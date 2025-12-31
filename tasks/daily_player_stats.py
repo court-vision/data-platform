@@ -1,8 +1,9 @@
 from datetime import timedelta
 from datetime import datetime
 import json
+from pandas.core.indexes.datetimes import pytz
 import requests
-from nba_api.stats.endpoints import scoreboardv2, boxscoretraditionalv3
+from nba_api.stats.endpoints import scoreboardv2, playergamelogs
 import pandas as pd
 from db.models.season2.daily_player_stats import DailyPlayerStats
 
@@ -53,67 +54,104 @@ def get_rostered_pct(player_name):
 			return float(pct)
 	return None
 
-def calculate_fantasy_points(stats: pd.DataFrame) -> float:
-	points_score = stats['points']
-	rebounds_score = stats['reboundsTotal']
-	assists_score = stats['assists'] * 2
-	stocks_score = (stats['steals'] + stats['blocks']) * 4
-	turnovers_score = stats['turnovers'] * -2
-	three_pointers_score = stats['threePointersMade']
-	fg_eff_score = (stats['fieldGoalsMade'] * 2) - stats['fieldGoalsAttempted']
-	ft_eff_score = stats['freeThrowsMade'] - stats['freeThrowsAttempted']
+def calculate_fantasy_points(stats: pd.Series) -> float:
+	points_score = stats['PTS']
+	rebounds_score = stats['REB']
+	assists_score = stats['AST'] * 2
+	stocks_score = (stats['STL'] + stats['BLK']) * 4
+	turnovers_score = stats['TOV'] * -2
+	three_pointers_score = stats['FG3M']
+	fg_eff_score = (stats['FGM'] * 2) - stats['FGA']
+	ft_eff_score = stats['FTM'] - stats['FTA']
 
 	return points_score + rebounds_score + assists_score + stocks_score + turnovers_score + three_pointers_score + fg_eff_score + ft_eff_score
 
 
 def main():
-	yesterday = datetime.now() - timedelta(days=1)
-	game_ids = get_game_ids(yesterday)
-
-	for game_id in game_ids:
-			boxscore = boxscoretraditionalv3.BoxScoreTraditionalV3(game_id=game_id)
-			stats = boxscore.get_data_frames()[0]
-			stats = stats.dropna()
-			stats.loc[:, "fantasyScore"] = stats.apply(calculate_fantasy_points, axis=1)
-			game_date = yesterday.date()
-
-			for _, row in stats.iterrows():
-				# Skip players who didn't play (indicated by blank/null/empty minutes)
-				minutes_value = row['minutes']
-				
-				# Check for null, NaN, empty string, or None
-				if pd.isna(minutes_value) or minutes_value == '' or minutes_value is None:
-					continue
-				
-				# Convert to integer and skip if it's 0 (player didn't play)
-				minutes_int = minutes_to_int(minutes_value)
-				if minutes_int == 0:
-					continue
-				
-				player_name = row['firstName'] + " " + row['familyName']
-				rost_pct = get_rostered_pct(player_name)
-				
-				DailyPlayerStats.create(
-					id=int(row['personId']),
-					name=player_name,
-					team=row['teamTricode'],
-					date=game_date,
-					fpts=int(round(row['fantasyScore'])),
-					pts=int(row['points']),
-					reb=int(row['reboundsTotal']),
-					ast=int(row['assists']),
-					stl=int(row['steals']),
-					blk=int(row['blocks']),
-					tov=int(row['turnovers']),
-					fgm=int(row['fieldGoalsMade']),
-					fga=int(row['fieldGoalsAttempted']),
-					fg3m=int(row['threePointersMade']),
-					fg3a=int(row['threePointersAttempted']),
-					ftm=int(row['freeThrowsMade']),
-					fta=int(row['freeThrowsAttempted']),
-					min=minutes_int,
-					rost_pct=rost_pct
-				)
+	central_tz = pytz.timezone('US/Central')
+	yesterday = datetime.now(central_tz) - timedelta(days=3)
+	game_date = yesterday.date()
+	
+	# Format date as YYYYMMDD for scoreboard
+	date_str_scoreboard = yesterday.strftime('%Y%m%d')
+	# Format date as MM/DD/YYYY for playergamelogs
+	date_str = yesterday.strftime('%m/%d/%Y')
+	
+	# Try to get game IDs first to verify games exist
+	try:
+		scoreboard = scoreboardv2.ScoreboardV2(game_date=date_str_scoreboard)
+		games = scoreboard.get_dict()['resultSets'][0]['rowSet']
+		game_ids = [game[2] for game in games]
+		print(f"Found {len(game_ids)} games for {date_str}")
+	except Exception as e:
+		print(f"Error getting game IDs: {e}")
+		game_ids = []
+	
+	# Try to get player game logs for yesterday
+	try:
+		# Get current season (2025-26 format)
+		season = f"{yesterday.year}-{str(yesterday.year + 1)[-2:]}"
+		if yesterday.month < 8:  # Before August, use previous season
+			season = f"{yesterday.year - 1}-{str(yesterday.year)[-2:]}"
+		
+		game_logs = playergamelogs.PlayerGameLogs(
+			date_from_nullable=date_str,
+			date_to_nullable=date_str,
+			season_nullable=season
+		)
+		stats = game_logs.player_game_logs.get_data_frame()
+		
+		if stats.empty:
+			print(f"No player stats found for {date_str}")
+			return
+		
+		print(f"Found {len(stats)} player game logs for {date_str}")
+		
+		# Calculate fantasy scores
+		stats.loc[:, "fantasyScore"] = stats.apply(calculate_fantasy_points, axis=1)
+		
+		for _, row in stats.iterrows():
+			# Skip players who didn't play (indicated by blank/null/empty minutes)
+			minutes_value = row['MIN']
+			
+			# Check for null, NaN, empty string, or None
+			if pd.isna(minutes_value) or minutes_value == '' or minutes_value is None:
+				continue
+			
+			# Convert to integer and skip if it's 0 (player didn't play)
+			minutes_int = minutes_to_int(minutes_value)
+			if minutes_int == 0:
+				continue
+			
+			player_name = row['PLAYER_NAME']
+			rost_pct = get_rostered_pct(player_name)
+			
+			DailyPlayerStats.create(
+				id=int(row['PLAYER_ID']),
+				name=player_name,
+				team=row['TEAM_ABBREVIATION'],
+				date=game_date,
+				fpts=int(round(row['fantasyScore'])),
+				pts=int(row['PTS']),
+				reb=int(row['REB']),
+				ast=int(row['AST']),
+				stl=int(row['STL']),
+				blk=int(row['BLK']),
+				tov=int(row['TOV']),
+				fgm=int(row['FGM']),
+				fga=int(row['FGA']),
+				fg3m=int(row['FG3M']),
+				fg3a=int(row['FG3A']),
+				ftm=int(row['FTM']),
+				fta=int(row['FTA']),
+				min=minutes_int,
+				rost_pct=rost_pct
+			)
+	except Exception as e:
+		print(f"Error getting player game logs: {e}")
+		import traceback
+		traceback.print_exc()
+		raise
 
 if __name__ == "__main__":
 	main()
