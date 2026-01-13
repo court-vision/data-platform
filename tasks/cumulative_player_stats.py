@@ -153,7 +153,7 @@ def main():
 
     # Get yesterday's date (stats are for the previous day)
     central_tz = pytz.timezone('US/Central')
-    yesterday = datetime.now(central_tz) - timedelta(days=1)
+    yesterday = datetime.now(central_tz) - timedelta(days=7)
     date = yesterday.date()
     print(f"Processing stats for date: {date}")
 
