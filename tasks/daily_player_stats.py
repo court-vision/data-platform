@@ -1,11 +1,25 @@
 from datetime import timedelta
 from datetime import datetime
 import json
+import unicodedata
 from pandas.core.indexes.datetimes import pytz
 import requests
 from nba_api.stats.endpoints import scoreboardv2, playergamelogs
 import pandas as pd
 from db.models.season2.daily_player_stats import DailyPlayerStats
+
+
+def normalize_name(name: str) -> str:
+	"""
+	Normalize a name by removing diacritics and converting to lowercase.
+
+	Examples:
+		"Nikola Jokić" -> "nikola jokic"
+		"Luka Dončić" -> "luka doncic"
+	"""
+	normalized = unicodedata.normalize('NFD', name)
+	ascii_name = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+	return ascii_name.lower().strip()
 
 def get_game_ids(date: str) -> list[str]:
 	scoreboard = scoreboardv2.ScoreboardV2(game_date=date)
@@ -13,7 +27,13 @@ def get_game_ids(date: str) -> list[str]:
 	game_ids = [game[2] for game in games]
 	return game_ids
 
-def get_espn_rostered_data(year: int, league_id: int) -> dict:
+def get_espn_player_data(year: int, league_id: int) -> dict:
+	"""
+	Fetch ESPN player data including ESPN ID mapping.
+
+	Returns:
+		dict: Mapping from normalized player name to {'espn_id': int, 'rost_pct': float}
+	"""
 	params = {
 			'view': 'kona_player_info',
 			'scoringPeriodId': 0,
@@ -26,7 +46,14 @@ def get_espn_rostered_data(year: int, league_id: int) -> dict:
 	data = data['players']
 	data = [x.get('player', x) for x in data]
 
-	cleaned_data = {player['fullName']: player['ownership']['percentOwned'] for player in data if player}
+	cleaned_data = {}
+	for player in data:
+		if player and 'fullName' in player:
+			normalized = normalize_name(player['fullName'])
+			cleaned_data[normalized] = {
+				'espn_id': player['id'],
+				'rost_pct': player.get('ownership', {}).get('percentOwned', 0)
+			}
 
 	return cleaned_data
 
@@ -42,17 +69,22 @@ def minutes_to_int(min_str: str) -> int:
 year = 2026
 league_id = 993431466
 
-rostered_data = get_espn_rostered_data(year, league_id)
+espn_player_data = get_espn_player_data(year, league_id)
 
-def get_rostered_pct(player_name):
-	# Try exact match first
-	if player_name in rostered_data:
-		return float(rostered_data[player_name])
-	# Try case-insensitive match
-	for espn_name, pct in rostered_data.items():
-		if player_name.lower() == espn_name.lower():
-			return float(pct)
-	return None
+def get_espn_info(player_name: str) -> dict | None:
+	"""
+	Get ESPN info (espn_id, rost_pct) for a player by name.
+
+	Uses normalized name matching to handle diacritics (e.g., Jokić -> jokic).
+
+	Args:
+		player_name: The player's name from NBA API
+
+	Returns:
+		dict with 'espn_id' and 'rost_pct', or None if not found
+	"""
+	normalized = normalize_name(player_name)
+	return espn_player_data.get(normalized)
 
 def calculate_fantasy_points(stats: pd.Series) -> float:
 	points_score = stats['PTS']
@@ -70,6 +102,7 @@ def calculate_fantasy_points(stats: pd.Series) -> float:
 def main():
 	central_tz = pytz.timezone('US/Central')
 	yesterday = datetime.now(central_tz) - timedelta(days=1)
+	yesterday = datetime.strptime('2025-12-20', '%Y-%m-%d')
 	game_date = yesterday.date()
 	
 	# Format date as YYYYMMDD for scoreboard
@@ -124,10 +157,13 @@ def main():
 				continue
 			
 			player_name = row['PLAYER_NAME']
-			rost_pct = get_rostered_pct(player_name)
-			
+			espn_info = get_espn_info(player_name)
+			espn_id = espn_info['espn_id'] if espn_info else None
+			rost_pct = espn_info['rost_pct'] if espn_info else None
+
 			DailyPlayerStats.create(
 				id=int(row['PLAYER_ID']),
+				espn_id=espn_id,
 				name=player_name,
 				team=row['TEAM_ABBREVIATION'],
 				date=game_date,
