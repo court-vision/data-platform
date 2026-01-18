@@ -25,11 +25,11 @@ def init_db():
     db.connect()
     
     # Import all models to register them
-    from .models import DailyPlayerStats, CumulativePlayerStats
-    
+    from .models import DailyPlayerStats, CumulativePlayerStats, DailyMatchupScore
+
     # Create tables if they don't exist
     db.create_tables([
-        DailyPlayerStats, CumulativePlayerStats
+        DailyPlayerStats, CumulativePlayerStats, DailyMatchupScore
     ], safe=True)
     
     # print("Database initialized successfully")

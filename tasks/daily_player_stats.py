@@ -102,7 +102,6 @@ def calculate_fantasy_points(stats: pd.Series) -> float:
 def main():
 	central_tz = pytz.timezone('US/Central')
 	yesterday = datetime.now(central_tz) - timedelta(days=1)
-	yesterday = datetime.strptime('2025-12-20', '%Y-%m-%d')
 	game_date = yesterday.date()
 	
 	# Format date as YYYYMMDD for scoreboard

@@ -6,6 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "data-platform"
 version = "0.1.0"
 requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "peewee>=3.17.0",
+    "psycopg2-binary>=2.9.9",
+    "requests>=2.31.0",
+    "pytz>=2024.1",
+    "nba_api>=1.4.1",
+]
 
 [tool.setuptools.packages.find]
 include = ["libs*", "db*", "tasks*"]

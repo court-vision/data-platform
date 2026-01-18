@@ -5,7 +5,8 @@ from .season1.freeagents import FreeAgent
 
 from .season2.daily_player_stats import DailyPlayerStats
 from .season2.cumulative_player_stats import CumulativePlayerStats
+from .season2.daily_matchup_score import DailyMatchupScore
 
 __all__ = [
-    'DailyStats', 'TotalStats', 'FreeAgent', 'DailyPlayerStats', 'CumulativePlayerStats'
+    'DailyStats', 'TotalStats', 'FreeAgent', 'DailyPlayerStats', 'CumulativePlayerStats', 'DailyMatchupScore'
 ]
