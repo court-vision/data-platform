@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 3. Copy project files and install Python dependencies
 COPY pyproject.toml .
+COPY requirements.txt .
 COPY db/ ./db/
 COPY tasks/ ./tasks/
 COPY static/ ./static/
@@ -29,8 +30,9 @@ COPY api/ ./api/
 COPY pipelines/ ./pipelines/
 COPY services/ ./services/
 
-# Install the package and its dependencies
-RUN pip install --no-cache-dir -e .
+# Install Python dependencies from requirements.txt and the local package
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -e .
 
 # 4. Copy remaining application code
 COPY main.py .
