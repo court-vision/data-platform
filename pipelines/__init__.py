@@ -23,6 +23,7 @@ from pipelines.game_start_times import GameStartTimesPipeline
 from pipelines.injury_report import InjuryReportPipeline
 from pipelines.player_rolling_stats import PlayerRollingStatsPipeline
 from pipelines.team_stats import TeamStatsPipeline
+from pipelines.live_game_stats import LiveGameStatsPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -60,6 +61,12 @@ from pipelines.lineup_alerts import LineupAlertsPipeline
 
 NOTIFICATION_PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "lineup_alerts": LineupAlertsPipeline,
+}
+
+# Live pipelines - separate from PIPELINE_REGISTRY so they don't run in
+# batch jobs. Triggered by the cron-runner live loop every ~60s on game nights.
+LIVE_PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
+    "live_game_stats": LiveGameStatsPipeline,
 }
 
 
@@ -174,6 +181,8 @@ __all__ = [
     "PIPELINE_REGISTRY",
     "POST_GAME_PIPELINE_NAMES",
     "NOTIFICATION_PIPELINE_REGISTRY",
+    "LIVE_PIPELINE_REGISTRY",
+    "LiveGameStatsPipeline",
     "get_pipeline",
     "run_pipeline",
     "run_all_pipelines",

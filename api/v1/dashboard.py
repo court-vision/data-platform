@@ -21,7 +21,7 @@ from core.job_manager import get_job_manager
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
 from db.models.pipeline_run import PipelineRun
-from pipelines import PIPELINE_REGISTRY
+from pipelines import PIPELINE_REGISTRY, LIVE_PIPELINE_REGISTRY
 from schemas.dashboard import DashboardStatusData, DashboardStatusResponse, PipelineHealthEntry
 from schemas.pipeline import PipelineJobInfo
 
@@ -50,6 +50,7 @@ PIPELINE_TRIGGER_ENDPOINTS: dict[str, str] = {
     "game_schedule":        "/v1/internal/pipelines/game-schedule",
     "game_start_times":     "/v1/internal/pipelines/game-start-times",
     "player_profiles":      "/v1/internal/pipelines/player-profiles",
+    "live_game_stats":      "/v1/internal/pipelines/live-stats",
 }
 
 
@@ -111,7 +112,8 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
     """
     entries: list[PipelineHealthEntry] = []
 
-    for name, cls in PIPELINE_REGISTRY.items():
+    all_pipelines = {**PIPELINE_REGISTRY, **LIVE_PIPELINE_REGISTRY}
+    for name, cls in all_pipelines.items():
         config = cls.config
         # PipelineRun records are written using config.name (set in BasePipeline._run_sync),
         # which may differ from the registry key (e.g. "advanced_stats" vs "player_advanced_stats").

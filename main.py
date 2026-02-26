@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI):
     init_db()
     log.info("database_initialized")
 
+    from db.models.pipeline_run import PipelineRun
+    reset_count = PipelineRun.reset_stale_runs()
+    if reset_count:
+        log.warning("stale_runs_reset", count=reset_count)
+
     yield
 
     close_db()

@@ -6,7 +6,7 @@ Each pipeline execution creates a record with status, timing, and error info.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from peewee import (
     UUIDField,
@@ -123,20 +123,49 @@ class PipelineRun(BaseModel):
         )
 
     @classmethod
-    def is_running(cls, pipeline_name: str) -> bool:
+    def is_running(cls, pipeline_name: str, max_age_minutes: int = 120) -> bool:
         """
         Check if a pipeline is currently running.
 
+        A running record older than max_age_minutes is treated as stale (service
+        restart mid-run) and is not considered actively running.
+
         Args:
             pipeline_name: Name of the pipeline
+            max_age_minutes: Records older than this are considered stale (default 2h)
 
         Returns:
-            True if the pipeline has a 'running' status record
+            True if the pipeline has a recent 'running' status record
         """
+        staleness_cutoff = datetime.utcnow() - timedelta(minutes=max_age_minutes)
         return (
             cls.select()
             .where(
-                (cls.pipeline_name == pipeline_name) & (cls.status == "running")
+                (cls.pipeline_name == pipeline_name)
+                & (cls.status == "running")
+                & (cls.started_at >= staleness_cutoff)
             )
             .exists()
         )
+
+    @classmethod
+    def reset_stale_runs(cls) -> int:
+        """
+        Mark all lingering 'running' records as failed.
+
+        Called at service startup to clean up records left in 'running' state
+        by a previous crash or restart mid-execution.
+
+        Returns:
+            Number of records reset
+        """
+        stale = list(cls.select().where(cls.status == "running"))
+        if not stale:
+            return 0
+        now = datetime.utcnow()
+        for run in stale:
+            run.status = "failed"
+            run.completed_at = now
+            run.error_message = "Interrupted by service restart"
+            run.save()
+        return len(stale)
