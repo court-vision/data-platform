@@ -14,8 +14,9 @@ dependencies = [
     "requests>=2.31.0",
     "pytz>=2024.1",
     "nba_api>=1.4.1",
+    "curl-cffi>=0.6.0",
 ]
 
 [tool.setuptools.packages.find]
-include = ["libs*", "db*", "tasks*"]
+include = ["libs*", "db*", "tasks*", "utils*"]
 

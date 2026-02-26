@@ -22,6 +22,7 @@ COPY pyproject.toml .
 COPY db/ ./db/
 COPY tasks/ ./tasks/
 COPY static/ ./static/
+COPY utils/ ./utils/
 
 # Install the package and its dependencies
 RUN pip install --no-cache-dir -e .
