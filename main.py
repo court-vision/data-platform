@@ -1,185 +1,74 @@
 """
-Data Platform API Server
+Court Vision Data Platform
 
-FastAPI server for triggering data pipeline tasks via HTTP requests.
-Includes token-based authentication for security.
+Standalone ETL service that runs all data pipelines for the Court Vision
+fantasy basketball platform. Triggered by cron-runner instances and writes
+to the shared PostgreSQL database via Railway's private network.
+
+No user-facing routes — this service is only called by the cron-runner.
 
 Usage:
     uvicorn main:app --host 0.0.0.0 --port 8001
-
-Environment Variables:
-    PIPELINE_API_TOKEN - Required secret token for authentication
-    DATABASE_URL - PostgreSQL connection for stats_s2 schema
-    BACKEND_DATABASE_URL - PostgreSQL connection for usr schema (matchup scores)
 """
 
-import os
-import traceback
-from datetime import datetime
-from functools import wraps
-from typing import Callable
+# Apply NBA API patch early, before any nba_api imports elsewhere
+import utils.patches  # noqa: F401 - imported for side effect (patches nba_api)
 
-import pytz
-from fastapi import FastAPI, HTTPException, Security, BackgroundTasks
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 
-from db.base import init_db
+from core.middleware import setup_middleware
+from core.db_middleware import DatabaseMiddleware
+from core.correlation_middleware import CorrelationMiddleware
+from core.logging import setup_logging, get_logger
+from core.settings import settings
+from db.base import init_db, close_db
+from api.v1 import pipelines, live
 
-# Initialize FastAPI app
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    setup_logging(
+        log_level=settings.log_level,
+        json_format=settings.log_format == "json",
+        service_name=settings.service_name,
+    )
+    log = get_logger()
+    log.info("application_starting", service=settings.service_name)
+
+    init_db()
+    log.info("database_initialized")
+
+    yield
+
+    close_db()
+    log.info("application_stopped")
+
+
 app = FastAPI(
-    title="Data Platform API",
-    description="API for triggering data pipeline tasks",
+    title="Court Vision Data Platform",
+    description="ETL pipeline service for Court Vision fantasy basketball analytics",
     version="1.0.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
-# Security scheme
-security = HTTPBearer()
+# Middlewares (order matters — first added = outermost)
+app.add_middleware(CorrelationMiddleware)
+app.add_middleware(DatabaseMiddleware)
+setup_middleware(app)
 
-# Get API token from environment
-API_TOKEN = os.getenv("PIPELINE_API_TOKEN")
-
-
-def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
-    """Verify the bearer token matches our secret."""
-    if not API_TOKEN:
-        raise HTTPException(
-            status_code=500,
-            detail="Server misconfigured: PIPELINE_API_TOKEN not set",
-        )
-
-    if credentials.credentials != API_TOKEN:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authentication token",
-        )
-
-    return credentials.credentials
+# Routes
+app.include_router(pipelines.router, prefix="/v1/internal")
+app.include_router(live.router, prefix="/v1/live")
 
 
-# Response models
-class PipelineResponse(BaseModel):
-    status: str
-    message: str
-    started_at: str
-    completed_at: str | None = None
-    error: str | None = None
+@app.get("/")
+async def root():
+    return {"message": "Court Vision Data Platform"}
 
 
-class HealthResponse(BaseModel):
-    status: str
-    timestamp: str
-
-
-# Initialize database on startup
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database connection on server startup."""
-    try:
-        init_db()
-        print("Database initialized successfully")
-    except Exception as e:
-        print(f"Warning: Database initialization failed: {e}")
-
-
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint (no auth required)."""
-    central_tz = pytz.timezone("US/Central")
-    now = datetime.now(central_tz)
-    return HealthResponse(status="healthy", timestamp=now.isoformat())
-
-
-def run_pipeline(pipeline_func: Callable, pipeline_name: str) -> PipelineResponse:
-    """Execute a pipeline function and return standardized response."""
-    central_tz = pytz.timezone("US/Central")
-    started_at = datetime.now(central_tz)
-
-    try:
-        pipeline_func()
-        completed_at = datetime.now(central_tz)
-        return PipelineResponse(
-            status="success",
-            message=f"{pipeline_name} completed successfully",
-            started_at=started_at.isoformat(),
-            completed_at=completed_at.isoformat(),
-        )
-    except Exception as e:
-        completed_at = datetime.now(central_tz)
-        return PipelineResponse(
-            status="error",
-            message=f"{pipeline_name} failed",
-            started_at=started_at.isoformat(),
-            completed_at=completed_at.isoformat(),
-            error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}",
-        )
-
-
-@app.post("/pipelines/daily-player-stats", response_model=PipelineResponse)
-async def trigger_daily_player_stats(token: str = Security(verify_token)):
-    """
-    Trigger the daily player stats pipeline.
-
-    Fetches yesterday's game stats from NBA API and ESPN ownership data,
-    then inserts into daily_player_stats table.
-    """
-    from tasks.daily_player_stats import main as daily_player_stats_main
-
-    return run_pipeline(daily_player_stats_main, "Daily Player Stats")
-
-
-@app.post("/pipelines/cumulative-player-stats", response_model=PipelineResponse)
-async def trigger_cumulative_player_stats(token: str = Security(verify_token)):
-    """
-    Trigger the cumulative player stats pipeline.
-
-    Updates season totals and rankings for players who played yesterday.
-    """
-    from tasks.cumulative_player_stats import main as cumulative_player_stats_main
-
-    return run_pipeline(cumulative_player_stats_main, "Cumulative Player Stats")
-
-
-@app.post("/pipelines/daily-matchup-scores", response_model=PipelineResponse)
-async def trigger_daily_matchup_scores(token: str = Security(verify_token)):
-    """
-    Trigger the daily matchup scores pipeline.
-
-    Fetches current matchup scores for all saved teams and records
-    daily snapshots for visualization.
-    """
-    from tasks.daily_matchup_scores import main as daily_matchup_scores_main
-
-    return run_pipeline(daily_matchup_scores_main, "Daily Matchup Scores")
-
-
-@app.post("/pipelines/all", response_model=dict)
-async def trigger_all_pipelines(token: str = Security(verify_token)):
-    """
-    Trigger all pipelines in sequence.
-
-    Runs: daily-player-stats -> cumulative-player-stats -> daily-matchup-scores
-    """
-    from tasks.daily_player_stats import main as daily_player_stats_main
-    from tasks.cumulative_player_stats import main as cumulative_player_stats_main
-    from tasks.daily_matchup_scores import main as daily_matchup_scores_main
-
-    results = {}
-
-    results["daily_player_stats"] = run_pipeline(
-        daily_player_stats_main, "Daily Player Stats"
-    )
-    results["cumulative_player_stats"] = run_pipeline(
-        cumulative_player_stats_main, "Cumulative Player Stats"
-    )
-    results["daily_matchup_scores"] = run_pipeline(
-        daily_matchup_scores_main, "Daily Matchup Scores"
-    )
-
-    return results
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+@app.get("/ping")
+async def ping():
+    return {"message": "Pong!"}

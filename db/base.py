@@ -23,16 +23,58 @@ class BaseModel(Model):
 def init_db():
     """Initialize database connection and create tables if they don't exist."""
     db.connect()
-    
-    # Import all models to register them
-    from .models import DailyPlayerStats, CumulativePlayerStats, DailyMatchupScore
 
-    # Create tables if they don't exist
+    # Import models the data platform writes to or reads from
+    from .models.pipeline_run import PipelineRun
+
+    # Legacy stats model (written by DailyMatchupScoresPipeline)
+    from .models.stats.daily_matchup_score import DailyMatchupScore
+
+    # NBA schema models (data platform is the writer)
+    from .models.nba import (
+        Player,
+        NBATeam,
+        PlayerGameStats,
+        PlayerSeasonStats,
+        PlayerOwnership,
+        PlayerRollingStats,
+        TeamStats,
+        PlayerProfile,
+        PlayerAdvancedStats,
+        Game,
+        PlayerInjury,
+        LivePlayerStats,
+    )
+
+    # User/team models (read by lineup_alerts pipeline for notification prefs)
+    from .models import User, Team, Lineup
+    from .models.notifications import NotificationPreference, NotificationLog, NotificationTeamPreference
+
+    # Create tables if they don't exist (safe=True is idempotent)
+    # Note: Order matters for foreign key dependencies
+    # 1. Dimension tables first (Player, NBATeam)
+    # 2. Fact/aggregate tables second
+    # 3. Extended data tables last (may reference dimension tables)
     db.create_tables([
-        DailyPlayerStats, CumulativePlayerStats, DailyMatchupScore
+        # NBA schema - audit
+        PipelineRun,
+        # Legacy stats_s2 (DailyMatchupScoresPipeline still writes here)
+        DailyMatchupScore,
+        # NBA schema - dimension tables
+        Player, NBATeam,
+        # NBA schema - team stats (FK to NBATeam)
+        TeamStats,
+        # NBA schema - fact/aggregate tables
+        PlayerGameStats, PlayerSeasonStats, PlayerOwnership, PlayerRollingStats,
+        # NBA schema - extended data tables
+        PlayerProfile, PlayerAdvancedStats, Game, PlayerInjury,
+        # NBA schema - live data
+        LivePlayerStats,
+        # User schema (referenced by lineup_alerts)
+        User, Team, Lineup,
+        # Notification tables (read/written by lineup_alerts pipeline)
+        NotificationPreference, NotificationLog, NotificationTeamPreference,
     ], safe=True)
-    
-    # print("Database initialized successfully")
 
 # Function to close database connection
 def close_db():

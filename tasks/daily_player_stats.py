@@ -2,7 +2,7 @@ from datetime import timedelta
 from datetime import datetime
 import json
 import unicodedata
-from pandas.core.indexes.datetimes import pytz
+import pytz
 import requests
 from nba_api.stats.endpoints import scoreboardv2, playergamelogs
 import pandas as pd
@@ -105,19 +105,8 @@ def main():
 	game_date = yesterday.date()
 	
 	# Format date as YYYYMMDD for scoreboard
-	date_str_scoreboard = yesterday.strftime('%Y%m%d')
 	# Format date as MM/DD/YYYY for playergamelogs
 	date_str = yesterday.strftime('%m/%d/%Y')
-	
-	# Try to get game IDs first to verify games exist
-	try:
-		scoreboard = scoreboardv2.ScoreboardV2(game_date=date_str_scoreboard)
-		games = scoreboard.get_dict()['resultSets'][0]['rowSet']
-		game_ids = [game[2] for game in games]
-		print(f"Found {len(game_ids)} games for {date_str}")
-	except Exception as e:
-		print(f"Error getting game IDs: {e}")
-		game_ids = []
 	
 	# Try to get player game logs for yesterday
 	try:
