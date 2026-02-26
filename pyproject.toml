@@ -18,5 +18,5 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["libs*", "db*", "tasks*", "utils*"]
+include = ["libs*", "db*", "tasks*", "utils*", "core*"]
 
