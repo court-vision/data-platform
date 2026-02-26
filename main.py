@@ -15,7 +15,10 @@ Usage:
 import utils.patches  # noqa: F401 - imported for side effect (patches nba_api)
 
 from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.templating import Jinja2Templates
 
 from core.middleware import setup_middleware
 from core.db_middleware import DatabaseMiddleware
@@ -23,7 +26,7 @@ from core.correlation_middleware import CorrelationMiddleware
 from core.logging import setup_logging, get_logger
 from core.settings import settings
 from db.base import init_db, close_db
-from api.v1 import pipelines, live
+from api.v1 import pipelines, live, dashboard
 
 
 @asynccontextmanager
@@ -59,9 +62,14 @@ app.add_middleware(CorrelationMiddleware)
 app.add_middleware(DatabaseMiddleware)
 setup_middleware(app)
 
+# Templates
+_templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+dashboard.set_templates(_templates)
+
 # Routes
 app.include_router(pipelines.router, prefix="/v1/internal")
 app.include_router(live.router, prefix="/v1/live")
+app.include_router(dashboard.router, prefix="/v1")
 
 
 @app.get("/")

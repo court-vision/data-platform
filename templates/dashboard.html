@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Court Vision · Data Platform</title>
+  <style>
+    :root {
+      --bg:       #09090f;
+      --surface:  #0e0e1a;
+      --card:     #111120;
+      --border:   #1c1c30;
+      --border2:  #252540;
+      --text:     #cdd6f4;
+      --muted:    #585b70;
+      --muted2:   #7f849c;
+      --green:    #a6e3a1;
+      --red:      #f38ba8;
+      --yellow:   #f9e2af;
+      --blue:     #89b4fa;
+      --purple:   #cba6f7;
+      --font: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    code { font-family: var(--font); }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    .header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .logo {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--blue);
+      white-space: nowrap;
+    }
+    .logo span { color: var(--muted); font-weight: 400; }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      color: var(--muted2);
+      font-size: 11px;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      flex-shrink: 0;
+    }
+    .dot.pulsing { animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+    .refresh-label { display: flex; align-items: center; gap: 6px; }
+
+    .btn-sm {
+      background: transparent;
+      border: 1px solid var(--border2);
+      color: var(--muted2);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-sm:hover { border-color: var(--blue); color: var(--blue); }
+
+    /* ── Layout ─────────────────────────────────────────────────────────── */
+    .content {
+      padding: 24px;
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+
+    .error-banner {
+      display: none;
+      background: rgba(243,139,168,0.07);
+      border: 1px solid rgba(243,139,168,0.25);
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 20px;
+      font-size: 12px;
+      color: var(--red);
+    }
+    .error-banner.show { display: block; }
+
+    /* ── Section ─────────────────────────────────────────────────────────── */
+    .section { margin-bottom: 36px; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted2);
+    }
+
+    .badge {
+      font-size: 10px;
+      background: var(--border);
+      color: var(--muted2);
+      padding: 1px 7px;
+      border-radius: 10px;
+    }
+
+    /* ── Pipeline grid ───────────────────────────────────────────────────── */
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+      gap: 10px;
+    }
+
+    .pipeline-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      transition: border-color 0.15s;
+    }
+    .pipeline-card:hover { border-color: var(--border2); }
+    .pipeline-card.s-running { border-color: rgba(249,226,175,0.25); }
+    .pipeline-card.s-failed  { border-color: rgba(243,139,168,0.2); }
+
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .p-name { font-size: 12px; font-weight: 700; color: var(--text); }
+    .p-key  { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    .status-badge {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 3px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .status-badge.success { background: rgba(166,227,161,0.1);  color: var(--green);  }
+    .status-badge.failed  { background: rgba(243,139,168,0.1);  color: var(--red);    }
+    .status-badge.running { background: rgba(249,226,175,0.1);  color: var(--yellow); }
+    .status-badge.never   { background: rgba(88,91,112,0.15);   color: var(--muted);  }
+
+    .card-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      margin-bottom: 12px;
+    }
+
+    .meta-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+    .meta-value { font-size: 12px; color: var(--text); margin-top: 1px; }
+    .meta-value.err { color: var(--red); }
+
+    .card-footer { display: flex; gap: 6px; }
+
+    .btn-run {
+      background: transparent;
+      border: 1px solid var(--border2);
+      color: var(--muted2);
+      font-family: var(--font);
+      font-size: 10px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-run:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+    .btn-run:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-run.triggering { border-color: var(--yellow); color: var(--yellow); }
+
+    /* Skeleton */
+    .skel {
+      background: linear-gradient(90deg, var(--card) 25%, var(--border) 50%, var(--card) 75%);
+      background-size: 300% 100%;
+      animation: shimmer 1.6s infinite;
+      border-radius: 3px;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* ── Jobs table ──────────────────────────────────────────────────────── */
+    .table-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    th {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    td {
+      padding: 10px 14px;
+      font-size: 11px;
+      color: var(--text);
+      border-bottom: 1px solid rgba(28,28,48,0.6);
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(14,14,26,0.5); }
+
+    .job-id { color: var(--muted); font-size: 10px; }
+
+    .progress-wrap { display: flex; align-items: center; gap: 8px; }
+    .progress-track {
+      flex: 1;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      min-width: 48px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--green);
+      border-radius: 2px;
+      transition: width 0.4s;
+    }
+    .progress-fill.bad { background: var(--red); }
+    .progress-text { font-size: 10px; color: var(--muted2); white-space: nowrap; }
+
+    .empty { text-align: center; padding: 28px; color: var(--muted); }
+
+    /* ── Token modal ─────────────────────────────────────────────────────── */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(9,9,15,0.88);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .overlay.hidden { display: none; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 8px;
+      padding: 28px;
+      width: 400px;
+      max-width: 90vw;
+    }
+    .modal-title    { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+    .modal-subtitle { font-size: 11px; color: var(--muted2); line-height: 1.7; margin-bottom: 20px; }
+    .modal-subtitle code { color: var(--blue); }
+
+    .token-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border2);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .token-input:focus { border-color: var(--blue); }
+
+    .modal-err { font-size: 10px; color: var(--red); margin-bottom: 12px; display: none; }
+    .modal-err.show { display: block; }
+
+    .btn-primary {
+      width: 100%;
+      background: rgba(137,180,250,0.08);
+      border: 1px solid var(--blue);
+      color: var(--blue);
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 9px;
+      border-radius: 4px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: rgba(137,180,250,0.15); }
+
+    /* ── Toast ───────────────────────────────────────────────────────────── */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-size: 12px;
+      color: var(--text);
+      z-index: 200;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.ok  { border-color: rgba(166,227,161,0.35); color: var(--green); }
+    .toast.err { border-color: rgba(243,139,168,0.35); color: var(--red);   }
+  </style>
+</head>
+<body>
+
+<!-- Token modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-title">Pipeline API Token</div>
+    <div class="modal-subtitle">
+      Enter <code>PIPELINE_API_TOKEN</code> to access the dashboard.
+      The token is saved in <code>localStorage</code> for this browser.
+    </div>
+    <input
+      type="password"
+      class="token-input"
+      id="tokenInput"
+      placeholder="Enter token…"
+      autocomplete="off"
+    />
+    <div class="modal-err" id="tokenErr">Invalid token — check PIPELINE_API_TOKEN and try again.</div>
+    <button class="btn-primary" onclick="submitToken()">Connect</button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">COURT VISION <span>/ DATA PLATFORM</span></div>
+  <div class="header-right">
+    <span id="lastUpdated" style="color:var(--muted)">—</span>
+    <span class="refresh-label">
+      <span class="dot" id="dot"></span>
+      refresh in <span id="countdown">30</span>s
+    </span>
+    <a href="/docs" target="_blank" class="btn-sm">API docs ↗</a>
+    <button class="btn-sm" onclick="clearToken()">Disconnect</button>
+  </div>
+</div>
+
+<!-- Content -->
+<div class="content">
+  <div class="error-banner" id="errBanner"></div>
+
+  <!-- Pipeline Health -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Pipeline Health</span>
+      <span class="badge" id="pipelineCount">—</span>
+    </div>
+    <div class="pipeline-grid" id="pipelineGrid">
+      <!-- skeleton -->
+      <div class="pipeline-card" style="opacity:0.5">
+        <div class="skel" style="width:55%;height:13px;margin-bottom:8px"></div>
+        <div class="skel" style="width:35%;height:10px"></div>
+      </div>
+      <div class="pipeline-card" style="opacity:0.5">
+        <div class="skel" style="width:65%;height:13px;margin-bottom:8px"></div>
+        <div class="skel" style="width:40%;height:10px"></div>
+      </div>
+      <div class="pipeline-card" style="opacity:0.5">
+        <div class="skel" style="width:50%;height:13px;margin-bottom:8px"></div>
+        <div class="skel" style="width:30%;height:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Jobs -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Recent Jobs</span>
+      <span class="badge" id="jobCount">—</span>
+    </div>
+    <div id="jobsWrap">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const TOKEN_KEY  = 'cv_pipeline_token';
+  const REFRESH_S  = 30;
+
+  let countdownVal = REFRESH_S;
+  let countdownId  = null;
+  let lastPipelines = [];
+
+  // track which pipelines are mid-trigger
+  const triggering = new Set();
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const getToken   = () => localStorage.getItem(TOKEN_KEY);
+  const saveToken  = t  => localStorage.setItem(TOKEN_KEY, t);
+  const nukeToken  = () => localStorage.removeItem(TOKEN_KEY);
+
+  function clearToken() { nukeToken(); location.reload(); }
+
+  function submitToken() {
+    const val = document.getElementById('tokenInput').value.trim();
+    if (!val) return;
+    saveToken(val);
+    document.getElementById('overlay').classList.add('hidden');
+    document.getElementById('tokenErr').classList.remove('show');
+    startDashboard();
+  }
+
+  document.getElementById('tokenInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') submitToken();
+  });
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  function init() {
+    if (getToken()) {
+      document.getElementById('overlay').classList.add('hidden');
+      startDashboard();
+    }
+    // else: overlay is already visible by default
+  }
+
+  function startDashboard() {
+    fetchStatus();
+    startCountdown();
+  }
+
+  // ── Countdown + auto-refresh ──────────────────────────────────────────────
+  function startCountdown() {
+    clearInterval(countdownId);
+    countdownVal = REFRESH_S;
+    document.getElementById('countdown').textContent = countdownVal;
+    countdownId = setInterval(() => {
+      countdownVal--;
+      document.getElementById('countdown').textContent = countdownVal;
+      if (countdownVal <= 0) {
+        clearInterval(countdownId);
+        fetchStatus().then(startCountdown);
+      }
+    }, 1000);
+  }
+
+  // ── Fetch ─────────────────────────────────────────────────────────────────
+  async function fetchStatus() {
+    const dot = document.getElementById('dot');
+    dot.classList.add('pulsing');
+
+    try {
+      const res = await fetch('/v1/dashboard/status', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        nukeToken();
+        document.getElementById('tokenErr').classList.add('show');
+        document.getElementById('overlay').classList.remove('hidden');
+        return;
+      }
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const payload = await res.json();
+      hideErr();
+      lastPipelines = payload.data.pipelines || [];
+      renderPipelines(lastPipelines);
+      renderJobs(payload.data.recent_jobs || []);
+      document.getElementById('lastUpdated').textContent =
+        'updated ' + new Date().toLocaleTimeString();
+
+    } catch (e) {
+      showErr(`Failed to load: ${e.message}`);
+    } finally {
+      dot.classList.remove('pulsing');
+    }
+  }
+
+  // ── Render pipelines ──────────────────────────────────────────────────────
+  function renderPipelines(pipelines) {
+    const grid = document.getElementById('pipelineGrid');
+    document.getElementById('pipelineCount').textContent = pipelines.length;
+
+    if (!pipelines.length) {
+      grid.innerHTML = '<div class="empty">No pipelines registered</div>';
+      return;
+    }
+
+    grid.innerHTML = pipelines.map(p => {
+      const isRunning     = p.is_running;
+      const status        = isRunning ? 'running' : (p.last_status || 'never');
+      const statusLabel   = isRunning ? 'running' : (p.last_status || 'never run');
+      const cardCls       = isRunning ? 's-running' : (p.last_status === 'failed' ? 's-failed' : '');
+
+      const lastRun   = p.last_run_at      ? relTime(p.last_run_at)      : '—';
+      const lastOk    = p.last_success_at  ? relTime(p.last_success_at)  : 'never';
+      const duration  = p.last_duration_seconds != null
+                          ? `${p.last_duration_seconds.toFixed(1)}s`
+                          : '—';
+      const records   = p.last_records_processed != null
+                          ? p.last_records_processed.toLocaleString()
+                          : '—';
+
+      const isTrig    = triggering.has(p.name);
+      const btnLabel  = isTrig ? 'triggering…' : 'run now';
+      const btnCls    = isTrig ? ' triggering' : '';
+      const btnDis    = isTrig || isRunning ? ' disabled' : '';
+
+      return `
+        <div class="pipeline-card ${cardCls}">
+          <div class="card-top">
+            <div>
+              <div class="p-name">${esc(p.display_name)}</div>
+              <div class="p-key">${esc(p.name)}</div>
+            </div>
+            <span class="status-badge ${status}">${statusLabel}</span>
+          </div>
+          <div class="card-meta">
+            <div>
+              <div class="meta-label">Last run</div>
+              <div class="meta-value">${lastRun}</div>
+            </div>
+            <div>
+              <div class="meta-label">Duration</div>
+              <div class="meta-value">${duration}</div>
+            </div>
+            <div>
+              <div class="meta-label">Records</div>
+              <div class="meta-value">${records}</div>
+            </div>
+            <div>
+              <div class="meta-label">Last success</div>
+              <div class="meta-value">${lastOk}</div>
+            </div>
+            ${p.error_streak > 0 ? `
+            <div style="grid-column:1/-1">
+              <div class="meta-label">Error streak</div>
+              <div class="meta-value err">${p.error_streak} consecutive failure${p.error_streak > 1 ? 's' : ''}</div>
+            </div>` : ''}
+          </div>
+          <div class="card-footer">
+            <button
+              class="btn-run${btnCls}"
+              onclick="triggerPipeline('${esc(p.name)}', '${esc(p.trigger_endpoint)}')"
+              ${btnDis}
+            >${btnLabel}</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // ── Render jobs ───────────────────────────────────────────────────────────
+  function renderJobs(jobs) {
+    const wrap = document.getElementById('jobsWrap');
+    document.getElementById('jobCount').textContent = jobs.length;
+
+    if (!jobs.length) {
+      wrap.innerHTML = '<div class="empty">No batch jobs yet — trigger <code>/all</code> to create one</div>';
+      return;
+    }
+
+    const rows = jobs.map(j => {
+      const pct     = j.pipelines_total > 0
+                        ? Math.round((j.pipelines_completed / j.pipelines_total) * 100)
+                        : 0;
+      const bad     = j.pipelines_failed > 0;
+      const dur     = j.duration_seconds != null
+                        ? `${j.duration_seconds.toFixed(1)}s`
+                        : (j.status === 'running' ? '…' : '—');
+
+      const progressCell = `
+        <div class="progress-wrap">
+          <div class="progress-track">
+            <div class="progress-fill ${bad ? 'bad' : ''}" style="width:${pct}%"></div>
+          </div>
+          <span class="progress-text">
+            ${j.pipelines_completed}/${j.pipelines_total}
+            ${bad ? `<span style="color:var(--red)">(${j.pipelines_failed} failed)</span>` : ''}
+          </span>
+        </div>`;
+
+      const current = j.current_pipeline
+        ? `<span style="color:var(--yellow)">${esc(j.current_pipeline)}</span>`
+        : '<span style="color:var(--muted)">—</span>';
+
+      return `
+        <tr>
+          <td><span class="job-id">${esc(j.job_id.slice(0, 8))}…</span></td>
+          <td><span class="status-badge ${j.status}">${j.status}</span></td>
+          <td>${relTime(j.created_at)}</td>
+          <td>${dur}</td>
+          <td>${progressCell}</td>
+          <td>${current}</td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Duration</th>
+              <th>Progress</th>
+              <th>Current pipeline</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  // ── Trigger ───────────────────────────────────────────────────────────────
+  async function triggerPipeline(name, endpoint) {
+    if (!endpoint) {
+      showToast('No trigger endpoint configured for this pipeline', 'err');
+      return;
+    }
+    triggering.add(name);
+    renderPipelines(lastPipelines);
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `HTTP ${res.status}`);
+      }
+      showToast(`${name} triggered successfully`, 'ok');
+    } catch (e) {
+      showToast(`Trigger failed: ${e.message}`, 'err');
+    } finally {
+      triggering.delete(name);
+      // Brief delay then refresh so the new run_record appears
+      setTimeout(() => { fetchStatus().then(startCountdown); }, 1500);
+    }
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function relTime(iso) {
+    if (!iso) return '—';
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (diff < 60)     return `${diff}s ago`;
+    if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  let toastTimer = null;
+  function showToast(msg, type = '') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `toast show ${type}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+  }
+
+  function showErr(msg) {
+    const el = document.getElementById('errBanner');
+    el.textContent = msg;
+    el.classList.add('show');
+  }
+
+  function hideErr() {
+    document.getElementById('errBanner').classList.remove('show');
+  }
+
+  // ── Start ─────────────────────────────────────────────────────────────────
+  init();
+</script>
+</body>
+</html>

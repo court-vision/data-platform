@@ -130,6 +130,128 @@ async def trigger_player_advanced_stats(
     )
 
 
+@router.post("/player-ownership", response_model=PipelineResponse)
+async def trigger_player_ownership(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the player ownership pipeline.
+
+    Fetches ESPN ownership percentages for all players and updates
+    the nba.player_ownership table.
+    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    """
+    result = await run_pipeline("player_ownership", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
+@router.post("/player-rolling-stats", response_model=PipelineResponse)
+async def trigger_player_rolling_stats(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the player rolling stats pipeline.
+
+    Materializes L7, L14, and L30 rolling per-game averages from
+    player_game_stats into nba.player_rolling_stats.
+    Depends on player_game_stats having fresh data for the target date.
+    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    """
+    result = await run_pipeline("player_rolling_stats", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
+@router.post("/team-stats", response_model=PipelineResponse)
+async def trigger_team_stats(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the team stats pipeline.
+
+    Fetches season-to-date stats for all 30 NBA teams from NBA API
+    (base counting stats + advanced efficiency metrics) and upserts
+    to nba.team_stats.
+    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    """
+    result = await run_pipeline("team_stats", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
+@router.post("/game-schedule", response_model=PipelineResponse)
+async def trigger_game_schedule(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the game schedule pipeline.
+
+    Fetches NBA game schedule and results and upserts to nba.games.
+    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    """
+    result = await run_pipeline("game_schedule", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
+@router.post("/game-start-times", response_model=PipelineResponse)
+async def trigger_game_start_times(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the game start times pipeline.
+
+    Fetches scheduled tip-off times for upcoming games and upserts
+    to nba.games. Used by the live stats and post-game gates.
+    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    """
+    result = await run_pipeline("game_start_times", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
+@router.post("/player-profiles", response_model=PipelineResponse)
+async def trigger_player_profiles(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the player profiles pipeline.
+
+    Fetches biographical and position data for all active players and
+    upserts to nba.players. Intended to run weekly (slow — fetches all
+    active players from NBA API).
+    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    """
+    result = await run_pipeline("player_profiles", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
 @router.post("/post-game", response_model=PipelineResponse)
 async def trigger_post_game(
     _: str = Security(verify_pipeline_token),

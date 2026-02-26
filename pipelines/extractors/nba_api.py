@@ -508,9 +508,9 @@ class NBAApiExtractor(BaseExtractor):
                 per_mode_detailed="PerGame",
             ).get_normalized_dict()["LeagueDashTeamStats"]
 
-            base_map = {row["TEAM_ABBREVIATION"]: row for row in base}
+            base_map = {row["TEAM_ID"]: row for row in base}
             merged = [
-                {**base_map.get(row["TEAM_ABBREVIATION"], {}), **row}
+                {**base_map.get(row["TEAM_ID"], {}), **row}
                 for row in adv
             ]
 
