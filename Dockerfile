@@ -24,6 +24,10 @@ COPY tasks/ ./tasks/
 COPY static/ ./static/
 COPY utils/ ./utils/
 COPY core/ ./core/
+COPY schemas/ ./schemas/
+COPY api/ ./api/
+COPY pipelines/ ./pipelines/
+COPY services/ ./services/
 
 # Install the package and its dependencies
 RUN pip install --no-cache-dir -e .
