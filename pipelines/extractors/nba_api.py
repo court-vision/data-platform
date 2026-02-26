@@ -491,9 +491,17 @@ class NBAApiExtractor(BaseExtractor):
             List of 30 team dicts with both advanced and base stats merged
         """
         from nba_api.stats.endpoints import leaguedashteamstats
+        from nba_api.stats.static import teams as static_teams
 
         season = season or settings.nba_season
         self.log.debug("team_stats_start", season=season)
+
+        # LeagueDashTeamStats returns TEAM_ID (int) and TEAM_NAME but not
+        # TEAM_ABBREVIATION. Build a static lookup from the bundled team data
+        # (no extra API call) so we can inject abbreviations into each row.
+        abbr_by_id: dict[int, str] = {
+            t["id"]: t["abbreviation"] for t in static_teams.get_teams()
+        }
 
         try:
             adv = leaguedashteamstats.LeagueDashTeamStats(
@@ -510,7 +518,11 @@ class NBAApiExtractor(BaseExtractor):
 
             base_map = {row["TEAM_ID"]: row for row in base}
             merged = [
-                {**base_map.get(row["TEAM_ID"], {}), **row}
+                {
+                    **base_map.get(row["TEAM_ID"], {}),
+                    **row,
+                    "TEAM_ABBREVIATION": abbr_by_id.get(row["TEAM_ID"], ""),
+                }
                 for row in adv
             ]
 
