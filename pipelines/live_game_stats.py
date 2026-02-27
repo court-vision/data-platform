@@ -56,6 +56,19 @@ class LiveGameStatsPipeline(BasePipeline):
 
         ctx.log.info("live_stats_start", game_date=str(game_date))
 
+        # Clean up stale records from previous game days.
+        # Without this, old final-game records persist and get picked up by
+        # the live matchup endpoint, causing double-counting against the
+        # already-settled daily_matchup_scores baseline.
+        deleted = (
+            LivePlayerStats
+            .delete()
+            .where(LivePlayerStats.game_date < game_date)
+            .execute()
+        )
+        if deleted:
+            ctx.log.info("live_stats_cleanup", deleted_count=deleted, game_date=str(game_date))
+
         # Get all games on the scoreboard for today
         scoreboard_games = self.nba_extractor.get_scoreboard_games(game_date)
 
