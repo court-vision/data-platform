@@ -56,7 +56,10 @@ class ESPNExtractor(BaseExtractor):
         league_id: Optional[int] = None,
     ) -> dict[str, dict]:
         """
-        Fetch ESPN player data including ESPN ID and roster percentage.
+        Fetch all ESPN player data including ESPN ID and roster percentage.
+
+        Uses a high limit to capture all NBA players ESPN tracks, ensuring
+        comprehensive espn_id coverage in the players table.
 
         Args:
             year: ESPN season year (defaults to settings.espn_year)
@@ -73,7 +76,7 @@ class ESPNExtractor(BaseExtractor):
         filters = {
             "players": {
                 "filterSlotIds": {"value": []},
-                "limit": 750,
+                "limit": 1500,
                 "sortPercOwned": {"sortPriority": 1, "sortAsc": False},
                 "sortDraftRanks": {
                     "sortPriority": 2,
