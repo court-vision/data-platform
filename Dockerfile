@@ -29,6 +29,7 @@ COPY schemas/ ./schemas/
 COPY api/ ./api/
 COPY pipelines/ ./pipelines/
 COPY services/ ./services/
+COPY templates/ ./templates/
 
 # Install Python dependencies from requirements.txt and the local package
 RUN pip install --no-cache-dir -r requirements.txt && \
@@ -36,12 +37,18 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 
 # 4. Copy remaining application code
 COPY main.py .
+COPY main_public.py .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
 # 5. Create a non-root user for security
 # Running as root is a security risk. We create a user 'appuser' and switch to it.
 RUN useradd -m -u 1000 appuser
 USER appuser
 
+# Private port: full app, Railway internal IPv6 only (cron-runner, backend)
+# Public port:  dashboard only, routed from data.courtvision.dev via Railway's PORT env var
 EXPOSE 8001
+EXPOSE 8080
 
-CMD ["uvicorn", "main:app", "--host", "::", "--port", "8001"]
+CMD ["./entrypoint.sh"]
