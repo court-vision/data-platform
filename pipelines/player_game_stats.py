@@ -12,6 +12,7 @@ import pytz
 
 from core.settings import settings
 from db.models.nba import Player, PlayerGameStats
+from db.models.nba.games import Game
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig
 from pipelines.context import PipelineContext
@@ -78,6 +79,30 @@ class PlayerGameStatsPipeline(BasePipeline):
             return
 
         ctx.log.info("nba_data_fetched", record_count=len(stats))
+
+        # Data completeness check: compare unique games in API response vs nba.games table.
+        # The NBA Stats API (PlayerGameLogs) may lag behind the live scoreboard,
+        # so late West Coast games can be missing from the response even after
+        # the scoreboard shows them as Final. If we detect missing games, raise
+        # an error so the pipeline is marked as failed and can be retried.
+        if "GAME_ID" in stats.columns:
+            api_game_ids = set(stats["GAME_ID"].unique())
+            expected_games = Game.get_games_on_date(game_date)
+            expected_game_ids = {g.game_id for g in expected_games}
+            missing_games = expected_game_ids - api_game_ids
+            if missing_games:
+                ctx.log.warning(
+                    "incomplete_game_data",
+                    date=date_str,
+                    expected_count=len(expected_game_ids),
+                    received_count=len(api_game_ids),
+                    missing_game_ids=list(missing_games),
+                )
+                raise RuntimeError(
+                    f"NBA API returned stats for {len(api_game_ids)} of "
+                    f"{len(expected_game_ids)} games on {date_str}. "
+                    f"Missing: {missing_games}. Data not ready yet — will retry."
+                )
 
         # Process each player
         for _, row in stats.iterrows():

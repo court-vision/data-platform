@@ -281,6 +281,7 @@ async def trigger_post_game(
 
     # A date override implies force — skip all time/readiness gating
     force = force or (date is not None)
+    dedup_run = None
 
     eastern = pytz.timezone("US/Eastern")
     now_et = datetime.now(eastern)
@@ -359,16 +360,18 @@ async def trigger_post_game(
                 message=f"Already triggered post-game pipelines for {nba_date}",
             )
 
-        # Record dedup marker so normal polling won't re-trigger
+        # Record dedup marker as "running" — will be marked success/failed
+        # after pipelines complete. Only "success" blocks future retries, so
+        # a failed run will be retried on the next cron invocation.
         dedup_run = PipelineRun.start_run(dedup_key)
-        dedup_run.mark_success()
 
     # All gates pass (or bypassed) — trigger pipelines (excludes post_game_excluded ones)
     job_manager = get_job_manager()
     job = await job_manager.create_job(len(POST_GAME_PIPELINE_NAMES))
 
     target_date = date or nba_date
-    asyncio.create_task(_run_pipelines_background(job.job_id, date_override=target_date if date else None, pipeline_names=POST_GAME_PIPELINE_NAMES))
+    dedup_run_id = str(dedup_run.id) if not force and dedup_run else None
+    asyncio.create_task(_run_pipelines_background(job.job_id, date_override=target_date if date else None, pipeline_names=POST_GAME_PIPELINE_NAMES, dedup_run_id=dedup_run_id))
 
     log.info(
         "post_game_triggered",
@@ -678,12 +681,29 @@ async def get_job_status(
     )
 
 
-async def _run_pipelines_background(job_id: str, date_override: Optional[date] = None, pipeline_names: Optional[list[str]] = None) -> None:
+def _finalize_dedup_run(dedup_run_id: str, success: bool, error: str | None = None) -> None:
+    """Mark a post-game dedup PipelineRun as success or failed."""
+    from db.models.pipeline_run import PipelineRun
+
+    try:
+        dedup_run = PipelineRun.get_by_id(dedup_run_id)
+        if success:
+            dedup_run.mark_success()
+            log.info("dedup_marker_success", dedup_run_id=dedup_run_id)
+        else:
+            dedup_run.mark_failed(error or "Pipeline(s) failed")
+            log.info("dedup_marker_failed", dedup_run_id=dedup_run_id, error=error)
+    except Exception as e:
+        log.error("dedup_marker_update_error", dedup_run_id=dedup_run_id, error=str(e))
+
+
+async def _run_pipelines_background(job_id: str, date_override: Optional[date] = None, pipeline_names: Optional[list[str]] = None, dedup_run_id: Optional[str] = None) -> None:
     """
     Run pipelines in the background and update job status.
 
     This function is spawned as a background task and runs independently.
     pipeline_names: subset of PIPELINE_REGISTRY to run; defaults to all.
+    dedup_run_id: optional PipelineRun ID to mark success/failed based on outcome.
     """
     job_manager = get_job_manager()
     pipeline_names = pipeline_names if pipeline_names is not None else list(PIPELINE_REGISTRY.keys())
@@ -758,6 +778,13 @@ async def _run_pipelines_background(job_id: str, date_override: Optional[date] =
             failed=job.pipelines_failed if job else 0,
         )
 
+        # Finalize post-game dedup marker based on pipeline outcome
+        if dedup_run_id:
+            _finalize_dedup_run(dedup_run_id, all_success)
+
     except Exception as e:
         log.error("background_job_failed", job_id=job_id, error=str(e))
         await job_manager.complete_job(job_id, success=False, error=str(e))
+
+        if dedup_run_id:
+            _finalize_dedup_run(dedup_run_id, success=False, error=str(e))
