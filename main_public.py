@@ -23,7 +23,7 @@ from core.logging import setup_logging, get_logger
 from core.middleware import setup_middleware
 from core.settings import settings
 from db.base import close_db, init_db
-from api.v1 import dashboard
+from api.v1 import dashboard, pipelines
 
 
 @asynccontextmanager
@@ -64,8 +64,9 @@ setup_middleware(app)
 _templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 dashboard.set_templates(_templates)
 
-# Only the dashboard — no pipeline triggers, no live routes
+# Dashboard + pipeline triggers (triggers are token-authed via verify_pipeline_token)
 app.include_router(dashboard.router, prefix="/v1")
+app.include_router(pipelines.router, prefix="/v1/internal")
 
 
 @app.get("/")
