@@ -14,7 +14,7 @@ from datetime import timedelta
 
 from db.models.nba import Player, LivePlayerStats
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 from pipelines.transformers import normalize_name, calculate_fantasy_points, minutes_to_int
@@ -38,6 +38,7 @@ class LiveGameStatsPipeline(BasePipeline):
         display_name="Live Game Stats",
         description="Fetches in-progress game box scores from NBA API live endpoints",
         target_table="nba.live_player_stats",
+        category=PipelineCategory.LIVE,
     )
 
     def __init__(self):

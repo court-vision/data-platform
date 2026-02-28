@@ -10,7 +10,7 @@ from datetime import datetime
 from db.base import db
 from db.models.nba import Player, PlayerProfile
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 
@@ -36,6 +36,7 @@ class PlayerProfilesPipeline(BasePipeline):
         display_name="Player Profiles",
         description="Fetches player biographical data (height, position, draft info)",
         target_table="nba.player_profiles",
+        category=PipelineCategory.SCHEDULED,
         timeout_seconds=120,
     )
 

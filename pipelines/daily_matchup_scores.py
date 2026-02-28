@@ -13,7 +13,7 @@ from core.settings import settings
 from db.models.teams import Team
 from db.models.stats.daily_matchup_score import DailyMatchupScore
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, YahooExtractor
 from services.schedule_service import get_matchup_dates
@@ -37,7 +37,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
         target_table="stats_s2.daily_matchup_score",
         # ESPN matchup data isn't ready immediately after games end — it rolls over
         # later in the morning. Run via a dedicated 10am ET cron instead.
-        post_game_excluded=True,
+        category=PipelineCategory.SCHEDULED,
     )
 
     def __init__(self):

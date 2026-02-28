@@ -12,7 +12,7 @@ from datetime import timedelta
 
 from db.models.nba.team_stats import TeamStats
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 
@@ -40,6 +40,7 @@ class TeamStatsPipeline(BasePipeline):
         display_name="Team Stats",
         description="Daily team pace, ratings, and per-game stats for all 30 NBA teams",
         target_table="nba.team_stats",
+        category=PipelineCategory.POST_GAME,
     )
 
     def __init__(self):

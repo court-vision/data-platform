@@ -11,7 +11,7 @@ import pytz
 from core.settings import settings
 from db.models.nba import Player, PlayerAdvancedStats
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 
@@ -36,6 +36,7 @@ class PlayerAdvancedStatsPipeline(BasePipeline):
         display_name="Advanced Stats",
         description="Fetches advanced player stats (efficiency, usage, impact)",
         target_table="nba.player_advanced_stats",
+        category=PipelineCategory.POST_GAME,
     )
 
     def __init__(self):

@@ -14,7 +14,7 @@ from core.settings import settings
 from db.models.nba import Player, PlayerGameStats
 from db.models.nba.games import Game
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
 from pipelines.transformers import normalize_name, calculate_fantasy_points, minutes_to_int
@@ -37,6 +37,7 @@ class PlayerGameStatsPipeline(BasePipeline):
         display_name="Player Game Stats",
         description="Fetches yesterday's game stats from NBA API and ESPN ownership data",
         target_table="nba.player_game_stats",
+        category=PipelineCategory.POST_GAME,
     )
 
     def __init__(self):

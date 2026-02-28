@@ -12,7 +12,7 @@ from peewee import fn
 from core.settings import settings
 from db.models.nba import Player, PlayerSeasonStats
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
 from pipelines.transformers import normalize_name, calculate_fantasy_points
@@ -35,6 +35,7 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         display_name="Player Season Stats",
         description="Updates season totals and rankings for players who played yesterday",
         target_table="nba.player_season_stats",
+        category=PipelineCategory.POST_GAME,
         depends_on=("player_game_stats",),
     )
 

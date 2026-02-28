@@ -9,7 +9,7 @@ from datetime import timedelta
 
 from db.models.nba import Player, PlayerOwnership
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor
 
@@ -27,6 +27,7 @@ class PlayerOwnershipPipeline(BasePipeline):
         display_name="Player Ownership",
         description="Fetches ESPN fantasy ownership percentages for all players",
         target_table="nba.player_ownership",
+        category=PipelineCategory.POST_GAME,
     )
 
     def __init__(self):

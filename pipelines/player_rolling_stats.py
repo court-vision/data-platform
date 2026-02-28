@@ -19,7 +19,7 @@ from peewee import fn
 from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.player_rolling_stats import PlayerRollingStats
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 
 WINDOWS = [7, 14, 30]
@@ -39,6 +39,7 @@ class PlayerRollingStatsPipeline(BasePipeline):
         display_name="Player Rolling Stats",
         description="Materializes L7/L14/L30 rolling per-game averages from player_game_stats",
         target_table="nba.player_rolling_stats",
+        category=PipelineCategory.POST_GAME,
         depends_on=("player_game_stats",),
     )
 

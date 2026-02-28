@@ -11,7 +11,7 @@ import pytz
 from core.settings import settings
 from db.models.nba import Game
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 
@@ -34,6 +34,7 @@ class GameSchedulePipeline(BasePipeline):
         display_name="Game Schedule",
         description="Fetches NBA game schedule and results",
         target_table="nba.games",
+        category=PipelineCategory.POST_GAME,
     )
 
     def __init__(self):

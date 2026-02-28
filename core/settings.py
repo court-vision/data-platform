@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     notification_from_email: str = "alerts@courtvision.dev"
     lineup_alert_window_minutes: int = 150  # broad outer gate; must be >= max user-configurable value (150)
 
+    # Pre-game pipeline scheduling
+    pre_game_window_minutes: int = 150  # how many minutes before first tip-off pre-game pipelines become eligible
+
     # Post-game pipeline scheduling
     estimated_game_duration_minutes: int = 150  # time added to latest game start to estimate end (~2.5hr)
     post_game_pipeline_window_minutes: int = 60  # window after estimated end to attempt trigger

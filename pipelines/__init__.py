@@ -1,8 +1,8 @@
 """
 Pipeline Registry and Exports
 
-Provides a registry of all available pipelines and helper functions
-for running them by name.
+Provides a unified registry of all available pipelines and helper functions
+for running them by name or category.
 """
 
 from datetime import date
@@ -10,69 +10,54 @@ from typing import Optional, Type
 
 from core.logging import get_logger
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.player_game_stats import PlayerGameStatsPipeline
 from pipelines.player_season_stats import PlayerSeasonStatsPipeline
-from pipelines.daily_matchup_scores import DailyMatchupScoresPipeline
 from pipelines.player_advanced_stats import PlayerAdvancedStatsPipeline
 from pipelines.player_ownership import PlayerOwnershipPipeline
-from pipelines.player_profiles import PlayerProfilesPipeline
-from pipelines.game_schedule import GameSchedulePipeline
-from pipelines.game_start_times import GameStartTimesPipeline
-from pipelines.injury_report import InjuryReportPipeline
-from pipelines.espn_injury_status import ESPNInjuryStatusPipeline
-from pipelines.breakout_detection import BreakoutDetectionPipeline
 from pipelines.player_rolling_stats import PlayerRollingStatsPipeline
 from pipelines.team_stats import TeamStatsPipeline
+from pipelines.game_schedule import GameSchedulePipeline
+from pipelines.espn_injury_status import ESPNInjuryStatusPipeline
+from pipelines.breakout_detection import BreakoutDetectionPipeline
+from pipelines.lineup_alerts import LineupAlertsPipeline
 from pipelines.live_game_stats import LiveGameStatsPipeline
+from pipelines.player_profiles import PlayerProfilesPipeline
+from pipelines.game_start_times import GameStartTimesPipeline
+from pipelines.daily_matchup_scores import DailyMatchupScoresPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
 
-# Registry of all available pipelines
-# Order matters for run_all_pipelines - dependencies should come first
+# Unified registry of all pipelines.
+# Registration order is dependency-safe: dependencies listed before dependents.
+# Category-based endpoints use get_pipelines_by_category() to filter this list.
 PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
-    # Core daily pipelines
+    # POST_GAME — run after games complete
     "player_game_stats": PlayerGameStatsPipeline,
     "player_ownership": PlayerOwnershipPipeline,
     "player_season_stats": PlayerSeasonStatsPipeline,
-    "daily_matchup_scores": DailyMatchupScoresPipeline,
-    # Rolling averages (depends on player_game_stats)
     "player_rolling_stats": PlayerRollingStatsPipeline,
-    # Team stats (independent of player pipelines)
-    "team_stats": TeamStatsPipeline,
-    # Extended data pipelines
     "player_advanced_stats": PlayerAdvancedStatsPipeline,
+    "team_stats": TeamStatsPipeline,
     "game_schedule": GameSchedulePipeline,
-    "game_start_times": GameStartTimesPipeline,
-    # "injury_report": InjuryReportPipeline, -- requires BALLDONTLIE All-Star tier subscription
+    # PRE_GAME — run before games start (timed relative to first tip-off)
     "espn_injury_status": ESPNInjuryStatusPipeline,
-    # Breakout detection (depends on espn_injury_status + player_season_stats)
     "breakout_detection": BreakoutDetectionPipeline,
-    # Reference data pipelines (run less frequently)
-    "player_profiles": PlayerProfilesPipeline,
-}
-
-# Pipelines included in the post-game batch run (excludes post_game_excluded ones)
-POST_GAME_PIPELINE_NAMES: list[str] = [
-    name for name, cls in PIPELINE_REGISTRY.items()
-    if not cls.config.post_game_excluded
-]
-
-# Notification pipelines - separate from PIPELINE_REGISTRY so they
-# don't run in run_all_pipelines(). Triggered independently.
-from pipelines.lineup_alerts import LineupAlertsPipeline
-
-NOTIFICATION_PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "lineup_alerts": LineupAlertsPipeline,
+    # LIVE — run every ~60s during active game windows
+    "live_game_stats": LiveGameStatsPipeline,
+    # SCHEDULED — hardcoded Railway cron; each has its own service trigger
+    "player_profiles": PlayerProfilesPipeline,
+    "game_start_times": GameStartTimesPipeline,
+    "daily_matchup_scores": DailyMatchupScoresPipeline,
 }
 
-# Live pipelines - separate from PIPELINE_REGISTRY so they don't run in
-# batch jobs. Triggered by the cron-runner live loop every ~60s on game nights.
-LIVE_PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
-    "live_game_stats": LiveGameStatsPipeline,
-}
+
+def get_pipelines_by_category(category: PipelineCategory) -> list[Type[BasePipeline]]:
+    """Return all pipelines matching a category, in dependency-safe registry order."""
+    return [cls for cls in PIPELINE_REGISTRY.values() if cls.config.category == category]
 
 
 def get_pipeline(name: str) -> BasePipeline:
@@ -113,16 +98,10 @@ async def run_pipeline(name: str, date_override: Optional[date] = None) -> Pipel
 
 async def run_all_pipelines(date_override: Optional[date] = None) -> dict[str, PipelineResult]:
     """
-    Run all pipelines in sequence.
+    Run all non-SCHEDULED pipelines in sequence.
 
-    Pipelines are run in registration order:
-    1. player_game_stats - Per-game box scores
-    2. player_season_stats - Season totals
-    3. daily_matchup_scores - Fantasy matchup tracking
-    4. advanced_stats - Efficiency/usage metrics
-    5. game_schedule - NBA game results
-    6. injury_report - Player injury status
-    7. player_profiles - Biographical data (slow, run weekly)
+    Intended for backfills and manual use — not part of the regular production
+    schedule (which uses category-specific endpoints instead).
 
     Args:
         date_override: If provided, all pipelines use this date instead of
@@ -133,11 +112,14 @@ async def run_all_pipelines(date_override: Optional[date] = None) -> dict[str, P
     """
     log = get_logger("pipeline").bind(operation="run_all")
 
-    results = {}
-    pipeline_names = list(PIPELINE_REGISTRY.keys())
+    pipeline_names = [
+        name for name, cls in PIPELINE_REGISTRY.items()
+        if cls.config.category != PipelineCategory.SCHEDULED
+    ]
 
     log.info("all_pipelines_started", count=len(pipeline_names))
 
+    results = {}
     for i, name in enumerate(pipeline_names, 1):
         log.info("running_pipeline", pipeline=name, step=f"{i}/{len(pipeline_names)}")
         results[name] = await run_pipeline(name, date_override=date_override)
@@ -166,30 +148,26 @@ __all__ = [
     # Base classes
     "BasePipeline",
     "PipelineConfig",
+    "PipelineCategory",
     "PipelineContext",
-    # Core pipelines
+    # Pipelines
     "PlayerGameStatsPipeline",
     "PlayerSeasonStatsPipeline",
-    "DailyMatchupScoresPipeline",
-    # Rolling averages
-    "PlayerRollingStatsPipeline",
-    # Team stats
-    "TeamStatsPipeline",
-    # Extended data pipelines
+    "PlayerAdvancedStatsPipeline",
     "PlayerOwnershipPipeline",
-    "AdvancedStatsPipeline",
+    "PlayerRollingStatsPipeline",
+    "TeamStatsPipeline",
+    "GameSchedulePipeline",
     "ESPNInjuryStatusPipeline",
     "BreakoutDetectionPipeline",
-    "PlayerProfilesPipeline",
-    "GameSchedulePipeline",
-    "GameStartTimesPipeline",
     "LineupAlertsPipeline",
-    # Registry functions
-    "PIPELINE_REGISTRY",
-    "POST_GAME_PIPELINE_NAMES",
-    "NOTIFICATION_PIPELINE_REGISTRY",
-    "LIVE_PIPELINE_REGISTRY",
     "LiveGameStatsPipeline",
+    "PlayerProfilesPipeline",
+    "GameStartTimesPipeline",
+    "DailyMatchupScoresPipeline",
+    # Registry
+    "PIPELINE_REGISTRY",
+    "get_pipelines_by_category",
     "get_pipeline",
     "run_pipeline",
     "run_all_pipelines",

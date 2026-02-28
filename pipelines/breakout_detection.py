@@ -21,7 +21,7 @@ Algorithm — hybrid depth-chart + position-validated history:
       the same team was absent from the box score (guarantees the
       candidate was genuinely covering a rotation gap, not just garbage
       time in a blowout).
-   This naturally subsumes the player-specific absence signal: if the
+   This naturally incorporates the player-specific absence signal: if the
    currently injured player was already out before, those games pass
    the position-peer filter automatically.
 
@@ -50,7 +50,7 @@ from db.models.nba import (
     BreakoutCandidate,
 )
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 
 
@@ -101,6 +101,8 @@ class BreakoutDetectionPipeline(BasePipeline):
         display_name="Breakout Detection",
         description="Identifies players likely to benefit from a prominent teammate's injury",
         target_table="nba.breakout_candidates",
+        category=PipelineCategory.PRE_GAME,
+        pre_game_window_minutes=120,
         depends_on=("espn_injury_status", "player_season_stats", "player_game_stats"),
     )
 

@@ -13,7 +13,7 @@ from datetime import date, timedelta
 
 from db.models.nba import Player, PlayerInjury
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor
 from pipelines.transformers import normalize_name
@@ -55,6 +55,8 @@ class ESPNInjuryStatusPipeline(BasePipeline):
         display_name="ESPN Injury Status",
         description="Syncs player injury/availability status from ESPN Fantasy API",
         target_table="nba.player_injuries",
+        category=PipelineCategory.PRE_GAME,
+        pre_game_window_minutes=120,
     )
 
     def __init__(self):

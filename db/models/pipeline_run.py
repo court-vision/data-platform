@@ -6,7 +6,7 @@ Each pipeline execution creates a record with status, timing, and error info.
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from peewee import (
     UUIDField,
@@ -144,6 +144,34 @@ class PipelineRun(BaseModel):
                 (cls.pipeline_name == pipeline_name)
                 & (cls.status == "running")
                 & (cls.started_at >= staleness_cutoff)
+            )
+            .exists()
+        )
+
+    @classmethod
+    def was_successful_on_date(cls, pipeline_name: str, nba_date: date) -> bool:
+        """
+        Check if a pipeline completed successfully on a given NBA date.
+
+        Used by category endpoints (pre-game, post-game) to deduplicate per-pipeline
+        per-date runs. The cutoff is midnight UTC at the start of nba_date; any
+        successful run recorded after that moment counts as "already ran today".
+
+        Args:
+            pipeline_name: Name of the pipeline to check
+            nba_date: The NBA game date to check against
+
+        Returns:
+            True if the pipeline has a successful run recorded on or after midnight
+            of the given date
+        """
+        cutoff = datetime.combine(nba_date, time.min)
+        return (
+            cls.select()
+            .where(
+                (cls.pipeline_name == pipeline_name)
+                & (cls.status == "success")
+                & (cls.started_at >= cutoff)
             )
             .exists()
         )

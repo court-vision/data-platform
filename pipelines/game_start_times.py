@@ -12,7 +12,7 @@ from datetime import datetime
 
 from db.models.nba import Game, NBATeam
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 
 
@@ -43,6 +43,7 @@ class GameStartTimesPipeline(BasePipeline):
         display_name="Game Start Times",
         description="Populates game start times from NBA schedule data",
         target_table="nba.games",
+        category=PipelineCategory.SCHEDULED,
     )
 
     def execute(self, ctx: PipelineContext) -> None:

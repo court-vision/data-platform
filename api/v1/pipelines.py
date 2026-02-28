@@ -22,7 +22,14 @@ from core.job_manager import (
 )
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
-from pipelines import run_pipeline, run_all_pipelines, list_pipelines, PIPELINE_REGISTRY, POST_GAME_PIPELINE_NAMES
+from pipelines import (
+    run_pipeline,
+    run_all_pipelines,
+    list_pipelines,
+    PIPELINE_REGISTRY,
+    get_pipelines_by_category,
+)
+from pipelines.config import PipelineCategory
 from schemas.pipeline import (
     PipelineResponse,
     AllPipelinesResponse,
@@ -294,6 +301,125 @@ async def trigger_player_profiles(
     )
 
 
+@router.post("/pre-game", response_model=PipelineResponse)
+async def trigger_pre_game(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(False, description="Bypass window and dedup gates. Use for manual triggers or backfills."),
+    date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Implies force=true."),
+) -> PipelineResponse:
+    """
+    Pre-game pipeline trigger with per-pipeline self-gating.
+
+    Called every 15 minutes by the cron-runner. For each PRE_GAME pipeline:
+    1. Window gate: skips if current time is before (first_game - window_minutes)
+    2. Dedup gate: skips if the pipeline already ran successfully today
+    3. Concurrency gate: skips if the pipeline is already running
+
+    Each pipeline has its own window override (pre_game_window_minutes); otherwise
+    the global settings.pre_game_window_minutes default applies.
+
+    Safe to call frequently — gates return immediately with no-ops.
+    Pass ?force=true to skip all gates.
+    Pass ?date=YYYY-MM-DD to target a specific date (implies force=true).
+    """
+    import pytz
+    from datetime import datetime, timedelta
+
+    from core.settings import settings
+    from db.models.nba.games import Game
+    from db.models.pipeline_run import PipelineRun
+
+    force = force or (date is not None)
+
+    eastern = pytz.timezone("US/Eastern")
+    now_et = datetime.now(eastern)
+    now_et_naive = now_et.replace(tzinfo=None)
+
+    # ET-based NBA date (before 6am = still yesterday's game date)
+    if now_et.hour < 6:
+        nba_date = (now_et - timedelta(days=1)).date()
+    else:
+        nba_date = now_et.date()
+
+    target_date = date or nba_date
+
+    if not force:
+        # Exit early if no games today — nothing to prep for
+        games_today = Game.get_games_on_date(nba_date)
+        if not games_today:
+            log.info("pre_game_no_games", nba_date=str(nba_date))
+            return PipelineResponse(
+                status=ApiStatus.SUCCESS,
+                message=f"No games scheduled for NBA date {nba_date}",
+            )
+
+    first_game_time = Game.get_earliest_game_time_on_date(nba_date) if not force else None
+
+    pre_game_pipelines = get_pipelines_by_category(PipelineCategory.PRE_GAME)
+    pipelines_to_run = []
+
+    for cls in pre_game_pipelines:
+        name = cls.config.name
+
+        if not force:
+            # Window gate: skip if too early for this pipeline
+            if first_game_time:
+                window_minutes = cls.config.pre_game_window_minutes or settings.pre_game_window_minutes
+                first_game_dt = datetime.combine(nba_date, first_game_time)
+                window_opens_at = first_game_dt - timedelta(minutes=window_minutes)
+                if now_et_naive < window_opens_at:
+                    log.info(
+                        "pre_game_window_not_open",
+                        pipeline=name,
+                        window_minutes=window_minutes,
+                        opens_at=str(window_opens_at),
+                        current_time=str(now_et_naive),
+                    )
+                    continue
+
+            # Dedup gate: skip if already ran successfully today
+            if PipelineRun.was_successful_on_date(name, nba_date):
+                log.info("pre_game_already_ran", pipeline=name, nba_date=str(nba_date))
+                continue
+
+            # Concurrency gate: skip if already running
+            if PipelineRun.is_running(name):
+                log.info("pre_game_already_running", pipeline=name)
+                continue
+
+        pipelines_to_run.append(name)
+
+    if not pipelines_to_run:
+        return PipelineResponse(
+            status=ApiStatus.SUCCESS,
+            message=f"All pre-game pipelines skipped (window not open or already ran) for {nba_date}",
+        )
+
+    job_manager = get_job_manager()
+    job = await job_manager.create_job(len(pipelines_to_run))
+    asyncio.create_task(
+        _run_pipelines_background(
+            job.job_id,
+            date_override=target_date if date else None,
+            pipeline_names=pipelines_to_run,
+        )
+    )
+
+    log.info(
+        "pre_game_triggered",
+        nba_date=str(target_date),
+        job_id=job.job_id,
+        pipeline_count=len(pipelines_to_run),
+        pipelines=pipelines_to_run,
+        forced=force,
+    )
+
+    return PipelineResponse(
+        status=ApiStatus.SUCCESS,
+        message=f"Pre-game pipelines triggered for {target_date}. Job ID: {job.job_id}",
+    )
+
+
 @router.post("/post-game", response_model=PipelineResponse)
 async def trigger_post_game(
     _: str = Security(verify_pipeline_token),
@@ -301,14 +427,17 @@ async def trigger_post_game(
     date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Implies force=true."),
 ) -> PipelineResponse:
     """
-    Post-game pipeline trigger with self-gating.
+    Post-game pipeline trigger with per-pipeline self-gating.
 
-    Called every 15 minutes by the cron-runner. Self-gates using two checks:
-    1. Time window: within [estimated_last_game_end, estimated_last_game_end + window]
+    Called every 15 minutes by the cron-runner. Applies two batch-level gates
+    (time window and data readiness) then per-pipeline dedup:
+    1. Time window: only attempt within [estimated_last_game_end, estimated_last_game_end + window]
     2. Data readiness: all games on the NBA date are Final (live scoreboard check)
+    3. Per-pipeline dedup: skip if the pipeline already ran successfully today
+    4. Per-pipeline concurrency: skip if the pipeline is already running
 
-    Only triggers once per NBA game date via date-keyed PipelineRun dedup.
-    Safe to call frequently — returns immediately if outside window or already triggered.
+    Per-pipeline dedup enables partial batch retries — if one pipeline fails, the
+    next cron invocation will retry only the failed pipeline, not the whole batch.
 
     Pass ?force=true to skip all gates (useful for manual re-triggers or backfills).
     Pass ?date=YYYY-MM-DD to backfill a specific date (implies force=true).
@@ -323,7 +452,6 @@ async def trigger_post_game(
 
     # A date override implies force — skip all time/readiness gating
     force = force or (date is not None)
-    dedup_run = None
 
     eastern = pytz.timezone("US/Eastern")
     now_et = datetime.now(eastern)
@@ -378,48 +506,53 @@ async def trigger_post_game(
             log.info(
                 "post_game_games_not_final",
                 nba_date=str(nba_date),
-                current_time=str(now_et_naive),
             )
             return PipelineResponse(
                 status=ApiStatus.SUCCESS,
                 message="Games still in progress, will retry next interval",
             )
 
-        # Dedup: one trigger per NBA date, keyed by date in the pipeline_name
-        dedup_key = f"post_game_trigger_{nba_date.isoformat()}"
-        already_ran = (
-            PipelineRun.select()
-            .where(
-                (PipelineRun.pipeline_name == dedup_key)
-                & (PipelineRun.status == "success")
-            )
-            .exists()
+    # Per-pipeline dedup: determine which pipelines still need to run
+    post_game_pipelines = get_pipelines_by_category(PipelineCategory.POST_GAME)
+    pipelines_to_run = []
+
+    for cls in post_game_pipelines:
+        name = cls.config.name
+
+        if not force:
+            if PipelineRun.was_successful_on_date(name, nba_date):
+                log.info("post_game_pipeline_dedup_skip", pipeline=name, nba_date=str(nba_date))
+                continue
+            if PipelineRun.is_running(name):
+                log.info("post_game_pipeline_concurrency_skip", pipeline=name)
+                continue
+
+        pipelines_to_run.append(name)
+
+    if not pipelines_to_run:
+        log.info("post_game_all_complete", nba_date=str(nba_date))
+        return PipelineResponse(
+            status=ApiStatus.SUCCESS,
+            message=f"All post-game pipelines already completed for {nba_date}",
         )
-        if already_ran:
-            log.info("post_game_already_triggered", nba_date=str(nba_date), dedup_key=dedup_key)
-            return PipelineResponse(
-                status=ApiStatus.SUCCESS,
-                message=f"Already triggered post-game pipelines for {nba_date}",
-            )
-
-        # Record dedup marker as "running" — will be marked success/failed
-        # after pipelines complete. Only "success" blocks future retries, so
-        # a failed run will be retried on the next cron invocation.
-        dedup_run = PipelineRun.start_run(dedup_key)
-
-    # All gates pass (or bypassed) — trigger pipelines (excludes post_game_excluded ones)
-    job_manager = get_job_manager()
-    job = await job_manager.create_job(len(POST_GAME_PIPELINE_NAMES))
 
     target_date = date or nba_date
-    dedup_run_id = str(dedup_run.id) if not force and dedup_run else None
-    asyncio.create_task(_run_pipelines_background(job.job_id, date_override=target_date if date else None, pipeline_names=POST_GAME_PIPELINE_NAMES, dedup_run_id=dedup_run_id))
+    job_manager = get_job_manager()
+    job = await job_manager.create_job(len(pipelines_to_run))
+    asyncio.create_task(
+        _run_pipelines_background(
+            job.job_id,
+            date_override=target_date if date else None,
+            pipeline_names=pipelines_to_run,
+        )
+    )
 
     log.info(
         "post_game_triggered",
         nba_date=str(target_date),
         job_id=job.job_id,
-        pipeline_count=len(POST_GAME_PIPELINE_NAMES),
+        pipeline_count=len(pipelines_to_run),
+        pipelines=pipelines_to_run,
         forced=force,
     )
 
@@ -574,26 +707,31 @@ async def trigger_all_pipelines(
     date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD) for all pipelines. Omit for automatic date."),
 ) -> JobCreatedResponse:
     """
-    Trigger all pipelines in the background (fire-and-forget).
+    Trigger all non-SCHEDULED pipelines in the background (fire-and-forget).
 
     Returns immediately with a job ID. Use GET /jobs/{job_id} to check status.
-
-    Runs (registry order): player_game_stats -> player_ownership -> player_season_stats
-          -> daily_matchup_scores -> player_advanced_stats -> game_schedule
-          -> game_start_times -> player_profiles
+    Intended for backfills and manual use — production runs use the category
+    endpoints (/pre-game, /post-game, /live-stats) instead.
 
     Pass ?date=YYYY-MM-DD to backfill all pipelines for a specific date.
     """
+    pipeline_names = [
+        name for name, cls in PIPELINE_REGISTRY.items()
+        if cls.config.category != PipelineCategory.SCHEDULED
+    ]
+
     job_manager = get_job_manager()
-    pipeline_count = len(PIPELINE_REGISTRY)
+    job = await job_manager.create_job(len(pipeline_names))
+    asyncio.create_task(
+        _run_pipelines_background(job.job_id, date_override=date, pipeline_names=pipeline_names)
+    )
 
-    # Create job record
-    job = await job_manager.create_job(pipeline_count)
-
-    # Start background task
-    asyncio.create_task(_run_pipelines_background(job.job_id, date_override=date))
-
-    log.info("pipeline_job_started", job_id=job.job_id, pipeline_count=pipeline_count, date_override=str(date) if date else None)
+    log.info(
+        "pipeline_job_started",
+        job_id=job.job_id,
+        pipeline_count=len(pipeline_names),
+        date_override=str(date) if date else None,
+    )
 
     return JobCreatedResponse(
         status=ApiStatus.SUCCESS,
@@ -613,7 +751,7 @@ async def trigger_all_pipelines_sync(
     date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD) for all pipelines. Omit for automatic date."),
 ) -> AllPipelinesResponse:
     """
-    Trigger all pipelines synchronously (blocks until complete).
+    Trigger all non-SCHEDULED pipelines synchronously (blocks until complete).
 
     WARNING: This can take several minutes. Use POST /all for fire-and-forget.
     Only use this endpoint if you need the results immediately and can wait.
@@ -726,34 +864,31 @@ async def get_job_status(
     )
 
 
-def _finalize_dedup_run(dedup_run_id: str, success: bool, error: str | None = None) -> None:
-    """Mark a post-game dedup PipelineRun as success or failed."""
-    from db.models.pipeline_run import PipelineRun
-
-    try:
-        dedup_run = PipelineRun.get_by_id(dedup_run_id)
-        if success:
-            dedup_run.mark_success()
-            log.info("dedup_marker_success", dedup_run_id=dedup_run_id)
-        else:
-            dedup_run.mark_failed(error or "Pipeline(s) failed")
-            log.info("dedup_marker_failed", dedup_run_id=dedup_run_id, error=error)
-    except Exception as e:
-        log.error("dedup_marker_update_error", dedup_run_id=dedup_run_id, error=str(e))
-
-
-async def _run_pipelines_background(job_id: str, date_override: Optional[date] = None, pipeline_names: Optional[list[str]] = None, dedup_run_id: Optional[str] = None) -> None:
+async def _run_pipelines_background(
+    job_id: str,
+    date_override: Optional[date] = None,
+    pipeline_names: Optional[list[str]] = None,
+) -> None:
     """
     Run pipelines in the background and update job status.
 
     This function is spawned as a background task and runs independently.
-    pipeline_names: subset of PIPELINE_REGISTRY to run; defaults to all.
-    dedup_run_id: optional PipelineRun ID to mark success/failed based on outcome.
+    pipeline_names: subset of PIPELINE_REGISTRY to run; defaults to all non-SCHEDULED.
     """
     job_manager = get_job_manager()
-    pipeline_names = pipeline_names if pipeline_names is not None else list(PIPELINE_REGISTRY.keys())
 
-    log.info("background_job_starting", job_id=job_id, pipelines=pipeline_names, date_override=str(date_override) if date_override else None)
+    if pipeline_names is None:
+        pipeline_names = [
+            name for name, cls in PIPELINE_REGISTRY.items()
+            if cls.config.category != PipelineCategory.SCHEDULED
+        ]
+
+    log.info(
+        "background_job_starting",
+        job_id=job_id,
+        pipelines=pipeline_names,
+        date_override=str(date_override) if date_override else None,
+    )
 
     await job_manager.update_job_started(job_id)
 
@@ -771,8 +906,6 @@ async def _run_pipelines_background(job_id: str, date_override: Optional[date] =
             try:
                 result = await run_pipeline(name, date_override=date_override)
 
-                # Convert to job result format
-                # Note: result.status is already a string due to use_enum_values=True
                 job_result = JobResultInternal(
                     pipeline_name=name,
                     status=result.status,
@@ -823,13 +956,6 @@ async def _run_pipelines_background(job_id: str, date_override: Optional[date] =
             failed=job.pipelines_failed if job else 0,
         )
 
-        # Finalize post-game dedup marker based on pipeline outcome
-        if dedup_run_id:
-            _finalize_dedup_run(dedup_run_id, all_success)
-
     except Exception as e:
         log.error("background_job_failed", job_id=job_id, error=str(e))
         await job_manager.complete_job(job_id, success=False, error=str(e))
-
-        if dedup_run_id:
-            _finalize_dedup_run(dedup_run_id, success=False, error=str(e))

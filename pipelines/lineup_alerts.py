@@ -24,7 +24,7 @@ from db.models.teams import Team
 from db.models.nba.games import Game
 from db.models.notifications import NotificationPreference, NotificationLog, NotificationTeamPreference
 from pipelines.base import BasePipeline
-from pipelines.config import PipelineConfig
+from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor
 from services.lineup_check_service import LineupCheckService
@@ -48,6 +48,7 @@ class LineupAlertsPipeline(BasePipeline):
         display_name="Lineup Alerts",
         description="Checks user lineups and sends alerts before games start",
         target_table="usr.notification_log",
+        category=PipelineCategory.PRE_GAME,
     )
 
     def __init__(self):
