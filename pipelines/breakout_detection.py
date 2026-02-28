@@ -152,7 +152,6 @@ class BreakoutDetectionPipeline(BasePipeline):
                 team_id=team_id,
                 injured_player_id=player_id,
                 injured_position=injured_position,
-                latest_stats_date=latest_stats_date,
             )
 
             if not depth_chart:
@@ -240,8 +239,6 @@ class BreakoutDetectionPipeline(BasePipeline):
         """
         Find starters (>=28 min/g, >=20 gp) currently listed Out or Doubtful.
         """
-        # Reuse the existing model method which handles the "latest record per player"
-        # subquery correctly. It returns all non-Available players; filter to Out/Doubtful.
         all_injured = PlayerInjury.get_injured_players(as_of_date)
         latest_injuries = [inj for inj in all_injured if inj.status in ("Out", "Doubtful")]
 
@@ -251,21 +248,28 @@ class BreakoutDetectionPipeline(BasePipeline):
         injured_player_ids = [inj.player_id for inj in latest_injuries]
         injury_by_player_id = {inj.player_id: inj for inj in latest_injuries}
 
-        latest_date = (
-            PlayerSeasonStats.select(fn.MAX(PlayerSeasonStats.as_of_date))
-            .scalar()
+        # Use per-player max date: injured players won't have a row on the global
+        # latest date because they haven't played recently.
+        latest_per_player = (
+            PlayerSeasonStats.select(
+                PlayerSeasonStats.player_id,
+                fn.MAX(PlayerSeasonStats.as_of_date).alias("max_date"),
+            )
+            .where(PlayerSeasonStats.player.in_(injured_player_ids))
+            .group_by(PlayerSeasonStats.player_id)
         )
-        if not latest_date:
-            return []
 
         season_stats = list(
             PlayerSeasonStats.select(PlayerSeasonStats, Player)
             .join(Player)
-            .where(
-                (PlayerSeasonStats.player.in_(injured_player_ids))
-                & (PlayerSeasonStats.as_of_date == latest_date)
-                & (PlayerSeasonStats.gp >= PROMINENT_MIN_GP)
+            .join(
+                latest_per_player,
+                on=(
+                    (PlayerSeasonStats.player_id == latest_per_player.c.player_id)
+                    & (PlayerSeasonStats.as_of_date == latest_per_player.c.max_date)
+                ),
             )
+            .where(PlayerSeasonStats.gp >= PROMINENT_MIN_GP)
         )
 
         results = []
@@ -300,7 +304,6 @@ class BreakoutDetectionPipeline(BasePipeline):
         team_id: str,
         injured_player_id: int,
         injured_position: str,
-        latest_stats_date: date,
     ) -> list[dict]:
         """
         Return rotation players at the injured player's position group,
@@ -315,12 +318,29 @@ class BreakoutDetectionPipeline(BasePipeline):
             # Unknown position: include all rotation players on the team
             adjacent_positions = {"PG", "SG", "SF", "PF", "C", "G", "F"}
 
+        # Per-player max date: teammates who recently sat out (rest, minor injury)
+        # won't appear on the global latest date.
+        latest_per_player = (
+            PlayerSeasonStats.select(
+                PlayerSeasonStats.player_id,
+                fn.MAX(PlayerSeasonStats.as_of_date).alias("max_date"),
+            )
+            .where(PlayerSeasonStats.team == team_id)
+            .group_by(PlayerSeasonStats.player_id)
+        )
+
         teammates_stats = list(
             PlayerSeasonStats.select(PlayerSeasonStats, Player)
             .join(Player)
+            .join(
+                latest_per_player,
+                on=(
+                    (PlayerSeasonStats.player_id == latest_per_player.c.player_id)
+                    & (PlayerSeasonStats.as_of_date == latest_per_player.c.max_date)
+                ),
+            )
             .where(
                 (PlayerSeasonStats.team == team_id)
-                & (PlayerSeasonStats.as_of_date == latest_stats_date)
                 & (PlayerSeasonStats.player != injured_player_id)
                 & (PlayerSeasonStats.gp >= TEAMMATE_MIN_GP)
             )
