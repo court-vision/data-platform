@@ -231,6 +231,48 @@ async def trigger_game_start_times(
     )
 
 
+@router.post("/espn-injury-status", response_model=PipelineResponse)
+async def trigger_espn_injury_status(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override report date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the ESPN injury status pipeline.
+
+    Fetches player injury/availability status from ESPN Fantasy API and upserts
+    to nba.player_injuries. Free alternative to the BALLDONTLIE injury endpoint.
+    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    """
+    result = await run_pipeline("espn_injury_status", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
+@router.post("/breakout-detection", response_model=PipelineResponse)
+async def trigger_breakout_detection(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override detection date (YYYY-MM-DD). Omit for automatic date."),
+) -> PipelineResponse:
+    """
+    Trigger the breakout streamer detection pipeline.
+
+    Analyzes current injuries to prominent starters and identifies teammates
+    most likely to absorb their minutes. Results written to nba.breakout_candidates.
+
+    Depends on espn_injury_status and player_season_stats being fresh.
+    Pass ?date=YYYY-MM-DD to run detection as of a specific date.
+    """
+    result = await run_pipeline("breakout_detection", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
 @router.post("/player-profiles", response_model=PipelineResponse)
 async def trigger_player_profiles(
     _: str = Security(verify_pipeline_token),

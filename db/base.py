@@ -44,6 +44,7 @@ def init_db():
         Game,
         PlayerInjury,
         LivePlayerStats,
+        BreakoutCandidate,
     )
 
     # User/team models (read by lineup_alerts pipeline for notification prefs)
@@ -70,6 +71,8 @@ def init_db():
         PlayerProfile, PlayerAdvancedStats, Game, PlayerInjury,
         # NBA schema - live data
         LivePlayerStats,
+        # NBA schema - breakout detection
+        BreakoutCandidate,
         # User schema (referenced by lineup_alerts)
         User, Team, Lineup,
         # Notification tables (read/written by lineup_alerts pipeline)

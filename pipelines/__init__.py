@@ -21,6 +21,8 @@ from pipelines.player_profiles import PlayerProfilesPipeline
 from pipelines.game_schedule import GameSchedulePipeline
 from pipelines.game_start_times import GameStartTimesPipeline
 from pipelines.injury_report import InjuryReportPipeline
+from pipelines.espn_injury_status import ESPNInjuryStatusPipeline
+from pipelines.breakout_detection import BreakoutDetectionPipeline
 from pipelines.player_rolling_stats import PlayerRollingStatsPipeline
 from pipelines.team_stats import TeamStatsPipeline
 from pipelines.live_game_stats import LiveGameStatsPipeline
@@ -45,6 +47,9 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "game_schedule": GameSchedulePipeline,
     "game_start_times": GameStartTimesPipeline,
     # "injury_report": InjuryReportPipeline, -- requires BALLDONTLIE All-Star tier subscription
+    "espn_injury_status": ESPNInjuryStatusPipeline,
+    # Breakout detection (depends on espn_injury_status + player_season_stats)
+    "breakout_detection": BreakoutDetectionPipeline,
     # Reference data pipelines (run less frequently)
     "player_profiles": PlayerProfilesPipeline,
 }
@@ -173,6 +178,8 @@ __all__ = [
     # Extended data pipelines
     "PlayerOwnershipPipeline",
     "AdvancedStatsPipeline",
+    "ESPNInjuryStatusPipeline",
+    "BreakoutDetectionPipeline",
     "PlayerProfilesPipeline",
     "GameSchedulePipeline",
     "GameStartTimesPipeline",

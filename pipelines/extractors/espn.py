@@ -122,6 +122,8 @@ class ESPNExtractor(BaseExtractor):
                 cleaned_data[normalized] = {
                     "espn_id": player["id"],
                     "rost_pct": player.get("ownership", {}).get("percentOwned", 0),
+                    "injured": player.get("injured", False),
+                    "injury_status": player.get("injuryStatus"),  # "ACTIVE", "OUT", "DAY_TO_DAY", "DOUBTFUL", "SUSPENSION", etc.
                 }
 
         self.log.info("request_complete", player_count=len(cleaned_data))
