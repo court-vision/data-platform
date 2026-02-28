@@ -21,7 +21,7 @@ from core.job_manager import get_job_manager
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
 from db.models.pipeline_run import PipelineRun
-from pipelines import PIPELINE_REGISTRY, LIVE_PIPELINE_REGISTRY
+from pipelines import PIPELINE_REGISTRY
 from schemas.dashboard import DashboardStatusData, DashboardStatusResponse, PipelineHealthEntry
 from schemas.pipeline import PipelineJobInfo
 
@@ -114,7 +114,7 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
     """
     entries: list[PipelineHealthEntry] = []
 
-    all_pipelines = {**PIPELINE_REGISTRY, **LIVE_PIPELINE_REGISTRY}
+    all_pipelines = PIPELINE_REGISTRY
     for name, cls in all_pipelines.items():
         config = cls.config
         # PipelineRun records are written using config.name (set in BasePipeline._run_sync),
