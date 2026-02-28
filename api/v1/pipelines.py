@@ -501,6 +501,7 @@ async def trigger_live_stats(
                 status="skipped",
                 games_total=0,
                 all_games_complete=True,
+                done=True,
                 duration_seconds=round(time.monotonic() - start_time, 3),
             ),
         )
@@ -528,6 +529,7 @@ async def trigger_live_stats(
                     status="skipped",
                     games_total=len(games_today),
                     all_games_complete=False,
+                    done=False,
                     duration_seconds=round(time.monotonic() - start_time, 3),
                 ),
             )
@@ -560,6 +562,7 @@ async def trigger_live_stats(
             records_processed=result.records_processed or 0,
             games_total=len(games_today),
             all_games_complete=all_complete,
+            done=all_complete,
             duration_seconds=result.duration_seconds,
         ),
     )

@@ -133,14 +133,14 @@ class LiveStatsData(BaseModel):
     records_processed: int = 0
     games_total: int = 0
     all_games_complete: bool = False
+    done: bool = False  # Generic loop completion signal read by cron-runner loop mode
     duration_seconds: Optional[float] = None
 
 
 class LiveStatsResponse(BaseModel):
     """Response for the live stats trigger endpoint.
 
-    The all_games_complete field is read by the cron-runner's live loop
-    to determine when to exit.
+    The done field signals the cron-runner loop mode to exit.
     """
 
     status: ApiStatus
