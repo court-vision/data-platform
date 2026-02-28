@@ -240,27 +240,10 @@ class BreakoutDetectionPipeline(BasePipeline):
         """
         Find starters (>=28 min/g, >=20 gp) currently listed Out or Doubtful.
         """
-        # Latest injury record per player on or before as_of_date
-        injury_subq = (
-            PlayerInjury.select(
-                PlayerInjury.player,
-                fn.MAX(PlayerInjury.report_date).alias("max_date"),
-            )
-            .where(PlayerInjury.report_date <= as_of_date)
-            .group_by(PlayerInjury.player)
-        )
-
-        latest_injuries = list(
-            PlayerInjury.select()
-            .join(
-                injury_subq,
-                on=(
-                    (PlayerInjury.player == injury_subq.c.player_id)
-                    & (PlayerInjury.report_date == injury_subq.c.max_date)
-                ),
-            )
-            .where(PlayerInjury.status.in_(["Out", "Doubtful"]))
-        )
+        # Reuse the existing model method which handles the "latest record per player"
+        # subquery correctly. It returns all non-Available players; filter to Out/Doubtful.
+        all_injured = PlayerInjury.get_injured_players(as_of_date)
+        latest_injuries = [inj for inj in all_injured if inj.status in ("Out", "Doubtful")]
 
         if not latest_injuries:
             return []
