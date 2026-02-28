@@ -51,6 +51,8 @@ PIPELINE_TRIGGER_ENDPOINTS: dict[str, str] = {
     "game_start_times":     "/v1/internal/pipelines/game-start-times",
     "player_profiles":      "/v1/internal/pipelines/player-profiles",
     "live_game_stats":      "/v1/internal/pipelines/live-stats",
+    "espn_injury_status":   "/v1/internal/pipelines/espn-injury-status",
+    "breakout_detection":   "/v1/internal/pipelines/breakout-detection",
 }
 
 
