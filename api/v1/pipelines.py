@@ -612,6 +612,7 @@ async def trigger_live_stats(
     import pytz
 
     from db.models.nba.games import Game
+    from db.models.nba.live_player_stats import LivePlayerStats
     from pipelines.extractors.nba_api import NBAApiExtractor
     from pipelines.live_game_stats import LiveGameStatsPipeline
 
@@ -681,6 +682,12 @@ async def trigger_live_stats(
     except Exception as e:
         log.warning("live_stats_final_check_failed", error=str(e))
         all_complete = False
+
+    # Reconcile stale in-progress records before the cron-runner exits
+    if all_complete:
+        finalized = LivePlayerStats.finalize_stale_games(game_date)
+        if finalized:
+            log.info("live_stats_finalized_stale", game_date=str(game_date), records=finalized)
 
     log.info(
         "live_stats_triggered",

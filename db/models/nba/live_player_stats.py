@@ -164,6 +164,32 @@ class LivePlayerStats(BaseModel):
         return live_stats
 
     @classmethod
+    def finalize_stale_games(cls, game_date) -> int:
+        """
+        Set game_status=3 and game_clock=NULL for any records still marked
+        as in-progress on the given date.
+
+        Called when the NBA Scoreboard confirms all games are final, to
+        reconcile the race where the Scoreboard updates before per-game
+        BoxScores do.
+
+        Returns:
+            Number of records updated
+        """
+        return (
+            cls.update(
+                game_status=3,
+                game_clock=None,
+                last_updated=datetime.utcnow(),
+            )
+            .where(
+                (cls.game_date == game_date)
+                & (cls.game_status == 2)
+            )
+            .execute()
+        )
+
+    @classmethod
     def get_live_stats_for_date(cls, game_date) -> list["LivePlayerStats"]:
         """
         Get all live player stats for a specific date, ordered by fpts descending.
