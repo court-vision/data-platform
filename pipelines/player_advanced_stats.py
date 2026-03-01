@@ -32,7 +32,7 @@ class PlayerAdvancedStatsPipeline(BasePipeline):
     """
 
     config = PipelineConfig(
-        name="advanced_stats",
+        name="player_advanced_stats",
         display_name="Advanced Stats",
         description="Fetches advanced player stats (efficiency, usage, impact)",
         target_table="nba.player_advanced_stats",
