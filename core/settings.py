@@ -53,7 +53,7 @@ class Settings(BaseSettings):
 
     # Post-game pipeline scheduling
     estimated_game_duration_minutes: int = 150  # time added to latest game start to estimate end (~2.5hr)
-    post_game_pipeline_window_minutes: int = 180  # window after estimated end to attempt trigger
+    post_game_pipeline_window_minutes: int = 120  # window after estimated end to attempt trigger
 
     # Development mode
     development_mode: bool = False
