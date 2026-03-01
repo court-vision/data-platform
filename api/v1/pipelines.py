@@ -491,6 +491,9 @@ async def trigger_post_game(
                 message="Outside post-game window",
             )
 
+        # Convert estimated end to UTC for dedup cutoff (started_at is stored as UTC)
+        estimated_end_utc = eastern.localize(estimated_end_dt).astimezone(pytz.utc).replace(tzinfo=None)
+
         # Gate 2: Data readiness — verify all games are actually Final via live scoreboard
         nba_extractor = NBAApiExtractor()
         try:
@@ -520,7 +523,7 @@ async def trigger_post_game(
         name = cls.config.name
 
         if not force:
-            if PipelineRun.was_successful_on_date(name, nba_date):
+            if PipelineRun.was_successful_on_date(name, nba_date, after=estimated_end_utc):
                 log.info("post_game_pipeline_dedup_skip", pipeline=name, nba_date=str(nba_date))
                 continue
             if PipelineRun.is_running(name):

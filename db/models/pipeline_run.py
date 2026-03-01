@@ -149,23 +149,26 @@ class PipelineRun(BaseModel):
         )
 
     @classmethod
-    def was_successful_on_date(cls, pipeline_name: str, nba_date: date) -> bool:
+    def was_successful_on_date(
+        cls, pipeline_name: str, nba_date: date, after: datetime | None = None
+    ) -> bool:
         """
         Check if a pipeline completed successfully on a given NBA date.
 
         Used by category endpoints (pre-game, post-game) to deduplicate per-pipeline
-        per-date runs. The cutoff is midnight UTC at the start of nba_date; any
-        successful run recorded after that moment counts as "already ran today".
+        per-date runs.
 
         Args:
             pipeline_name: Name of the pipeline to check
             nba_date: The NBA game date to check against
+            after: Optional explicit cutoff (UTC naive). Only runs with
+                   started_at >= this value count. When omitted, defaults to
+                   midnight of nba_date.
 
         Returns:
-            True if the pipeline has a successful run recorded on or after midnight
-            of the given date
+            True if the pipeline has a successful run recorded on or after the cutoff
         """
-        cutoff = datetime.combine(nba_date, time.min)
+        cutoff = after if after is not None else datetime.combine(nba_date, time.min)
         return (
             cls.select()
             .where(
