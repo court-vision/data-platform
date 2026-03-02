@@ -17,6 +17,7 @@ class PipelineHealthEntry(BaseModel):
 
     name: str
     display_name: str
+    category: str  # "pre_game" | "live" | "post_game" | "scheduled"
     trigger_endpoint: str  # relative path to POST to trigger, e.g. "/v1/internal/pipelines/daily-player-stats"
     last_run_at: Optional[datetime] = None
     last_status: Optional[str] = None  # "success" | "failed" | None

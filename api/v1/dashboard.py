@@ -160,6 +160,7 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
         entry = PipelineHealthEntry(
             name=name,
             display_name=config.display_name,
+            category=config.category.value,
             trigger_endpoint=trigger_endpoint,
             last_run_at=latest_run.started_at if latest_run else None,
             last_status=latest_run.status if latest_run and not is_running else None,

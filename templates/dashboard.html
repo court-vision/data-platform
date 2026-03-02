@@ -14,12 +14,21 @@
       --text:     #cdd6f4;
       --muted:    #585b70;
       --muted2:   #7f849c;
-      --green:    #a6e3a1;
-      --red:      #f38ba8;
-      --yellow:   #f9e2af;
-      --blue:     #89b4fa;
-      --purple:   #cba6f7;
+      --orange:   #f97316;
+      --orange-dim: rgba(249,115,22,0.12);
+      --orange-mid: rgba(249,115,22,0.25);
+      --green:    #22c55e;
+      --red:      #f43f5e;
+      --yellow:   #eab308;
+      --purple:   #a78bfa;
+      --blue:     #60a5fa;
       --font: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+
+      /* Category accent colors */
+      --cat-live:      #f97316;
+      --cat-pre:       #eab308;
+      --cat-post:      #a78bfa;
+      --cat-scheduled: #60a5fa;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -31,6 +40,10 @@
       font-size: 12px;
       line-height: 1.5;
       min-height: 100vh;
+      background-image:
+        linear-gradient(rgba(28,28,48,0.4) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(28,28,48,0.4) 1px, transparent 1px);
+      background-size: 40px 40px;
     }
 
     a { color: inherit; text-decoration: none; }
@@ -41,7 +54,8 @@
       position: sticky;
       top: 0;
       z-index: 50;
-      background: var(--surface);
+      background: rgba(14,14,26,0.9);
+      backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
       padding: 10px 24px;
       display: flex;
@@ -53,11 +67,19 @@
     .logo {
       font-size: 13px;
       font-weight: 700;
-      letter-spacing: 0.04em;
-      color: var(--blue);
+      letter-spacing: 0.06em;
       white-space: nowrap;
+      background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 40%, var(--orange) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
-    .logo span { color: var(--muted); font-weight: 400; }
+    .logo span {
+      background: none;
+      -webkit-background-clip: unset;
+      -webkit-text-fill-color: var(--muted);
+      font-weight: 400;
+    }
 
     .header-right {
       display: flex;
@@ -91,7 +113,7 @@
       cursor: pointer;
       transition: border-color 0.15s, color 0.15s;
     }
-    .btn-sm:hover { border-color: var(--blue); color: var(--blue); }
+    .btn-sm:hover { border-color: var(--orange); color: var(--orange); }
 
     /* ── Layout ─────────────────────────────────────────────────────────── */
     .content {
@@ -102,8 +124,8 @@
 
     .error-banner {
       display: none;
-      background: rgba(243,139,168,0.07);
-      border: 1px solid rgba(243,139,168,0.25);
+      background: rgba(244,63,94,0.07);
+      border: 1px solid rgba(244,63,94,0.25);
       border-radius: 6px;
       padding: 10px 14px;
       margin-bottom: 20px;
@@ -112,24 +134,45 @@
     }
     .error-banner.show { display: block; }
 
-    /* ── Section ─────────────────────────────────────────────────────────── */
-    .section { margin-bottom: 36px; }
+    /* ── Category Section ─────────────────────────────────────────────── */
+    .category-section { margin-bottom: 32px; }
 
     .section-header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       margin-bottom: 14px;
       padding-bottom: 10px;
       border-bottom: 1px solid var(--border);
     }
+
+    .cat-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .cat-dot.live      { background: var(--cat-live);      box-shadow: 0 0 6px var(--cat-live); }
+    .cat-dot.pre_game  { background: var(--cat-pre);       box-shadow: 0 0 6px var(--cat-pre); }
+    .cat-dot.post_game { background: var(--cat-post);      box-shadow: 0 0 6px var(--cat-post); }
+    .cat-dot.scheduled { background: var(--cat-scheduled); box-shadow: 0 0 6px var(--cat-scheduled); }
 
     .section-title {
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--muted2);
+    }
+    .section-title.live      { color: var(--cat-live);      }
+    .section-title.pre_game  { color: var(--cat-pre);       }
+    .section-title.post_game { color: var(--cat-post);      }
+    .section-title.scheduled { color: var(--cat-scheduled); }
+    .section-title.jobs      { color: var(--muted2);        }
+
+    .section-desc {
+      font-size: 10px;
+      color: var(--muted);
+      margin-left: auto;
     }
 
     .badge {
@@ -153,10 +196,25 @@
       border-radius: 6px;
       padding: 14px 16px;
       transition: border-color 0.15s;
+      position: relative;
+      overflow: hidden;
     }
+    .pipeline-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 3px;
+      height: 100%;
+    }
+    .pipeline-card.cat-live::before      { background: var(--cat-live); }
+    .pipeline-card.cat-pre_game::before  { background: var(--cat-pre); }
+    .pipeline-card.cat-post_game::before { background: var(--cat-post); }
+    .pipeline-card.cat-scheduled::before { background: var(--cat-scheduled); }
+
     .pipeline-card:hover { border-color: var(--border2); }
-    .pipeline-card.s-running { border-color: rgba(249,226,175,0.25); }
-    .pipeline-card.s-failed  { border-color: rgba(243,139,168,0.2); }
+    .pipeline-card.s-running { border-color: rgba(234,179,8,0.3); }
+    .pipeline-card.s-failed  { border-color: rgba(244,63,94,0.25); }
 
     .card-top {
       display: flex;
@@ -179,10 +237,10 @@
       white-space: nowrap;
       flex-shrink: 0;
     }
-    .status-badge.success { background: rgba(166,227,161,0.1);  color: var(--green);  }
-    .status-badge.failed  { background: rgba(243,139,168,0.1);  color: var(--red);    }
-    .status-badge.running { background: rgba(249,226,175,0.1);  color: var(--yellow); }
-    .status-badge.never   { background: rgba(88,91,112,0.15);   color: var(--muted);  }
+    .status-badge.success { background: rgba(34,197,94,0.1);  color: var(--green);  }
+    .status-badge.failed  { background: rgba(244,63,94,0.1);  color: var(--red);    }
+    .status-badge.running { background: rgba(234,179,8,0.1);  color: var(--yellow); }
+    .status-badge.never   { background: rgba(88,91,112,0.15); color: var(--muted);  }
 
     .card-meta {
       display: grid;
@@ -211,7 +269,7 @@
       transition: border-color 0.15s, color 0.15s;
       color-scheme: dark;
     }
-    .date-input:focus { border-color: var(--blue); color: var(--text); }
+    .date-input:focus { border-color: var(--orange); color: var(--text); }
     .date-input::-webkit-calendar-picker-indicator {
       filter: invert(0.5);
       cursor: pointer;
@@ -228,7 +286,7 @@
       cursor: pointer;
       transition: border-color 0.15s, color 0.15s;
     }
-    .btn-run:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+    .btn-run:hover:not(:disabled) { border-color: var(--orange); color: var(--orange); }
     .btn-run:disabled { opacity: 0.35; cursor: not-allowed; }
     .btn-run.triggering { border-color: var(--yellow); color: var(--yellow); }
 
@@ -241,7 +299,9 @@
     }
     @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-    /* ── Jobs table ──────────────────────────────────────────────────────── */
+    /* ── Jobs section ────────────────────────────────────────────────────── */
+    .jobs-section { margin-bottom: 36px; }
+
     .table-wrap {
       background: var(--card);
       border: 1px solid var(--border);
@@ -318,7 +378,7 @@
     }
     .modal-title    { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
     .modal-subtitle { font-size: 11px; color: var(--muted2); line-height: 1.7; margin-bottom: 20px; }
-    .modal-subtitle code { color: var(--blue); }
+    .modal-subtitle code { color: var(--orange); }
 
     .token-input {
       width: 100%;
@@ -333,16 +393,16 @@
       outline: none;
       transition: border-color 0.15s;
     }
-    .token-input:focus { border-color: var(--blue); }
+    .token-input:focus { border-color: var(--orange); }
 
     .modal-err { font-size: 10px; color: var(--red); margin-bottom: 12px; display: none; }
     .modal-err.show { display: block; }
 
     .btn-primary {
       width: 100%;
-      background: rgba(137,180,250,0.08);
-      border: 1px solid var(--blue);
-      color: var(--blue);
+      background: var(--orange-dim);
+      border: 1px solid var(--orange);
+      color: var(--orange);
       font-family: var(--font);
       font-size: 12px;
       font-weight: 700;
@@ -352,7 +412,7 @@
       letter-spacing: 0.04em;
       transition: background 0.15s;
     }
-    .btn-primary:hover { background: rgba(137,180,250,0.15); }
+    .btn-primary:hover { background: var(--orange-mid); }
 
     /* ── Toast ───────────────────────────────────────────────────────────── */
     .toast {
@@ -372,8 +432,8 @@
       pointer-events: none;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
-    .toast.ok  { border-color: rgba(166,227,161,0.35); color: var(--green); }
-    .toast.err { border-color: rgba(243,139,168,0.35); color: var(--red);   }
+    .toast.ok  { border-color: rgba(34,197,94,0.35);  color: var(--green); }
+    .toast.err { border-color: rgba(244,63,94,0.35);  color: var(--red);   }
   </style>
 </head>
 <body>
@@ -419,33 +479,34 @@
 <div class="content">
   <div class="error-banner" id="errBanner"></div>
 
-  <!-- Pipeline Health -->
-  <div class="section">
-    <div class="section-header">
-      <span class="section-title">Pipeline Health</span>
-      <span class="badge" id="pipelineCount">—</span>
-    </div>
-    <div class="pipeline-grid" id="pipelineGrid">
-      <!-- skeleton -->
-      <div class="pipeline-card" style="opacity:0.5">
-        <div class="skel" style="width:55%;height:13px;margin-bottom:8px"></div>
-        <div class="skel" style="width:35%;height:10px"></div>
+  <!-- Pipeline sections rendered by JS -->
+  <div id="pipelineSections">
+    <!-- skeleton -->
+    <div class="category-section">
+      <div class="section-header">
+        <div class="skel" style="width:80px;height:10px"></div>
       </div>
-      <div class="pipeline-card" style="opacity:0.5">
-        <div class="skel" style="width:65%;height:13px;margin-bottom:8px"></div>
-        <div class="skel" style="width:40%;height:10px"></div>
-      </div>
-      <div class="pipeline-card" style="opacity:0.5">
-        <div class="skel" style="width:50%;height:13px;margin-bottom:8px"></div>
-        <div class="skel" style="width:30%;height:10px"></div>
+      <div class="pipeline-grid">
+        <div class="pipeline-card" style="opacity:0.5">
+          <div class="skel" style="width:55%;height:13px;margin-bottom:8px"></div>
+          <div class="skel" style="width:35%;height:10px"></div>
+        </div>
+        <div class="pipeline-card" style="opacity:0.5">
+          <div class="skel" style="width:65%;height:13px;margin-bottom:8px"></div>
+          <div class="skel" style="width:40%;height:10px"></div>
+        </div>
+        <div class="pipeline-card" style="opacity:0.5">
+          <div class="skel" style="width:50%;height:13px;margin-bottom:8px"></div>
+          <div class="skel" style="width:30%;height:10px"></div>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Recent Jobs -->
-  <div class="section">
+  <div class="jobs-section">
     <div class="section-header">
-      <span class="section-title">Recent Jobs</span>
+      <span class="section-title jobs">Recent Jobs</span>
       <span class="badge" id="jobCount">—</span>
     </div>
     <div id="jobsWrap">
@@ -458,17 +519,40 @@
   const TOKEN_KEY  = 'cv_pipeline_token';
   const REFRESH_S  = 30;
 
+  // Category display config (order matters — rendered top-to-bottom)
+  const CATEGORIES = [
+    {
+      key: 'live',
+      label: 'Live Pipelines',
+      desc: 'Runs every ~60s during active game windows',
+    },
+    {
+      key: 'pre_game',
+      label: 'Pre-Game Pipelines',
+      desc: 'Runs ~150 min before first tip-off',
+    },
+    {
+      key: 'post_game',
+      label: 'Post-Game Pipelines',
+      desc: 'Runs after games complete each night',
+    },
+    {
+      key: 'scheduled',
+      label: 'Scheduled Pipelines',
+      desc: 'Hardcoded Railway cron — own service trigger',
+    },
+  ];
+
   let countdownVal = REFRESH_S;
   let countdownId  = null;
   let lastPipelines = [];
 
-  // track which pipelines are mid-trigger
   const triggering = new Set();
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  const getToken   = () => localStorage.getItem(TOKEN_KEY);
-  const saveToken  = t  => localStorage.setItem(TOKEN_KEY, t);
-  const nukeToken  = () => localStorage.removeItem(TOKEN_KEY);
+  const getToken  = () => localStorage.getItem(TOKEN_KEY);
+  const saveToken = t  => localStorage.setItem(TOKEN_KEY, t);
+  const nukeToken = () => localStorage.removeItem(TOKEN_KEY);
 
   function clearToken() { nukeToken(); location.reload(); }
 
@@ -491,7 +575,6 @@
       document.getElementById('overlay').classList.add('hidden');
       startDashboard();
     }
-    // else: overlay is already visible by default
   }
 
   function startDashboard() {
@@ -536,7 +619,7 @@
       const payload = await res.json();
       hideErr();
       lastPipelines = payload.data.pipelines || [];
-      renderPipelines(lastPipelines);
+      renderPipelineSections(lastPipelines);
       renderJobs(payload.data.recent_jobs || []);
       document.getElementById('lastUpdated').textContent =
         'updated ' + new Date().toLocaleTimeString();
@@ -548,84 +631,107 @@
     }
   }
 
-  // ── Render pipelines ──────────────────────────────────────────────────────
-  function renderPipelines(pipelines) {
-    const grid = document.getElementById('pipelineGrid');
-    document.getElementById('pipelineCount').textContent = pipelines.length;
+  // ── Render pipeline sections grouped by category ──────────────────────────
+  function renderPipelineSections(pipelines) {
+    const container = document.getElementById('pipelineSections');
 
-    if (!pipelines.length) {
-      grid.innerHTML = '<div class="empty">No pipelines registered</div>';
-      return;
+    // Group by category
+    const byCategory = {};
+    for (const cat of CATEGORIES) byCategory[cat.key] = [];
+    for (const p of pipelines) {
+      if (byCategory[p.category]) byCategory[p.category].push(p);
+      else byCategory[p.category] = [p]; // unknown category fallback
     }
 
-    grid.innerHTML = pipelines.map(p => {
-      const isRunning     = p.is_running;
-      const status        = isRunning ? 'running' : (p.last_status || 'never');
-      const statusLabel   = isRunning ? 'running' : (p.last_status || 'never run');
-      const cardCls       = isRunning ? 's-running' : (p.last_status === 'failed' ? 's-failed' : '');
+    container.innerHTML = CATEGORIES.map(cat => {
+      const catPipelines = byCategory[cat.key] || [];
+      if (!catPipelines.length) return '';
 
-      const lastRun   = p.last_run_at      ? relTime(p.last_run_at)      : '—';
-      const lastOk    = p.last_success_at  ? relTime(p.last_success_at)  : 'never';
-      const duration  = p.last_duration_seconds != null
-                          ? `${p.last_duration_seconds.toFixed(1)}s`
-                          : '—';
-      const records   = p.last_records_processed != null
-                          ? p.last_records_processed.toLocaleString()
-                          : '—';
-
-      const isTrig    = triggering.has(p.name);
-      const btnLabel  = isTrig ? 'triggering…' : 'run now';
-      const btnCls    = isTrig ? ' triggering' : '';
-      const btnDis    = isTrig || isRunning ? ' disabled' : '';
+      const cards = catPipelines.map(p => renderCard(p, cat.key)).join('');
 
       return `
-        <div class="pipeline-card ${cardCls}">
-          <div class="card-top">
-            <div>
-              <div class="p-name">${esc(p.display_name)}</div>
-              <div class="p-key">${esc(p.name)}</div>
-            </div>
-            <span class="status-badge ${status}">${statusLabel}</span>
+        <div class="category-section">
+          <div class="section-header">
+            <span class="cat-dot ${cat.key}"></span>
+            <span class="section-title ${cat.key}">${cat.label}</span>
+            <span class="badge">${catPipelines.length}</span>
+            <span class="section-desc">${cat.desc}</span>
           </div>
-          <div class="card-meta">
-            <div>
-              <div class="meta-label">Last run</div>
-              <div class="meta-value">${lastRun}</div>
-            </div>
-            <div>
-              <div class="meta-label">Duration</div>
-              <div class="meta-value">${duration}</div>
-            </div>
-            <div>
-              <div class="meta-label">Records</div>
-              <div class="meta-value">${records}</div>
-            </div>
-            <div>
-              <div class="meta-label">Last success</div>
-              <div class="meta-value">${lastOk}</div>
-            </div>
-            ${p.error_streak > 0 ? `
-            <div style="grid-column:1/-1">
-              <div class="meta-label">Error streak</div>
-              <div class="meta-value err">${p.error_streak} consecutive failure${p.error_streak > 1 ? 's' : ''}</div>
-            </div>` : ''}
-          </div>
-          <div class="card-footer">
-            <input
-              type="date"
-              class="date-input"
-              id="date-${p.name}"
-              title="Leave blank to use today's date"
-            />
-            <button
-              class="btn-run${btnCls}"
-              onclick="triggerPipeline('${esc(p.name)}', '${esc(p.trigger_endpoint)}')"
-              ${btnDis}
-            >${btnLabel}</button>
+          <div class="pipeline-grid">
+            ${cards}
           </div>
         </div>
       `;
     }).join('');
+  }
+
+  function renderCard(p, catKey) {
+    const isRunning   = p.is_running;
+    const status      = isRunning ? 'running' : (p.last_status || 'never');
+    const statusLabel = isRunning ? 'running'  : (p.last_status || 'never run');
+    const cardCls     = isRunning ? 's-running' : (p.last_status === 'failed' ? 's-failed' : '');
+
+    const lastRun  = p.last_run_at     ? relTime(p.last_run_at)     : '—';
+    const lastOk   = p.last_success_at ? relTime(p.last_success_at) : 'never';
+    const duration = p.last_duration_seconds != null
+                       ? `${p.last_duration_seconds.toFixed(1)}s`
+                       : '—';
+    const records  = p.last_records_processed != null
+                       ? p.last_records_processed.toLocaleString()
+                       : '—';
+
+    const isTrig   = triggering.has(p.name);
+    const btnLabel = isTrig ? 'triggering…' : 'run now';
+    const btnCls   = isTrig ? ' triggering' : '';
+    const btnDis   = isTrig || isRunning ? ' disabled' : '';
+
+    return `
+      <div class="pipeline-card cat-${catKey} ${cardCls}">
+        <div class="card-top">
+          <div>
+            <div class="p-name">${esc(p.display_name)}</div>
+            <div class="p-key">${esc(p.name)}</div>
+          </div>
+          <span class="status-badge ${status}">${statusLabel}</span>
+        </div>
+        <div class="card-meta">
+          <div>
+            <div class="meta-label">Last run</div>
+            <div class="meta-value">${lastRun}</div>
+          </div>
+          <div>
+            <div class="meta-label">Duration</div>
+            <div class="meta-value">${duration}</div>
+          </div>
+          <div>
+            <div class="meta-label">Records</div>
+            <div class="meta-value">${records}</div>
+          </div>
+          <div>
+            <div class="meta-label">Last success</div>
+            <div class="meta-value">${lastOk}</div>
+          </div>
+          ${p.error_streak > 0 ? `
+          <div style="grid-column:1/-1">
+            <div class="meta-label">Error streak</div>
+            <div class="meta-value err">${p.error_streak} consecutive failure${p.error_streak > 1 ? 's' : ''}</div>
+          </div>` : ''}
+        </div>
+        <div class="card-footer">
+          <input
+            type="date"
+            class="date-input"
+            id="date-${p.name}"
+            title="Leave blank to use today's date"
+          />
+          <button
+            class="btn-run${btnCls}"
+            onclick="triggerPipeline('${esc(p.name)}', '${esc(p.trigger_endpoint)}')"
+            ${btnDis}
+          >${btnLabel}</button>
+        </div>
+      </div>
+    `;
   }
 
   // ── Render jobs ───────────────────────────────────────────────────────────
@@ -639,13 +745,13 @@
     }
 
     const rows = jobs.map(j => {
-      const pct     = j.pipelines_total > 0
-                        ? Math.round((j.pipelines_completed / j.pipelines_total) * 100)
-                        : 0;
-      const bad     = j.pipelines_failed > 0;
-      const dur     = j.duration_seconds != null
-                        ? `${j.duration_seconds.toFixed(1)}s`
-                        : (j.status === 'running' ? '…' : '—');
+      const pct = j.pipelines_total > 0
+                    ? Math.round((j.pipelines_completed / j.pipelines_total) * 100)
+                    : 0;
+      const bad = j.pipelines_failed > 0;
+      const dur = j.duration_seconds != null
+                    ? `${j.duration_seconds.toFixed(1)}s`
+                    : (j.status === 'running' ? '…' : '—');
 
       const progressCell = `
         <div class="progress-wrap">
@@ -703,10 +809,10 @@
     const url = date ? `${endpoint}?date=${date}` : endpoint;
 
     triggering.add(name);
-    renderPipelines(lastPipelines);
+    renderPipelineSections(lastPipelines);
 
     // Preserve date value across re-render
-    if (date && dateInput) {
+    if (date) {
       const el = document.getElementById('date-' + name);
       if (el) el.value = date;
     }
@@ -726,7 +832,6 @@
       showToast(`Trigger failed: ${e.message}`, 'err');
     } finally {
       triggering.delete(name);
-      // Brief delay then refresh so the new run_record appears
       setTimeout(() => { fetchStatus().then(startCountdown); }, 1500);
     }
   }
@@ -735,9 +840,9 @@
   function relTime(iso) {
     if (!iso) return '—';
     const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (diff < 60)     return `${diff}s ago`;
-    if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 60)    return `${diff}s ago`;
+    if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
     return `${Math.floor(diff / 86400)}d ago`;
   }
 
