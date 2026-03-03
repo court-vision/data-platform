@@ -8,7 +8,7 @@ separate from the finalized player_game_stats fact table.
 One row per player per game, uniquely keyed on (player_id, game_id).
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from peewee import (
@@ -185,6 +185,39 @@ class LivePlayerStats(BaseModel):
             .where(
                 (cls.game_date == game_date)
                 & (cls.game_status == 2)
+            )
+            .execute()
+        )
+
+    @classmethod
+    def finalize_stale_by_time(cls, game_date, stale_minutes: int = 30) -> int:
+        """
+        Force-finalize records still marked in-progress whose last_updated
+        timestamp is older than ``stale_minutes`` minutes ago.
+
+        This is a time-based safety net that runs on every pipeline trigger,
+        regardless of whether the scoreboard confirms all games are final.
+        It catches edge cases where a game ended but the API never reported
+        game_status=3 for that game.
+
+        Args:
+            game_date: Date to scope the cleanup
+            stale_minutes: Minutes since last update to consider stale
+
+        Returns:
+            Number of records updated
+        """
+        cutoff = datetime.utcnow() - timedelta(minutes=stale_minutes)
+        return (
+            cls.update(
+                game_status=3,
+                game_clock=None,
+                last_updated=datetime.utcnow(),
+            )
+            .where(
+                (cls.game_date == game_date)
+                & (cls.game_status == 2)
+                & (cls.last_updated < cutoff)
             )
             .execute()
         )

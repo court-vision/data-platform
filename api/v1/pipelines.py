@@ -683,7 +683,13 @@ async def trigger_live_stats(
         log.warning("live_stats_final_check_failed", error=str(e))
         all_complete = False
 
-    # Reconcile stale in-progress records before the cron-runner exits
+    # Time-based finalize: force any game_status=2 records with stale last_updated.
+    # Runs on EVERY trigger as a safety net, not gated on check_all_games_final.
+    time_finalized = LivePlayerStats.finalize_stale_by_time(game_date, stale_minutes=30)
+    if time_finalized:
+        log.info("live_stats_time_finalized", game_date=str(game_date), records=time_finalized)
+
+    # Full finalize when scoreboard confirms all games are done
     if all_complete:
         finalized = LivePlayerStats.finalize_stale_games(game_date)
         if finalized:
