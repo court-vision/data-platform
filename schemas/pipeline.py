@@ -15,6 +15,7 @@ class PipelineResult(BaseModel):
     duration_seconds: Optional[float] = None
     records_processed: Optional[int] = None
     error: Optional[str] = None
+    done: bool = True  # Loop completion signal for cron-runner loop mode
 
     class Config:
         use_enum_values = True

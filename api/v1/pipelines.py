@@ -32,6 +32,7 @@ from pipelines import (
 from pipelines.config import PipelineCategory
 from schemas.pipeline import (
     PipelineResponse,
+    PipelineResult,
     AllPipelinesResponse,
     JobCreatedResponse,
     JobStatusResponse,
@@ -103,6 +104,7 @@ async def trigger_cumulative_player_stats(
 async def trigger_daily_matchup_scores(
     _: str = Security(verify_pipeline_token),
     date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+    watch: bool = Query(False, description="Loop mode: skip pipeline until ESPN scoring period advances."),
 ) -> PipelineResponse:
     """
     Trigger the daily matchup scores pipeline.
@@ -110,13 +112,112 @@ async def trigger_daily_matchup_scores(
     Fetches current matchup scores for all saved teams and records
     daily snapshots for visualization.
     Pass ?date=YYYY-MM-DD to backfill a specific date.
+
+    Pass ?watch=true to enable flip-detection mode (for cron-runner loop job).
+    In this mode the endpoint checks whether ESPN's scoring period has advanced
+    beyond the latest stored baseline. If not yet flipped, it returns immediately
+    with done=false so the cron-runner keeps polling. When the flip is detected
+    the pipeline runs once and returns done=true, signalling the loop to exit.
     """
+    if watch and not date:
+        flipped = await asyncio.to_thread(_espn_scoring_period_advanced)
+        if not flipped:
+            log.info("espn_scoring_period_unchanged_skipping")
+            from datetime import datetime
+            now = datetime.utcnow().isoformat()
+            return PipelineResponse(
+                status=ApiStatus.OK,
+                message="espn_scoring_period_unchanged",
+                data=PipelineResult(
+                    status=ApiStatus.OK,
+                    message="espn_scoring_period_unchanged",
+                    started_at=now,
+                    completed_at=now,
+                    duration_seconds=0,
+                    records_processed=0,
+                    done=False,
+                ),
+            )
+        log.info("espn_scoring_period_advanced_running_pipeline")
+
     result = await run_pipeline("daily_matchup_scores", date_override=date)
     return PipelineResponse(
         status=result.status,
         message=result.message,
         data=result,
     )
+
+
+def _espn_scoring_period_advanced() -> bool:
+    """
+    Check whether ESPN's current scoring period has advanced beyond the latest
+    stored baseline. Called once per loop-mode poll (one ESPN API call).
+
+    Returns True if the pipeline should run (flip detected or no baseline yet).
+    Returns False if ESPN's period matches the baseline (no flip yet).
+    """
+    import json
+    import requests
+    from db.models.teams import Team
+    from db.models.stats.daily_matchup_score import DailyMatchupScore
+    from core.settings import settings
+
+    ESPN_ENDPOINT = (
+        "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{}/segments/0/leagues/{}"
+    )
+
+    # Find the first ESPN team to peek at the scoring period
+    teams = list(Team.select().limit(10))
+    espn_team = None
+    espn_league_info = None
+    for team in teams:
+        try:
+            league_info = json.loads(team.league_info)
+            if league_info.get("provider", "espn") == "espn":
+                espn_team = team
+                espn_league_info = league_info
+                break
+        except Exception:
+            continue
+
+    if not espn_team or not espn_league_info:
+        # No ESPN teams registered — always run
+        return True
+
+    # Peek at ESPN's current latestScoringPeriod
+    try:
+        year = espn_league_info.get("year", settings.espn_year)
+        league_id = espn_league_info.get("league_id")
+        espn_s2 = espn_league_info.get("espn_s2", "")
+        swid = espn_league_info.get("swid", "")
+        endpoint = ESPN_ENDPOINT.format(year, league_id)
+        resp = requests.get(
+            endpoint,
+            params={"view": "mSettings"},
+            cookies={"espn_s2": espn_s2, "SWID": swid},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        espn_period = resp.json().get("status", {}).get("latestScoringPeriod")
+    except Exception as e:
+        log.warning("espn_peek_failed_running_pipeline", error=str(e))
+        return True  # On error, run the pipeline anyway
+
+    if espn_period is None:
+        return True
+
+    # Compare to the latest baseline's scoring period for this team
+    latest = (
+        DailyMatchupScore.select()
+        .where(DailyMatchupScore.team_id == espn_team.team_id)
+        .order_by(DailyMatchupScore.date.desc())
+        .first()
+    )
+
+    if latest is None or latest.scoring_period_id is None:
+        return True  # No baseline yet — run pipeline
+
+    return espn_period != latest.scoring_period_id
 
 
 @router.post("/player-advanced-stats", response_model=PipelineResponse)
