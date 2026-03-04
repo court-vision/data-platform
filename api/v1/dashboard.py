@@ -22,8 +22,15 @@ from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
 from db.models.pipeline_run import PipelineRun
 from pipelines import PIPELINE_REGISTRY
-from schemas.dashboard import DashboardStatusData, DashboardStatusResponse, PipelineHealthEntry
+from schemas.dashboard import (
+    DashboardStatusData,
+    DashboardStatusResponse,
+    PipelineHealthEntry,
+    QualityRunEntry,
+    QualityCheckEntry,
+)
 from schemas.pipeline import PipelineJobInfo
+from services.data_quality_service import DataQualityService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 log = get_logger("dashboard_api")
@@ -77,7 +84,10 @@ async def get_dashboard_status(
 
     Also returns the last 10 background jobs from the in-memory job manager.
     """
-    pipeline_entries = await asyncio.to_thread(_build_pipeline_health)
+    pipeline_entries, quality_payload = await asyncio.gather(
+        asyncio.to_thread(_build_pipeline_health),
+        asyncio.to_thread(_build_quality_status),
+    )
 
     job_manager = get_job_manager()
     raw_jobs = await job_manager.list_jobs(limit=10)
@@ -103,6 +113,9 @@ async def get_dashboard_status(
         data=DashboardStatusData(
             pipelines=pipeline_entries,
             recent_jobs=recent_jobs,
+            quality_latest=quality_payload["quality_latest"],
+            recent_quality_runs=quality_payload["recent_quality_runs"],
+            quality_failed_checks=quality_payload["quality_failed_checks"],
         ),
     )
 
@@ -173,3 +186,49 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
         entries.append(entry)
 
     return entries
+
+
+def _build_quality_status() -> dict:
+    """
+    Build quality run summary payload for the dashboard.
+
+    Returns:
+        Dict with keys:
+            quality_latest: Optional[QualityRunEntry]
+            recent_quality_runs: list[QualityRunEntry]
+            quality_failed_checks: list[QualityCheckEntry]
+    """
+    service = DataQualityService()
+    latest: QualityRunEntry | None = None
+    failed_checks: list[QualityCheckEntry] = []
+    recent: list[QualityRunEntry] = []
+
+    try:
+        recent_runs = service.list_runs(limit=5)
+        recent = [QualityRunEntry(**r) for r in recent_runs]
+        latest = recent[0] if recent else None
+
+        if latest and latest.failed_checks > 0:
+            detail = service.get_run(latest.run_id)
+            raw_checks = detail.get("checks", []) if detail else []
+            for check in raw_checks:
+                if check.get("status") == "passed":
+                    continue
+                failed_checks.append(
+                    QualityCheckEntry(
+                        check_name=check.get("check_name", "unknown_check"),
+                        status=check.get("status", "error"),
+                        severity=check.get("severity", "critical"),
+                        failures=check.get("failures", 0),
+                        message=check.get("message"),
+                        duration_ms=check.get("duration_ms"),
+                    )
+                )
+    except Exception as exc:
+        log.warning("dashboard_quality_status_failed", error=str(exc))
+
+    return {
+        "quality_latest": latest,
+        "recent_quality_runs": recent,
+        "quality_failed_checks": failed_checks[:10],
+    }

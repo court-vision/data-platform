@@ -58,7 +58,48 @@ def test_dashboard_status_returns_expected_payload(monkeypatch) -> None:
             }
         ]
 
+    def fake_quality_status():
+        return {
+            "quality_latest": {
+                "run_id": "run-1",
+                "status": "failed",
+                "started_at": "2026-03-04T11:00:00Z",
+                "completed_at": "2026-03-04T11:00:05Z",
+                "duration_seconds": 5.0,
+                "total_checks": 4,
+                "passed_checks": 3,
+                "failed_checks": 1,
+                "triggered_by": "dashboard",
+                "error_message": None,
+            },
+            "recent_quality_runs": [
+                {
+                    "run_id": "run-1",
+                    "status": "failed",
+                    "started_at": "2026-03-04T11:00:00Z",
+                    "completed_at": "2026-03-04T11:00:05Z",
+                    "duration_seconds": 5.0,
+                    "total_checks": 4,
+                    "passed_checks": 3,
+                    "failed_checks": 1,
+                    "triggered_by": "dashboard",
+                    "error_message": None,
+                }
+            ],
+            "quality_failed_checks": [
+                {
+                    "check_name": "player_game_stats_non_negative_minutes",
+                    "status": "failed",
+                    "severity": "critical",
+                    "failures": 2,
+                    "message": "negative minutes found",
+                    "duration_ms": 18,
+                }
+            ],
+        }
+
     monkeypatch.setattr(dashboard, "_build_pipeline_health", fake_pipeline_health)
+    monkeypatch.setattr(dashboard, "_build_quality_status", fake_quality_status)
     monkeypatch.setattr(dashboard, "get_job_manager", lambda: _FakeJobManager())
 
     client = TestClient(_make_app())
@@ -76,3 +117,7 @@ def test_dashboard_status_returns_expected_payload(monkeypatch) -> None:
     assert body["data"]["pipelines"][0]["name"] == "player_game_stats"
     assert len(body["data"]["recent_jobs"]) == 1
     assert body["data"]["recent_jobs"][0]["job_id"] == "job-1"
+    assert body["data"]["quality_latest"]["run_id"] == "run-1"
+    assert len(body["data"]["recent_quality_runs"]) == 1
+    assert body["data"]["recent_quality_runs"][0]["failed_checks"] == 1
+    assert body["data"]["quality_failed_checks"][0]["check_name"] == "player_game_stats_non_negative_minutes"

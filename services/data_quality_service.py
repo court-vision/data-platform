@@ -56,6 +56,55 @@ CORE_SQL_CHECKS: tuple[SQLQualityCheck, ...] = (
         """,
         failure_message="stale running pipeline_run rows detected",
     ),
+    SQLQualityCheck(
+        name="pipeline_runs_recent_success_freshness",
+        severity="warning",
+        sql="""
+            SELECT
+              CASE
+                WHEN MAX(started_at) IS NULL THEN 1
+                WHEN MAX(started_at) < (NOW() - INTERVAL '36 hours') THEN 1
+                ELSE 0
+              END
+            FROM nba.pipeline_runs
+            WHERE status = 'success'
+        """,
+        failure_message="no successful pipeline runs in the last 36 hours",
+    ),
+    SQLQualityCheck(
+        name="player_game_stats_team_has_matching_game",
+        severity="critical",
+        sql="""
+            SELECT COUNT(*)
+            FROM nba.player_game_stats pgs
+            LEFT JOIN nba.games g
+              ON g.game_date = pgs.game_date
+             AND (g.home_team_id = pgs.team_id OR g.away_team_id = pgs.team_id)
+            WHERE g.game_id IS NULL
+        """,
+        failure_message="player_game_stats rows without matching game/team schedule entry",
+    ),
+    SQLQualityCheck(
+        name="player_season_stats_no_orphan_players",
+        severity="critical",
+        sql="""
+            SELECT COUNT(*)
+            FROM nba.player_season_stats pss
+            LEFT JOIN nba.players p ON p.id = pss.player_id
+            WHERE p.id IS NULL
+        """,
+        failure_message="player_season_stats has orphan player references",
+    ),
+    SQLQualityCheck(
+        name="player_rolling_stats_window_allowed_values",
+        severity="critical",
+        sql="""
+            SELECT COUNT(*)
+            FROM nba.player_rolling_stats
+            WHERE window_days NOT IN (7, 14, 30)
+        """,
+        failure_message="player_rolling_stats contains unsupported window_days values",
+    ),
 )
 
 
@@ -93,7 +142,7 @@ class DataQualityService:
                 try:
                     cursor = db.execute_sql(check.sql)
                     row = cursor.fetchone()
-                    failures = int(row[0] if row else 0)
+                    failures = self._coerce_failures(row[0] if row else 0)
                     if failures > 0:
                         check_status = "failed"
                         message = check.failure_message
@@ -197,3 +246,14 @@ class DataQualityService:
             "duration_ms": check.duration_ms,
         }
 
+    @staticmethod
+    def _coerce_failures(value: Any) -> int:
+        """Normalize SQL scalar output into an integer failure count."""
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            return 1 if value else 0
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 1

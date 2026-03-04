@@ -6,7 +6,7 @@ Pydantic models for quality run APIs.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from schemas.common import ApiStatus
 
@@ -35,7 +35,7 @@ class DataQualityRunInfo(BaseModel):
 
 
 class DataQualityRunDetail(DataQualityRunInfo):
-    checks: list[DataQualityCheckResult] = []
+    checks: list[DataQualityCheckResult] = Field(default_factory=list)
 
 
 class DataQualityRunResponse(BaseModel):
@@ -52,4 +52,3 @@ class DataQualityRunListResponse(BaseModel):
     data: list[DataQualityRunInfo]
 
     model_config = ConfigDict(use_enum_values=True)
-

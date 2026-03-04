@@ -167,6 +167,7 @@
     .section-title.pre_game  { color: var(--cat-pre);       }
     .section-title.post_game { color: var(--cat-post);      }
     .section-title.scheduled { color: var(--cat-scheduled); }
+    .section-title.quality   { color: var(--blue);          }
     .section-title.jobs      { color: var(--muted2);        }
 
     .section-desc {
@@ -298,6 +299,52 @@
       border-radius: 3px;
     }
     @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* ── Quality section ─────────────────────────────────────────────────── */
+    .quality-section { margin-bottom: 24px; }
+    .inline-run-btn {
+      margin-left: auto;
+      padding: 4px 10px;
+      font-size: 10px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .inline-run-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .quality-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 10px;
+    }
+    .quality-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+    .quality-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .quality-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 10px;
+    }
+    .failed-check-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .failed-check-item {
+      border: 1px solid rgba(244,63,94,0.2);
+      border-radius: 4px;
+      padding: 6px 8px;
+      background: rgba(244,63,94,0.06);
+      font-size: 10px;
+    }
 
     /* ── Jobs section ────────────────────────────────────────────────────── */
     .jobs-section { margin-bottom: 36px; }
@@ -504,6 +551,18 @@
   </div>
 
   <!-- Recent Jobs -->
+  <div class="quality-section">
+    <div class="section-header">
+      <span class="section-title quality">Data Quality</span>
+      <span class="badge" id="qualityRunCount">—</span>
+      <button class="btn-sm inline-run-btn" id="runQualityBtn" onclick="runQualityChecks()">Run Data Checks</button>
+    </div>
+    <div id="qualityWrap">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Recent Jobs -->
   <div class="jobs-section">
     <div class="section-header">
       <span class="section-title jobs">Recent Jobs</span>
@@ -546,6 +605,7 @@
   let countdownVal = REFRESH_S;
   let countdownId  = null;
   let lastPipelines = [];
+  let qualityTriggering = false;
 
   const triggering = new Set();
 
@@ -620,6 +680,7 @@
       hideErr();
       lastPipelines = payload.data.pipelines || [];
       renderPipelineSections(lastPipelines);
+      renderQuality(payload.data || {});
       renderJobs(payload.data.recent_jobs || []);
       document.getElementById('lastUpdated').textContent =
         'updated ' + new Date().toLocaleTimeString();
@@ -735,6 +796,63 @@
   }
 
   // ── Render jobs ───────────────────────────────────────────────────────────
+  function renderQuality(data) {
+    const wrap = document.getElementById('qualityWrap');
+    const latest = data.quality_latest;
+    const recent = data.recent_quality_runs || [];
+    const failedChecks = data.quality_failed_checks || [];
+    document.getElementById('qualityRunCount').textContent = recent.length;
+
+    if (!latest) {
+      wrap.innerHTML = '<div class="empty">No quality runs yet — click <code>Run Data Checks</code> to start one</div>';
+      return;
+    }
+
+    const latestStatus = latest.status || 'unknown';
+    const latestDuration = latest.duration_seconds != null
+      ? `${latest.duration_seconds.toFixed(1)}s`
+      : '—';
+    const latestCompleted = latest.completed_at ? relTime(latest.completed_at) : '—';
+    const latestStarted = latest.started_at ? relTime(latest.started_at) : '—';
+
+    const failedMarkup = failedChecks.length
+      ? `<div class="failed-check-list">
+          ${failedChecks.map(c => `
+            <div class="failed-check-item">
+              <strong>${esc(c.check_name)}</strong> · ${esc(c.status)} · failures: ${c.failures}
+              ${c.message ? `<div style="color:var(--muted2);margin-top:2px">${esc(c.message)}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>`
+      : '<div class="empty" style="padding:8px">No failing checks in latest run.</div>';
+
+    wrap.innerHTML = `
+      <div class="quality-grid">
+        <div class="quality-card">
+          <div class="quality-top">
+            <span class="meta-label">Latest Run</span>
+            <span class="status-badge ${esc(latestStatus)}">${esc(latestStatus)}</span>
+          </div>
+          <div class="quality-meta">
+            <div><div class="meta-label">Started</div><div class="meta-value">${latestStarted}</div></div>
+            <div><div class="meta-label">Completed</div><div class="meta-value">${latestCompleted}</div></div>
+            <div><div class="meta-label">Duration</div><div class="meta-value">${latestDuration}</div></div>
+            <div><div class="meta-label">Checks</div><div class="meta-value">${latest.passed_checks}/${latest.total_checks} passed</div></div>
+            <div><div class="meta-label">Failures</div><div class="meta-value ${latest.failed_checks > 0 ? 'err' : ''}">${latest.failed_checks}</div></div>
+            <div><div class="meta-label">Triggered by</div><div class="meta-value">${esc(latest.triggered_by || 'unknown')}</div></div>
+          </div>
+        </div>
+        <div class="quality-card">
+          <div class="quality-top">
+            <span class="meta-label">Failed Checks (Latest)</span>
+          </div>
+          ${failedMarkup}
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Render jobs ───────────────────────────────────────────────────────────
   function renderJobs(jobs) {
     const wrap = document.getElementById('jobsWrap');
     document.getElementById('jobCount').textContent = jobs.length;
@@ -798,6 +916,49 @@
   }
 
   // ── Trigger ───────────────────────────────────────────────────────────────
+  function setQualityButtonState() {
+    const btn = document.getElementById('runQualityBtn');
+    if (!btn) return;
+    btn.disabled = qualityTriggering;
+    btn.textContent = qualityTriggering ? 'Running Checks…' : 'Run Data Checks';
+  }
+
+  async function runQualityChecks() {
+    if (qualityTriggering) return;
+    qualityTriggering = true;
+    setQualityButtonState();
+
+    try {
+      const res = await fetch('/v1/internal/quality/run?triggered_by=dashboard', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        nukeToken();
+        document.getElementById('tokenErr').classList.add('show');
+        document.getElementById('overlay').classList.remove('hidden');
+        return;
+      }
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `HTTP ${res.status}`);
+      }
+
+      const body = await res.json().catch(() => ({}));
+      const failed = body?.data?.failed_checks ?? 0;
+      showToast(`Data checks complete (${failed} failed)`, failed > 0 ? 'err' : 'ok');
+    } catch (e) {
+      showToast(`Quality run failed: ${e.message}`, 'err');
+    } finally {
+      qualityTriggering = false;
+      setQualityButtonState();
+      await fetchStatus();
+      startCountdown();
+    }
+  }
+
   async function triggerPipeline(name, endpoint) {
     if (!endpoint) {
       showToast('No trigger endpoint configured for this pipeline', 'err');

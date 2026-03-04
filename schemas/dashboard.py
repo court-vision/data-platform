@@ -7,7 +7,7 @@ Pydantic models for the pipeline monitoring dashboard API.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from schemas.pipeline import PipelineJobInfo
 
@@ -28,11 +28,40 @@ class PipelineHealthEntry(BaseModel):
     error_streak: int = 0
 
 
+class QualityRunEntry(BaseModel):
+    """Summary of a data quality run."""
+
+    run_id: str
+    status: str
+    started_at: str
+    completed_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    total_checks: int = 0
+    passed_checks: int = 0
+    failed_checks: int = 0
+    triggered_by: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class QualityCheckEntry(BaseModel):
+    """Single failed/errored quality check entry."""
+
+    check_name: str
+    status: str
+    severity: str
+    failures: int = 0
+    message: Optional[str] = None
+    duration_ms: Optional[int] = None
+
+
 class DashboardStatusData(BaseModel):
     """Data payload for the dashboard status endpoint."""
 
     pipelines: list[PipelineHealthEntry]
     recent_jobs: list[PipelineJobInfo]
+    quality_latest: Optional[QualityRunEntry] = None
+    recent_quality_runs: list[QualityRunEntry] = Field(default_factory=list)
+    quality_failed_checks: list[QualityCheckEntry] = Field(default_factory=list)
 
 
 class DashboardStatusResponse(BaseModel):
