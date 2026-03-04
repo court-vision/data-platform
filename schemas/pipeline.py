@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from enum import Enum
 
@@ -17,8 +17,7 @@ class PipelineResult(BaseModel):
     error: Optional[str] = None
     done: bool = True  # Loop completion signal for cron-runner loop mode
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class PipelineResponse(BaseModel):
@@ -28,8 +27,7 @@ class PipelineResponse(BaseModel):
     message: str
     data: Optional[PipelineResult] = None
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class AllPipelinesResponse(BaseModel):
@@ -39,8 +37,7 @@ class AllPipelinesResponse(BaseModel):
     message: str
     data: Optional[dict[str, PipelineResult]] = None
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # ---------------------- Job-based Pipeline Responses ---------------------- #
@@ -69,8 +66,7 @@ class PipelineJobInfo(BaseModel):
     pipelines_failed: int = 0
     current_pipeline: Optional[str] = None
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class PipelineJobResult(BaseModel):
@@ -100,8 +96,7 @@ class JobCreatedResponse(BaseModel):
     message: str
     data: PipelineJobInfo
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class JobStatusResponse(BaseModel):
@@ -111,8 +106,7 @@ class JobStatusResponse(BaseModel):
     message: str
     data: PipelineJobDetail
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class JobListResponse(BaseModel):
@@ -122,8 +116,7 @@ class JobListResponse(BaseModel):
     message: str
     data: list[PipelineJobInfo]
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class LiveStatsData(BaseModel):
@@ -148,5 +141,4 @@ class LiveStatsResponse(BaseModel):
     message: str
     data: LiveStatsData
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)

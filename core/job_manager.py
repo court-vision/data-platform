@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Optional
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from core.logging import get_logger
 
@@ -55,8 +55,7 @@ class PipelineJob(BaseModel):
     results: dict[str, PipelineJobResult] = {}
     error: Optional[str] = None
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class JobManager:

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Any, Generic, TypeVar
 from enum import Enum
 
@@ -27,8 +27,7 @@ class BaseResponse(BaseModel, Generic[TypeVar('T')]):
     error_code: Optional[str] = None
     timestamp: Optional[str] = None
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 class BaseRequest(BaseModel):
     """
