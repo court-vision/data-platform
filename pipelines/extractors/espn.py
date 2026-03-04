@@ -170,6 +170,10 @@ class ESPNExtractor(BaseExtractor):
             self.log.warning("matchup_error", error=str(e), team=team_name)
             return None
 
+        # Extract ESPN's current scoring period for transition detection
+        status = data.get("status", {})
+        scoring_period_id = status.get("latestScoringPeriod")
+
         # Find our team
         teams = data.get("teams", [])
         our_team_id = None
@@ -217,6 +221,7 @@ class ESPNExtractor(BaseExtractor):
                     "current_score": our_score,
                     "opponent_team_name": opponent_name,
                     "opponent_current_score": opponent_score,
+                    "scoring_period_id": scoring_period_id,
                 }
 
         return None

@@ -27,6 +27,9 @@ class DailyMatchupScore(BaseModel):
     current_score = DecimalField(max_digits=8, decimal_places=2)
     opponent_current_score = DecimalField(max_digits=8, decimal_places=2)
 
+    # ESPN scoring period this snapshot was captured under.
+    scoring_period_id = SmallIntegerField(null=True)
+
     class Meta:
         schema = "stats_s2"
         table_name = "daily_matchup_scores"

@@ -98,6 +98,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
                         "day_of_matchup": matchup_info["day_index"],
                         "current_score": matchup_data["current_score"],
                         "opponent_current_score": matchup_data["opponent_current_score"],
+                        "scoring_period_id": matchup_data.get("scoring_period_id"),
                         "pipeline_run_id": ctx.run_id,
                     }
 
@@ -112,6 +113,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
                             "opponent_current_score": record["opponent_current_score"],
                             "team_name": record["team_name"],
                             "opponent_team_name": record["opponent_team_name"],
+                            "scoring_period_id": record["scoring_period_id"],
                             "pipeline_run_id": record["pipeline_run_id"],
                         },
                     ).execute()
