@@ -23,7 +23,7 @@ from core.logging import setup_logging, get_logger
 from core.middleware import setup_middleware
 from core.settings import settings
 from db.base import close_db, init_db
-from api.v1 import dashboard, pipelines
+from api.v1 import dashboard, pipelines, quality
 
 
 @asynccontextmanager
@@ -67,6 +67,7 @@ dashboard.set_templates(_templates)
 # Dashboard + pipeline triggers (triggers are token-authed via verify_pipeline_token)
 app.include_router(dashboard.router, prefix="/v1")
 app.include_router(pipelines.router, prefix="/v1/internal")
+app.include_router(quality.router, prefix="/v1/internal")
 
 
 @app.get("/")

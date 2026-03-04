@@ -26,6 +26,8 @@ def init_db():
 
     # Import models the data platform writes to or reads from
     from .models.pipeline_run import PipelineRun
+    from .models.data_quality_run import DataQualityRun
+    from .models.data_quality_check import DataQualityCheck
 
     # Legacy stats model (written by DailyMatchupScoresPipeline)
     from .models.stats.daily_matchup_score import DailyMatchupScore
@@ -59,6 +61,8 @@ def init_db():
     db.create_tables([
         # NBA schema - audit
         PipelineRun,
+        DataQualityRun,
+        DataQualityCheck,
         # Legacy stats_s2 (DailyMatchupScoresPipeline still writes here)
         DailyMatchupScore,
         # NBA schema - dimension tables

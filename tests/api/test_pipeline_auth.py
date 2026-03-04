@@ -5,6 +5,14 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
 
+@pytest.fixture(autouse=True)
+def _reset_pipeline_auth_module():
+    """Prevent module-level token state from leaking across tests."""
+    yield
+    pipeline_auth = importlib.import_module("core.pipeline_auth")
+    importlib.reload(pipeline_auth)
+
+
 @pytest.mark.api
 def test_verify_pipeline_token_accepts_valid_bearer(monkeypatch) -> None:
     monkeypatch.setenv("PIPELINE_API_TOKEN", "token-123")
@@ -41,4 +49,3 @@ def test_verify_pipeline_token_requires_server_configuration(monkeypatch) -> Non
 
     assert exc.value.status_code == 500
     assert "PIPELINE_API_TOKEN not set" in exc.value.detail
-
