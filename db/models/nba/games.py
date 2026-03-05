@@ -4,7 +4,7 @@ Games Table
 NBA game schedule and results.
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, UTC
 
 from peewee import (
     CharField,
@@ -62,7 +62,7 @@ class Game(BaseModel):
     start_time_et = TimeField(null=True)  # e.g., 19:30 for 7:30 PM ET
     arena = CharField(max_length=100, null=True)
     attendance = IntegerField(null=True)
-    updated_at = DateTimeField(default=datetime.utcnow)
+    updated_at = DateTimeField(default=lambda: datetime.now(UTC).replace(tzinfo=None))
 
     class Meta:
         table_name = "games"
@@ -83,7 +83,7 @@ class Game(BaseModel):
 
     def save(self, *args, **kwargs):
         """Override save to auto-update updated_at timestamp."""
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC).replace(tzinfo=None)
         return super().save(*args, **kwargs)
 
     @property

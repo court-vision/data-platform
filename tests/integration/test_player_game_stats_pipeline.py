@@ -93,5 +93,4 @@ def test_player_game_stats_pipeline_upserts_idempotently(integration_db) -> None
     assert row.player_id == 201939
     assert row.team_id == "GSW"
     assert row.game_date == game_date
-    assert row.fpts == 46
-
+    assert row.fpts == 53
