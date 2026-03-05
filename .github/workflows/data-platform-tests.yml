@@ -37,6 +37,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://cv:cv@127.0.0.1:5432/cv_test
       PIPELINE_API_TOKEN: ci-test-token
+      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       - name: Checkout
@@ -54,13 +55,13 @@ jobs:
 
       - name: Run unit and API tests
         run: |
-          pytest -m "unit or api" --cov=. --cov-report=term-missing --cov-report=xml
+          python -m pytest -m "unit or api" --cov=. --cov-report=term-missing --cov-report=xml
 
       - name: Run integration tests (main/nightly/manual)
         if: github.event_name != 'pull_request'
         run: |
           set +e
-          pytest -m "integration"
+          python -m pytest -m "integration"
           status=$?
           if [ $status -eq 5 ]; then
             echo "No integration tests collected yet."
@@ -72,7 +73,7 @@ jobs:
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
           set +e
-          pytest -m "quality"
+          python -m pytest -m "quality"
           status=$?
           if [ $status -eq 5 ]; then
             echo "No quality tests collected yet."
