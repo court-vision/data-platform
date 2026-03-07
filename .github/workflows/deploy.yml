@@ -1,37 +1,40 @@
 name: Deploy Data Platform
 
-# Runs after tests pass on main. Deploys to staging first, runs smoke tests,
-# then waits for manual approval before deploying to production.
+# Release train model:
+#   - Every push to main (after tests pass): deploy to staging + smoke test
+#   - Nightly at 2 AM ET (7 AM UTC): smoke test staging, then deploy to production
+#   - workflow_dispatch: same as nightly (on-demand production deploy for hotfixes)
 #
 # Required GitHub secrets (scoped to each environment):
-#   staging:    RAILWAY_TOKEN          (Railway project token scoped to staging env)
-#               STAGING_PIPELINE_TOKEN (value of PIPELINE_API_TOKEN on staging service)
-#   production: RAILWAY_TOKEN          (Railway project token scoped to production env)
-#               PRODUCTION_PIPELINE_TOKEN (value of PIPELINE_API_TOKEN on production service)
+#   court-vision / staging:    RAILWAY_TOKEN          (Railway env-scoped token)
+#                              STAGING_PIPELINE_TOKEN (value of PIPELINE_API_TOKEN)
+#   court-vision / production: RAILWAY_TOKEN          (Railway env-scoped token)
+#                              PRODUCTION_PIPELINE_TOKEN (value of PIPELINE_API_TOKEN)
 #
 # Required GitHub variables (scoped to each environment):
-#   staging:    STAGING_URL   (public Railway URL for staging data-platform)
-#   production: PRODUCTION_URL (public Railway URL for production data-platform)
-#
-# Railway tokens are environment-scoped — create one token per environment in
-# Railway → Project Settings → Tokens. Each token can only deploy to its own environment.
+#   court-vision / staging:    STAGING_URL   (public Railway URL for staging service)
+#   court-vision / production: PRODUCTION_URL (public Railway URL for production service)
 
 on:
   workflow_run:
     workflows: ["Data Platform Tests"]
     types: [completed]
     branches: [main]
+  schedule:
+    - cron: '0 7 * * *'  # 2 AM ET daily — deploy previous day's changes to production
   workflow_dispatch:
 
 jobs:
   # ------------------------------------------------------------------
   # Stage 1: Deploy to staging
+  # Runs only on CI push (workflow_run). Skipped on schedule/dispatch
+  # since staging already has the latest code from continuous deploys.
   # ------------------------------------------------------------------
   deploy-staging:
     runs-on: ubuntu-latest
     if: >
-      (github.event_name == 'workflow_dispatch') ||
-      (github.event.workflow_run.conclusion == 'success')
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
     environment: court-vision / staging
 
     steps:
@@ -70,10 +73,15 @@ jobs:
 
   # ------------------------------------------------------------------
   # Stage 2: Smoke tests against staging
+  # Runs after every staging deploy AND before every production deploy.
+  # On schedule/dispatch, deploy-staging is skipped so this runs first.
   # ------------------------------------------------------------------
   smoke-test-staging:
     runs-on: ubuntu-latest
     needs: deploy-staging
+    if: >
+      always() &&
+      (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
     environment: court-vision / staging
 
     steps:
@@ -120,27 +128,21 @@ jobs:
           " 2>/dev/null || echo "0")
 
           if [ "$failed" != "0" ]; then
-            echo "WARNING: $failed quality check(s) failed on staging — investigate before production deploy"
+            echo "WARNING: $failed quality check(s) failed on staging"
           fi
 
   # ------------------------------------------------------------------
-  # Stage 3: Manual approval gate (requires reviewer in GitHub environment)
-  # ------------------------------------------------------------------
-  approve-production:
-    runs-on: ubuntu-latest
-    needs: smoke-test-staging
-    environment: court-vision / production
-
-    steps:
-      - name: Production deployment approved
-        run: echo "Proceeding with production deploy"
-
-  # ------------------------------------------------------------------
-  # Stage 4: Deploy to production
+  # Stage 3: Deploy to production
+  # Runs only on schedule (nightly) or workflow_dispatch (hotfix).
+  # Requires staging smoke tests to have passed.
   # ------------------------------------------------------------------
   deploy-production:
     runs-on: ubuntu-latest
-    needs: approve-production
+    needs: smoke-test-staging
+    if: >
+      always() &&
+      needs.smoke-test-staging.result == 'success' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     environment: court-vision / production
 
     steps:
