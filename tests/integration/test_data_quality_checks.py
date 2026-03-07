@@ -285,23 +285,37 @@ class TestTeamGameMatchCheck:
 
 @pytest.mark.integration
 class TestOrphanPlayersCheck:
-    """player_season_stats_no_orphan_players"""
+    """player_season_stats_no_orphan_players
+
+    The FK constraint (player_season_stats_player_id_fkey) normally prevents
+    orphan rows from being inserted. This quality check is defense-in-depth for
+    cases where orphans can be introduced outside the ORM: pg_restore, bulk COPY
+    loads, or migration scripts that temporarily disable triggers.
+
+    To test it we bypass FK enforcement with session_replication_role=replica,
+    which is the same mechanism pg_restore uses.
+    """
 
     def test_detects_orphan_season_stats(self, integration_db, quality_tables):
         """Season stats referencing a player_id not in the players table."""
-        db.execute_sql(
-            """
-            INSERT INTO nba.player_season_stats
-              (player_id, team_id, as_of_date, season, gp, fpts,
-               pts, reb, ast, stl, blk, tov, min,
-               fgm, fga, fg3m, fg3a, ftm, fta, rank,
-               created_at, updated_at)
-            VALUES (999999, 'GSW', '2026-02-14', '2025-26', 10, 500,
-                    200, 50, 60, 20, 5, 30, 340,
-                    80, 160, 30, 80, 40, 50, 99,
-                    NOW(), NOW())
-            """
-        )
+        # Bypass FK enforcement for this insert — simulates a bulk load or restore
+        db.execute_sql("SET session_replication_role = replica")
+        try:
+            db.execute_sql(
+                """
+                INSERT INTO nba.player_season_stats
+                  (player_id, team_id, as_of_date, season, gp, fpts,
+                   pts, reb, ast, stl, blk, tov, min,
+                   fgm, fga, fg3m, fg3a, ftm, fta, rank,
+                   created_at, updated_at)
+                VALUES (999999, 'GSW', '2026-02-14', '2025-26', 10, 500,
+                        200, 50, 60, 20, 5, 30, 340,
+                        80, 160, 30, 80, 40, 50, 99,
+                        NOW(), NOW())
+                """
+            )
+        finally:
+            db.execute_sql("SET session_replication_role = DEFAULT")
 
         service = DataQualityService()
         check = _run_single_check(service, "player_season_stats_no_orphan_players")
