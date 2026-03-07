@@ -3,3 +3,4 @@
 .venv
 secrets.env
 data_platform.egg-info
+.github/workflows/quality-check.yml

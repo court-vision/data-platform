@@ -2,6 +2,10 @@
 Data Quality Service
 
 Runs SQL-based data quality checks and stores run/check history.
+
+Check groups:
+  STRUCTURAL_CHECKS  — schema integrity, referential consistency, field validity
+  TIMING_CHECKS      — per-pipeline execution recency (generated from registry)
 """
 
 from __future__ import annotations
@@ -24,7 +28,11 @@ class SQLQualityCheck:
     failure_message: str
 
 
-CORE_SQL_CHECKS: tuple[SQLQualityCheck, ...] = (
+# ---------------------------------------------------------------------------
+# Structural checks — schema integrity, referential consistency, field validity
+# ---------------------------------------------------------------------------
+
+STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_game_stats_required_fields_not_null",
         severity="critical",
@@ -105,7 +113,102 @@ CORE_SQL_CHECKS: tuple[SQLQualityCheck, ...] = (
         """,
         failure_message="player_rolling_stats contains unsupported window_days values",
     ),
+    # Business correctness — stat values within realistic bounds
+    SQLQualityCheck(
+        name="player_game_stats_stat_ranges_valid",
+        severity="critical",
+        sql="""
+            SELECT COUNT(*)
+            FROM nba.player_game_stats
+            WHERE pts < 0 OR reb < 0 OR ast < 0
+               OR stl < 0 OR blk < 0 OR tov < 0
+               OR fgm > fga OR fg3m > fg3a OR ftm > fta
+               OR min > 60
+        """,
+        failure_message="player_game_stats contains out-of-range values (negative stats, made > attempted, or minutes > 60)",
+    ),
+    # Business correctness — season totals should roughly match summed game log.
+    # Tolerance of 50 pts handles mid-season corrections and data source lag.
+    # Only applied to players with 5+ games to filter sparse/mid-season records.
+    SQLQualityCheck(
+        name="player_season_stats_totals_match_game_log",
+        severity="warning",
+        sql="""
+            SELECT COUNT(*) FROM (
+                SELECT
+                    pss.player_id,
+                    pss.pts          AS season_pts,
+                    SUM(pgs.pts)     AS game_log_pts
+                FROM nba.player_season_stats pss
+                JOIN nba.player_game_stats pgs
+                  ON pgs.player_id = pss.player_id
+                GROUP BY pss.player_id, pss.pts, pss.gp
+                HAVING pss.gp >= 5
+                   AND ABS(pss.pts - SUM(pgs.pts)) > 50
+            ) mismatches
+        """,
+        failure_message="player_season_stats totals deviate >50 pts from summed game log for players with 5+ games",
+    ),
 )
+
+
+# ---------------------------------------------------------------------------
+# Timing checks — per-pipeline execution recency
+# Generated from the pipeline registry so they stay in sync automatically.
+#
+# Pipelines excluded from timing checks:
+#   player_profiles   — manual ad-hoc via dashboard
+#   game_start_times  — manual ad-hoc via dashboard
+#
+# All other pipelines are expected to have run within 24 hours.
+# WARNING severity — timing checks will fire on off-days (no games) which is
+# expected behaviour, not a data error. Investigate in context of game schedule.
+# ---------------------------------------------------------------------------
+
+_MANUAL_PIPELINES: frozenset[str] = frozenset({"player_profiles", "game_start_times"})
+
+
+def _build_timing_checks() -> tuple[SQLQualityCheck, ...]:
+    """Generate one timing check per pipeline, excluding manual ad-hoc ones."""
+    # Import here to avoid circular imports at module load time.
+    from pipelines import PIPELINE_REGISTRY
+
+    checks = []
+    for name, cls in PIPELINE_REGISTRY.items():
+        if name in _MANUAL_PIPELINES:
+            continue
+
+        display_name = cls.config.display_name
+        category = cls.config.category.value
+
+        checks.append(SQLQualityCheck(
+            name=f"{name}_ran_within_24h",
+            severity="warning",
+            sql=f"""
+                SELECT CASE
+                    WHEN EXISTS (
+                        SELECT 1 FROM nba.pipeline_runs
+                        WHERE pipeline_name = '{name}'
+                          AND status = 'success'
+                          AND started_at >= NOW() - INTERVAL '24 hours'
+                    ) THEN 0 ELSE 1 END
+            """,
+            failure_message=(
+                f"{display_name} ({category}) has not run successfully in the last 24 hours"
+                " — expected on off-days or when no games were scheduled"
+            ),
+        ))
+
+    return tuple(checks)
+
+
+TIMING_CHECKS: tuple[SQLQualityCheck, ...] = _build_timing_checks()
+
+# ---------------------------------------------------------------------------
+# Combined check set — used by default when no check_names filter is applied
+# ---------------------------------------------------------------------------
+
+CORE_SQL_CHECKS: tuple[SQLQualityCheck, ...] = STRUCTURAL_CHECKS + TIMING_CHECKS
 
 
 class DataQualityService:
