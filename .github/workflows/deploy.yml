@@ -46,7 +46,7 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           railway up \
-            --service data-platform \
+            --service data-platform-staging \
             --ci \
             -m "Deploy from ${{ github.sha }}"
 
