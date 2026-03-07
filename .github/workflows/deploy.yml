@@ -47,7 +47,7 @@ jobs:
         run: |
           railway up \
             --service data-platform \
-            --detach \
+            --ci \
             -m "Deploy from ${{ github.sha }}"
 
       - name: Wait for staging to become healthy
@@ -97,7 +97,7 @@ jobs:
           response=$(curl -s -w "\n%{http_code}" \
             -X POST \
             -H "Authorization: Bearer $STAGING_TOKEN" \
-            "$STAGING_URL/v1/internal/quality/run")
+            "$STAGING_URL/v1/internal/quality/run?triggered_by=ci")
           body=$(echo "$response" | head -n -1)
           http_status=$(echo "$response" | tail -n 1)
 
@@ -153,7 +153,7 @@ jobs:
         run: |
           railway up \
             --service data-platform \
-            --detach \
+            --ci \
             -m "Deploy from ${{ github.sha }}"
 
       - name: Wait for production to become healthy
