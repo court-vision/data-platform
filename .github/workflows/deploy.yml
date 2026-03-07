@@ -84,7 +84,7 @@ jobs:
         run: |
           status=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $STAGING_TOKEN" \
-            "$STAGING_URL/v1/pipelines/")
+            "$STAGING_URL/v1/internal/pipelines/")
           if [ "$status" != "200" ]; then
             echo "Pipeline listing failed: HTTP $status"
             exit 1
@@ -183,7 +183,7 @@ jobs:
         run: |
           status=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $PRODUCTION_TOKEN" \
-            "$PRODUCTION_URL/v1/pipelines/")
+            "$PRODUCTION_URL/v1/internal/pipelines/")
           if [ "$status" != "200" ]; then
             echo "Post-deploy verification failed: HTTP $status"
             echo "Roll back via Railway dashboard → Deployments → previous deployment → Redeploy"
