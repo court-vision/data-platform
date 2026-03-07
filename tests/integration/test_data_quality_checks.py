@@ -1,0 +1,402 @@
+"""
+Data Quality Check Integration Tests
+
+Exercises the 7 SQL-based quality checks from DataQualityService against
+controlled data states in the CI Postgres container. Verifies that each
+check correctly detects violations and passes on clean data.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+
+import pytest
+
+from db.base import db
+from db.models.data_quality_check import DataQualityCheck
+from db.models.data_quality_run import DataQualityRun
+from db.models.nba.games import Game
+from db.models.nba.player_game_stats import PlayerGameStats
+from db.models.nba.player_rolling_stats import PlayerRollingStats
+from db.models.nba.player_season_stats import PlayerSeasonStats
+from db.models.nba.players import Player
+from db.models.pipeline_run import PipelineRun
+from services.data_quality_service import DataQualityService
+
+
+# ---------------------------------------------------------------------------
+# Additional models for quality check tables
+# ---------------------------------------------------------------------------
+
+QUALITY_MODELS = [DataQualityRun, DataQualityCheck]
+
+
+@pytest.fixture(scope="session")
+def quality_tables(integration_db):
+    """Ensure data quality tables exist alongside integration tables."""
+    db.create_tables(QUALITY_MODELS, safe=True)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def clean_quality_tables(quality_tables):
+    """Clean quality run/check tables between tests."""
+    DataQualityCheck.delete().execute()
+    DataQualityRun.delete().execute()
+    yield
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
+    """Seed a minimal valid dataset that passes all quality checks."""
+    # Game
+    Game.create(
+        game_id="0022500001",
+        game_date=game_date,
+        season="2025-26",
+        home_team_id="GSW",
+        away_team_id="LAL",
+        status="final",
+        home_score=120,
+        away_score=115,
+    )
+    # Player
+    Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
+    # Player game stats (valid: non-null core fields, non-negative minutes, matching game)
+    PlayerGameStats.create(
+        player_id=201939,
+        team_id="GSW",
+        game_date=game_date,
+        fpts=53,
+        pts=30, reb=5, ast=6, stl=2, blk=0, tov=3,
+        min=34,
+        fgm=10, fga=20, fg3m=5, fg3a=12, ftm=5, fta=6,
+    )
+    # Player season stats (valid: player exists in players table)
+    PlayerSeasonStats.create(
+        player_id=201939,
+        team_id="GSW",
+        as_of_date=game_date,
+        season="2025-26",
+        gp=50,
+        fpts=2500,
+        pts=1200, reb=250, ast=300, stl=80, blk=30, tov=150,
+        min=1700,
+        fgm=500, fga=1000, fg3m=150, fg3a=400, ftm=200, fta=220,
+        rank=5,
+    )
+    # Player rolling stats (valid: window_days in {7, 14, 30})
+    PlayerRollingStats.create(
+        player_id=201939,
+        team_id="GSW",
+        as_of_date=game_date,
+        window_days=7,
+        gp=3,
+        fpts=45.0,
+        pts=25.0, reb=5.0, ast=6.0, stl=2.0, blk=0.5, tov=2.5,
+        min=34,
+        fgm=10.0, fga=20.0, fg3m=4.0, fg3a=10.0, ftm=4.0, fta=5.0,
+    )
+    # Successful pipeline run (for freshness/stale checks)
+    PipelineRun.create(
+        pipeline_name="player_game_stats",
+        started_at=datetime.utcnow(),
+        completed_at=datetime.utcnow(),
+        status="success",
+        records_processed=1,
+    )
+
+
+def _run_single_check(service: DataQualityService, check_name: str) -> dict:
+    """Run a single quality check and return its result dict."""
+    run = service.run_checks(check_names=[check_name], triggered_by="test")
+    detail = service.get_run(str(run.id))
+    assert detail is not None
+    assert len(detail["checks"]) == 1
+    return detail["checks"][0]
+
+
+# ---------------------------------------------------------------------------
+# Happy path: all checks pass on clean data
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestQualityChecksHappyPath:
+    """All 7 checks pass when data is valid."""
+
+    def test_all_checks_pass_on_clean_data(self, integration_db, quality_tables):
+        _seed_clean_data()
+        service = DataQualityService()
+        run = service.run_checks(triggered_by="test")
+
+        assert run.status == "success"
+        assert run.failed_checks == 0
+        assert run.passed_checks == run.total_checks
+
+
+# ---------------------------------------------------------------------------
+# Individual check failure detection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestNullCoreFieldsCheck:
+    """player_game_stats_required_fields_not_null"""
+
+    def test_detects_null_player_id(self, integration_db, quality_tables):
+        """Inserting a row with NULL player_id should trigger failure."""
+        Game.create(
+            game_id="0022500099",
+            game_date=date(2026, 2, 14),
+            season="2025-26",
+            home_team_id="GSW",
+            away_team_id="LAL",
+            status="final",
+        )
+        # Insert raw SQL to bypass ORM FK constraint
+        db.execute_sql(
+            """
+            INSERT INTO nba.player_game_stats
+              (player_id, team_id, game_date, fpts, pts, reb, ast, stl, blk, tov, min,
+               fgm, fga, fg3m, fg3a, ftm, fta)
+            VALUES (NULL, 'GSW', '2026-02-14', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            """
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "player_game_stats_required_fields_not_null")
+        assert check["status"] == "failed"
+        assert check["failures"] >= 1
+
+
+@pytest.mark.integration
+class TestNonNegativeMinutesCheck:
+    """player_game_stats_non_negative_minutes"""
+
+    def test_detects_negative_minutes(self, integration_db, quality_tables):
+        Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
+        # Insert with negative minutes via raw SQL
+        db.execute_sql(
+            """
+            INSERT INTO nba.player_game_stats
+              (player_id, team_id, game_date, fpts, pts, reb, ast, stl, blk, tov, min,
+               fgm, fga, fg3m, fg3a, ftm, fta)
+            VALUES (201939, 'GSW', '2026-02-14', 10, 10, 5, 3, 1, 0, 2, -5, 4, 10, 2, 5, 2, 3)
+            """
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "player_game_stats_non_negative_minutes")
+        assert check["status"] == "failed"
+        assert check["failures"] >= 1
+
+
+@pytest.mark.integration
+class TestStalePipelineRunsCheck:
+    """pipeline_runs_no_stale_running"""
+
+    def test_detects_stale_running_pipeline(self, integration_db, quality_tables):
+        """A pipeline stuck in 'running' for >6 hours should be flagged."""
+        PipelineRun.create(
+            pipeline_name="test_stale",
+            started_at=datetime.utcnow() - timedelta(hours=7),
+            status="running",
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "pipeline_runs_no_stale_running")
+        assert check["status"] == "failed"
+        assert check["failures"] >= 1
+
+    def test_recent_running_is_not_stale(self, integration_db, quality_tables):
+        """A pipeline running for <6 hours should not be flagged."""
+        PipelineRun.create(
+            pipeline_name="test_recent",
+            started_at=datetime.utcnow() - timedelta(hours=1),
+            status="running",
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "pipeline_runs_no_stale_running")
+        assert check["status"] == "passed"
+
+
+@pytest.mark.integration
+class TestFreshnessCheck:
+    """pipeline_runs_recent_success_freshness"""
+
+    def test_detects_no_recent_success(self, integration_db, quality_tables):
+        """No successful run in 36 hours should trigger failure."""
+        PipelineRun.create(
+            pipeline_name="old_run",
+            started_at=datetime.utcnow() - timedelta(hours=48),
+            completed_at=datetime.utcnow() - timedelta(hours=48),
+            status="success",
+            records_processed=10,
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "pipeline_runs_recent_success_freshness")
+        assert check["status"] == "failed"
+
+    def test_recent_success_passes(self, integration_db, quality_tables):
+        """A successful run within 36 hours should pass."""
+        PipelineRun.create(
+            pipeline_name="recent_run",
+            started_at=datetime.utcnow() - timedelta(hours=1),
+            completed_at=datetime.utcnow(),
+            status="success",
+            records_processed=10,
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "pipeline_runs_recent_success_freshness")
+        assert check["status"] == "passed"
+
+
+@pytest.mark.integration
+class TestTeamGameMatchCheck:
+    """player_game_stats_team_has_matching_game"""
+
+    def test_detects_orphan_game_stats(self, integration_db, quality_tables):
+        """Game stats for a team/date with no matching game record."""
+        Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
+        # Game stats on a date with no game record
+        PlayerGameStats.create(
+            player_id=201939,
+            team_id="GSW",
+            game_date=date(2026, 3, 1),  # No game seeded for this date
+            fpts=30,
+            pts=20, reb=5, ast=5, stl=1, blk=0, tov=2,
+            min=30,
+            fgm=8, fga=16, fg3m=3, fg3a=8, ftm=3, fta=4,
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "player_game_stats_team_has_matching_game")
+        assert check["status"] == "failed"
+        assert check["failures"] >= 1
+
+
+@pytest.mark.integration
+class TestOrphanPlayersCheck:
+    """player_season_stats_no_orphan_players"""
+
+    def test_detects_orphan_season_stats(self, integration_db, quality_tables):
+        """Season stats referencing a player not in the players table."""
+        # Insert season stats with raw SQL to bypass FK constraint
+        db.execute_sql(
+            """
+            INSERT INTO nba.player_season_stats
+              (player_id, team_id, as_of_date, season, gp, fpts,
+               pts, reb, ast, stl, blk, tov, min,
+               fgm, fga, fg3m, fg3a, ftm, fta, rank)
+            VALUES (999999, 'GSW', '2026-02-14', '2025-26', 10, 500,
+                    200, 50, 60, 20, 5, 30, 340,
+                    80, 160, 30, 80, 40, 50, 99)
+            """
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "player_season_stats_no_orphan_players")
+        assert check["status"] == "failed"
+        assert check["failures"] >= 1
+
+
+@pytest.mark.integration
+class TestRollingStatsWindowCheck:
+    """player_rolling_stats_window_allowed_values"""
+
+    def test_detects_invalid_window_days(self, integration_db, quality_tables):
+        """window_days=99 should be flagged as invalid."""
+        Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
+        # Insert with invalid window via raw SQL
+        db.execute_sql(
+            """
+            INSERT INTO nba.player_rolling_stats
+              (player_id, team_id, as_of_date, window_days, gp, fpts,
+               pts, reb, ast, stl, blk, tov, min,
+               fgm, fga, fg3m, fg3a, ftm, fta)
+            VALUES (201939, 'GSW', '2026-02-14', 99, 3, 45.0,
+                    25.0, 5.0, 6.0, 2.0, 0.5, 2.5, 34,
+                    10.0, 20.0, 4.0, 10.0, 4.0, 5.0)
+            """
+        )
+
+        service = DataQualityService()
+        check = _run_single_check(service, "player_rolling_stats_window_allowed_values")
+        assert check["status"] == "failed"
+        assert check["failures"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Service-level tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestDataQualityServiceIntegration:
+    """Test the DataQualityService orchestration."""
+
+    def test_run_stores_results_in_db(self, integration_db, quality_tables):
+        """Running checks creates DataQualityRun and DataQualityCheck records."""
+        _seed_clean_data()
+        service = DataQualityService()
+        run = service.run_checks(triggered_by="test")
+
+        # Verify run record
+        assert DataQualityRun.select().count() == 1
+        stored_run = DataQualityRun.select().first()
+        assert str(stored_run.id) == str(run.id)
+        assert stored_run.triggered_by == "test"
+
+        # Verify check records
+        checks = list(DataQualityCheck.select().where(DataQualityCheck.run_id == run.id))
+        assert len(checks) == 7  # All 7 core checks
+
+    def test_selective_check_execution(self, integration_db, quality_tables):
+        """Running a subset of checks only executes those checks."""
+        _seed_clean_data()
+        service = DataQualityService()
+        run = service.run_checks(
+            check_names=["player_game_stats_non_negative_minutes"],
+            triggered_by="test",
+        )
+
+        checks = list(DataQualityCheck.select().where(DataQualityCheck.run_id == run.id))
+        assert len(checks) == 1
+        assert checks[0].check_name == "player_game_stats_non_negative_minutes"
+
+    def test_list_runs_returns_history(self, integration_db, quality_tables):
+        """list_runs() returns past run summaries."""
+        _seed_clean_data()
+        service = DataQualityService()
+        service.run_checks(triggered_by="test-1")
+        service.run_checks(triggered_by="test-2")
+
+        runs = service.list_runs(limit=10)
+        assert len(runs) == 2
+        # Most recent first
+        assert runs[0]["triggered_by"] == "test-2"
+        assert runs[1]["triggered_by"] == "test-1"
+
+    def test_get_run_returns_checks(self, integration_db, quality_tables):
+        """get_run() includes per-check details."""
+        _seed_clean_data()
+        service = DataQualityService()
+        run = service.run_checks(triggered_by="test")
+
+        detail = service.get_run(str(run.id))
+        assert detail is not None
+        assert "checks" in detail
+        assert len(detail["checks"]) == 7
+        # Each check has expected fields
+        for check in detail["checks"]:
+            assert "check_name" in check
+            assert "status" in check
+            assert "severity" in check

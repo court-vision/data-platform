@@ -8,6 +8,7 @@ class ApiStatus(str, Enum):
     """Standard API response statuses"""
     SUCCESS = "success"
     ERROR = "error"
+    SKIPPED = "skipped"
     VALIDATION_ERROR = "validation_error"
     AUTHENTICATION_ERROR = "authentication_error"
     AUTHORIZATION_ERROR = "authorization_error"

@@ -981,6 +981,50 @@ async def get_job_status(
     )
 
 
+def _check_unmet_dependencies(
+    pipeline_cls,
+    succeeded_in_batch: set[str],
+    date_override: Optional[date] = None,
+) -> list[str]:
+    """
+    Check if a pipeline's depends_on requirements are met.
+
+    A dependency is met if it either succeeded earlier in this batch OR has a
+    successful PipelineRun for today's NBA date.
+
+    Returns:
+        List of unmet dependency names (empty if all met).
+    """
+    deps = pipeline_cls.config.depends_on
+    if not deps:
+        return []
+
+    from db.models.pipeline_run import PipelineRun as PRModel
+
+    # Compute target date (NBA date convention)
+    if date_override:
+        target_date = date_override
+    else:
+        import pytz
+        from datetime import datetime as dt, timedelta
+
+        eastern = pytz.timezone("US/Eastern")
+        now_et = dt.now(eastern)
+        if now_et.hour < 6:
+            target_date = (now_et - timedelta(days=1)).date()
+        else:
+            target_date = now_et.date()
+
+    unmet = []
+    for dep_name in deps:
+        if dep_name in succeeded_in_batch:
+            continue
+        if not PRModel.was_successful_on_date(dep_name, target_date):
+            unmet.append(dep_name)
+
+    return unmet
+
+
 async def _run_pipelines_background(
     job_id: str,
     date_override: Optional[date] = None,
@@ -1009,8 +1053,32 @@ async def _run_pipelines_background(
 
     await job_manager.update_job_started(job_id)
 
+    # Track which pipelines succeeded in this batch for dependency checks.
+    succeeded_in_batch: set[str] = set()
+
     try:
         for i, name in enumerate(pipeline_names, 1):
+            # Dependency enforcement: skip if depends_on pipelines haven't succeeded.
+            pipeline_cls = PIPELINE_REGISTRY[name]
+            unmet_deps = _check_unmet_dependencies(
+                pipeline_cls, succeeded_in_batch, date_override
+            )
+
+            if unmet_deps:
+                log.warning(
+                    "pipeline_dependency_not_met",
+                    job_id=job_id,
+                    pipeline=name,
+                    unmet_dependencies=unmet_deps,
+                )
+                job_result = JobResultInternal(
+                    pipeline_name=name,
+                    status=ApiStatus.SKIPPED,
+                    message=f"Skipped: dependencies not met ({', '.join(unmet_deps)})",
+                )
+                await job_manager.add_pipeline_result(job_id, name, job_result)
+                continue
+
             log.info(
                 "background_pipeline_starting",
                 job_id=job_id,
@@ -1035,6 +1103,9 @@ async def _run_pipelines_background(
                 )
 
                 await job_manager.add_pipeline_result(job_id, name, job_result)
+
+                if result.status == ApiStatus.SUCCESS:
+                    succeeded_in_batch.add(name)
 
                 log.info(
                     "background_pipeline_completed",

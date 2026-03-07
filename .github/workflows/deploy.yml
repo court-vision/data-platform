@@ -1,0 +1,189 @@
+name: Deploy Data Platform
+
+# Runs after tests pass on main. Deploys to staging first, runs smoke tests,
+# then waits for manual approval before deploying to production.
+#
+# Required GitHub secrets (scoped to each environment):
+#   staging:    RAILWAY_TOKEN          (Railway project token scoped to staging env)
+#               STAGING_PIPELINE_TOKEN (value of PIPELINE_API_TOKEN on staging service)
+#   production: RAILWAY_TOKEN          (Railway project token scoped to production env)
+#               PRODUCTION_PIPELINE_TOKEN (value of PIPELINE_API_TOKEN on production service)
+#
+# Required GitHub variables (scoped to each environment):
+#   staging:    STAGING_URL   (public Railway URL for staging data-platform)
+#   production: PRODUCTION_URL (public Railway URL for production data-platform)
+#
+# Railway tokens are environment-scoped — create one token per environment in
+# Railway → Project Settings → Tokens. Each token can only deploy to its own environment.
+
+on:
+  workflow_run:
+    workflows: ["Data Platform Tests"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ------------------------------------------------------------------
+  # Stage 1: Deploy to staging
+  # ------------------------------------------------------------------
+  deploy-staging:
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.workflow_run.conclusion == 'success')
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to staging
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service data-platform \
+            --detach \
+            -m "Deploy from ${{ github.sha }}"
+
+      - name: Wait for staging to become healthy
+        env:
+          STAGING_URL: ${{ vars.STAGING_URL }}
+        run: |
+          echo "Waiting for staging to become healthy..."
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$STAGING_URL/ping" || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "Staging is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i/30: HTTP $status — retrying in 10s..."
+            sleep 10
+          done
+          echo "Staging failed to become healthy after 5 minutes"
+          exit 1
+
+  # ------------------------------------------------------------------
+  # Stage 2: Smoke tests against staging
+  # ------------------------------------------------------------------
+  smoke-test-staging:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    steps:
+      - name: Verify pipeline API is responsive
+        env:
+          STAGING_URL: ${{ vars.STAGING_URL }}
+          STAGING_TOKEN: ${{ secrets.STAGING_PIPELINE_TOKEN }}
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $STAGING_TOKEN" \
+            "$STAGING_URL/v1/pipelines/")
+          if [ "$status" != "200" ]; then
+            echo "Pipeline listing failed: HTTP $status"
+            exit 1
+          fi
+          echo "Pipeline API: OK"
+
+      - name: Run data quality checks on staging
+        env:
+          STAGING_URL: ${{ vars.STAGING_URL }}
+          STAGING_TOKEN: ${{ secrets.STAGING_PIPELINE_TOKEN }}
+        run: |
+          response=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $STAGING_TOKEN" \
+            "$STAGING_URL/v1/internal/quality/run")
+          body=$(echo "$response" | head -n -1)
+          http_status=$(echo "$response" | tail -n 1)
+
+          if [ "$http_status" != "200" ]; then
+            echo "Quality check trigger failed: HTTP $http_status"
+            echo "$body"
+            exit 1
+          fi
+
+          echo "Quality checks completed:"
+          echo "$body" | python3 -m json.tool || echo "$body"
+
+          # Log failures but don't block — staging data may not be pristine.
+          failed=$(echo "$body" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          print(data.get('data', {}).get('failed_checks', 0))
+          " 2>/dev/null || echo "0")
+
+          if [ "$failed" != "0" ]; then
+            echo "WARNING: $failed quality check(s) failed on staging — investigate before production deploy"
+          fi
+
+  # ------------------------------------------------------------------
+  # Stage 3: Manual approval gate (requires reviewer in GitHub environment)
+  # ------------------------------------------------------------------
+  approve-production:
+    runs-on: ubuntu-latest
+    needs: smoke-test-staging
+    environment: production
+
+    steps:
+      - name: Production deployment approved
+        run: echo "Proceeding with production deploy"
+
+  # ------------------------------------------------------------------
+  # Stage 4: Deploy to production
+  # ------------------------------------------------------------------
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: approve-production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to production
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up \
+            --service data-platform \
+            --detach \
+            -m "Deploy from ${{ github.sha }}"
+
+      - name: Wait for production to become healthy
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          echo "Waiting for production to become healthy..."
+          for i in $(seq 1 30); do
+            status=$(curl -s -o /dev/null -w "%{http_code}" "$PRODUCTION_URL/ping" || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "Production is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i/30: HTTP $status — retrying in 10s..."
+            sleep 10
+          done
+          echo "Production failed health check — roll back via Railway dashboard"
+          exit 1
+
+      - name: Post-deploy verification
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          PRODUCTION_TOKEN: ${{ secrets.PRODUCTION_PIPELINE_TOKEN }}
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $PRODUCTION_TOKEN" \
+            "$PRODUCTION_URL/v1/pipelines/")
+          if [ "$status" != "200" ]; then
+            echo "Post-deploy verification failed: HTTP $status"
+            echo "Roll back via Railway dashboard → Deployments → previous deployment → Redeploy"
+            exit 1
+          fi
+          echo "Production deployment verified"
