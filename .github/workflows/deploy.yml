@@ -74,7 +74,7 @@ jobs:
   smoke-test-staging:
     runs-on: ubuntu-latest
     needs: deploy-staging
-    environment: staging
+    environment: court-vision / staging
 
     steps:
       - name: Verify pipeline API is responsive
@@ -129,7 +129,7 @@ jobs:
   approve-production:
     runs-on: ubuntu-latest
     needs: smoke-test-staging
-    environment: production
+    environment: court-vision / production
 
     steps:
       - name: Production deployment approved
