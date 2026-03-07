@@ -32,7 +32,7 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch') ||
       (github.event.workflow_run.conclusion == 'success')
-    environment: staging
+    environment: court-vision / staging
 
     steps:
       - name: Checkout
