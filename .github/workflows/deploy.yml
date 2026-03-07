@@ -45,6 +45,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
+          set -euo pipefail
           railway up \
             --service data-platform-staging \
             --ci \
@@ -73,6 +74,7 @@ jobs:
   smoke-test-staging:
     runs-on: ubuntu-latest
     needs: deploy-staging
+    environment: staging
 
     steps:
       - name: Verify pipeline API is responsive
@@ -151,6 +153,7 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
+          set -euo pipefail
           railway up \
             --service data-platform \
             --ci \
