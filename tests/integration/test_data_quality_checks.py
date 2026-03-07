@@ -50,10 +50,11 @@ def clean_quality_tables(quality_tables):
 # Helpers
 # ---------------------------------------------------------------------------
 
+NOW = "NOW()"
+
 
 def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
     """Seed a minimal valid dataset that passes all quality checks."""
-    # Game
     Game.create(
         game_id="0022500001",
         game_date=game_date,
@@ -64,9 +65,7 @@ def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
         home_score=120,
         away_score=115,
     )
-    # Player
     Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
-    # Player game stats (valid: non-null core fields, non-negative minutes, matching game)
     PlayerGameStats.create(
         player_id=201939,
         team_id="GSW",
@@ -76,7 +75,6 @@ def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
         min=34,
         fgm=10, fga=20, fg3m=5, fg3a=12, ftm=5, fta=6,
     )
-    # Player season stats (valid: player exists in players table)
     PlayerSeasonStats.create(
         player_id=201939,
         team_id="GSW",
@@ -89,7 +87,7 @@ def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
         fgm=500, fga=1000, fg3m=150, fg3a=400, ftm=200, fta=220,
         rank=5,
     )
-    # Player rolling stats (valid: window_days in {7, 14, 30})
+    # Include fg_pct, fg3_pct, ft_pct — all NOT NULL
     PlayerRollingStats.create(
         player_id=201939,
         team_id="GSW",
@@ -98,10 +96,11 @@ def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
         gp=3,
         fpts=45.0,
         pts=25.0, reb=5.0, ast=6.0, stl=2.0, blk=0.5, tov=2.5,
-        min=34,
-        fgm=10.0, fga=20.0, fg3m=4.0, fg3a=10.0, ftm=4.0, fta=5.0,
+        min=34.0,
+        fgm=10.0, fga=20.0, fg_pct=0.5000,
+        fg3m=4.0, fg3a=10.0, fg3_pct=0.4000,
+        ftm=4.0, fta=5.0, ft_pct=0.8000,
     )
-    # Successful pipeline run (for freshness/stale checks)
     PipelineRun.create(
         pipeline_name="player_game_stats",
         started_at=datetime.utcnow(),
@@ -146,26 +145,25 @@ class TestQualityChecksHappyPath:
 
 @pytest.mark.integration
 class TestNullCoreFieldsCheck:
-    """player_game_stats_required_fields_not_null"""
+    """player_game_stats_required_fields_not_null
 
-    def test_detects_null_player_id(self, integration_db, quality_tables):
-        """Inserting a row with NULL player_id should trigger failure."""
-        Game.create(
-            game_id="0022500099",
+    player_id has a NOT NULL DB constraint, so we test via team_id which is
+    nullable by design (null=True for trades/unknown). The check catches any
+    null in player_id OR game_date OR team_id.
+    """
+
+    def test_detects_null_team_id(self, integration_db, quality_tables):
+        """A row with NULL team_id should trigger the null fields check."""
+        Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
+        # team_id is nullable (null=True in model), so this insert succeeds
+        PlayerGameStats.create(
+            player_id=201939,
+            team_id=None,  # explicitly null — nullable FK
             game_date=date(2026, 2, 14),
-            season="2025-26",
-            home_team_id="GSW",
-            away_team_id="LAL",
-            status="final",
-        )
-        # Insert raw SQL to bypass ORM FK constraint
-        db.execute_sql(
-            """
-            INSERT INTO nba.player_game_stats
-              (player_id, team_id, game_date, fpts, pts, reb, ast, stl, blk, tov, min,
-               fgm, fga, fg3m, fg3a, ftm, fta)
-            VALUES (NULL, 'GSW', '2026-02-14', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-            """
+            fpts=30,
+            pts=20, reb=5, ast=5, stl=1, blk=0, tov=2,
+            min=30,
+            fgm=8, fga=16, fg3m=3, fg3a=8, ftm=3, fta=4,
         )
 
         service = DataQualityService()
@@ -180,13 +178,15 @@ class TestNonNegativeMinutesCheck:
 
     def test_detects_negative_minutes(self, integration_db, quality_tables):
         Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
-        # Insert with negative minutes via raw SQL
+        # Use raw SQL to insert negative minutes — ORM would accept it since
+        # IntegerField has no min-value constraint, but the quality check catches it.
         db.execute_sql(
             """
             INSERT INTO nba.player_game_stats
               (player_id, team_id, game_date, fpts, pts, reb, ast, stl, blk, tov, min,
-               fgm, fga, fg3m, fg3a, ftm, fta)
-            VALUES (201939, 'GSW', '2026-02-14', 10, 10, 5, 3, 1, 0, 2, -5, 4, 10, 2, 5, 2, 3)
+               fgm, fga, fg3m, fg3a, ftm, fta, created_at, updated_at)
+            VALUES (201939, 'GSW', '2026-02-14', 10, 10, 5, 3, 1, 0, 2, -5,
+                    4, 10, 2, 5, 2, 3, NOW(), NOW())
             """
         )
 
@@ -266,11 +266,11 @@ class TestTeamGameMatchCheck:
     def test_detects_orphan_game_stats(self, integration_db, quality_tables):
         """Game stats for a team/date with no matching game record."""
         Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
-        # Game stats on a date with no game record
+        # Stats on a date with no game record seeded for GSW
         PlayerGameStats.create(
             player_id=201939,
             team_id="GSW",
-            game_date=date(2026, 3, 1),  # No game seeded for this date
+            game_date=date(2026, 3, 1),  # no Game row for this date
             fpts=30,
             pts=20, reb=5, ast=5, stl=1, blk=0, tov=2,
             min=30,
@@ -288,17 +288,18 @@ class TestOrphanPlayersCheck:
     """player_season_stats_no_orphan_players"""
 
     def test_detects_orphan_season_stats(self, integration_db, quality_tables):
-        """Season stats referencing a player not in the players table."""
-        # Insert season stats with raw SQL to bypass FK constraint
+        """Season stats referencing a player_id not in the players table."""
         db.execute_sql(
             """
             INSERT INTO nba.player_season_stats
               (player_id, team_id, as_of_date, season, gp, fpts,
                pts, reb, ast, stl, blk, tov, min,
-               fgm, fga, fg3m, fg3a, ftm, fta, rank)
+               fgm, fga, fg3m, fg3a, ftm, fta, rank,
+               created_at, updated_at)
             VALUES (999999, 'GSW', '2026-02-14', '2025-26', 10, 500,
                     200, 50, 60, 20, 5, 30, 340,
-                    80, 160, 30, 80, 40, 50, 99)
+                    80, 160, 30, 80, 40, 50, 99,
+                    NOW(), NOW())
             """
         )
 
@@ -315,16 +316,17 @@ class TestRollingStatsWindowCheck:
     def test_detects_invalid_window_days(self, integration_db, quality_tables):
         """window_days=99 should be flagged as invalid."""
         Player.create(id=201939, name="Stephen Curry", name_normalized="stephen curry")
-        # Insert with invalid window via raw SQL
         db.execute_sql(
             """
             INSERT INTO nba.player_rolling_stats
               (player_id, team_id, as_of_date, window_days, gp, fpts,
                pts, reb, ast, stl, blk, tov, min,
-               fgm, fga, fg3m, fg3a, ftm, fta)
+               fgm, fga, fg_pct, fg3m, fg3a, fg3_pct, ftm, fta, ft_pct,
+               created_at, updated_at)
             VALUES (201939, 'GSW', '2026-02-14', 99, 3, 45.0,
-                    25.0, 5.0, 6.0, 2.0, 0.5, 2.5, 34,
-                    10.0, 20.0, 4.0, 10.0, 4.0, 5.0)
+                    25.0, 5.0, 6.0, 2.0, 0.5, 2.5, 34.0,
+                    10.0, 20.0, 0.5000, 4.0, 10.0, 0.4000, 4.0, 5.0, 0.8000,
+                    NOW(), NOW())
             """
         )
 
@@ -349,13 +351,11 @@ class TestDataQualityServiceIntegration:
         service = DataQualityService()
         run = service.run_checks(triggered_by="test")
 
-        # Verify run record
         assert DataQualityRun.select().count() == 1
         stored_run = DataQualityRun.select().first()
         assert str(stored_run.id) == str(run.id)
         assert stored_run.triggered_by == "test"
 
-        # Verify check records
         checks = list(DataQualityCheck.select().where(DataQualityCheck.run_id == run.id))
         assert len(checks) == 7  # All 7 core checks
 
@@ -373,7 +373,7 @@ class TestDataQualityServiceIntegration:
         assert checks[0].check_name == "player_game_stats_non_negative_minutes"
 
     def test_list_runs_returns_history(self, integration_db, quality_tables):
-        """list_runs() returns past run summaries."""
+        """list_runs() returns past run summaries in reverse chronological order."""
         _seed_clean_data()
         service = DataQualityService()
         service.run_checks(triggered_by="test-1")
@@ -381,7 +381,6 @@ class TestDataQualityServiceIntegration:
 
         runs = service.list_runs(limit=10)
         assert len(runs) == 2
-        # Most recent first
         assert runs[0]["triggered_by"] == "test-2"
         assert runs[1]["triggered_by"] == "test-1"
 
@@ -395,7 +394,6 @@ class TestDataQualityServiceIntegration:
         assert detail is not None
         assert "checks" in detail
         assert len(detail["checks"]) == 7
-        # Each check has expected fields
         for check in detail["checks"]:
             assert "check_name" in check
             assert "status" in check
