@@ -4,7 +4,7 @@ Player Injuries Table
 Injury status and history for NBA players.
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from uuid import UUID
 
 from peewee import (
@@ -154,24 +154,38 @@ class PlayerInjury(BaseModel):
         )
 
     @classmethod
-    def get_injured_players(cls, report_date: date | None = None) -> list["PlayerInjury"]:
+    def get_injured_players(
+        cls,
+        report_date: date | None = None,
+        staleness_days: int = 3,
+    ) -> list["PlayerInjury"]:
         """
-        Get all players with non-Available status.
+        Get all players with non-Available status whose most recent record
+        falls within the staleness window.
+
+        Only considers records from the last `staleness_days` days to avoid
+        returning stale Out records for players who have since recovered.
+        The pipeline runs daily, so a 3-day window handles brief outages while
+        preventing recovered players from appearing as still injured.
 
         Args:
             report_date: Date to check (defaults to today)
+            staleness_days: How far back to look for the most recent record
 
         Returns:
             List of PlayerInjury records for injured players
         """
         check_date = report_date or date.today()
+        earliest_date = check_date - timedelta(days=staleness_days)
 
-        # Get the most recent report for each player on or before the check date
         from peewee import fn
 
         subquery = (
             cls.select(cls.player_id, fn.MAX(cls.report_date).alias("max_date"))
-            .where(cls.report_date <= check_date)
+            .where(
+                (cls.report_date <= check_date)
+                & (cls.report_date >= earliest_date)
+            )
             .group_by(cls.player_id)
         )
 

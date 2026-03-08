@@ -42,9 +42,9 @@ class ESPNInjuryStatusPipeline(BasePipeline):
     3. Matches players by ESPN ID (cross-referenced in Player dimension)
     4. Upserts into nba.player_injuries using PlayerInjury.upsert_injury()
 
-    Players not marked as injured by ESPN are not written — absence of a record
-    for today means the player is available. The BreakoutDetectionPipeline reads
-    the most recent record per player, so old Out records remain until overwritten.
+    For players ESPN marks as active (injured=False), we write an "Available"
+    record if they have a stale non-Available record in the DB. This clears
+    stale Out/Doubtful/etc. records for players who have returned from injury.
 
     Note: ESPN does not provide injury_type/injury_detail in the kona_player_info
     view, so those fields are left null.
@@ -86,25 +86,43 @@ class ESPNInjuryStatusPipeline(BasePipeline):
         # Also build name → player_id as fallback
         name_lookup = self._build_name_lookup()
 
+        # Load player_ids with a stale non-Available record so we can clear them
+        # when ESPN now shows them as active (returned from injury).
+        stale_injured_ids = self._get_stale_injured_player_ids(report_date)
+        ctx.log.info("stale_injured_player_ids_loaded", count=len(stale_injured_ids))
+
         matched = 0
+        cleared = 0
         unmatched = 0
         skipped_active = 0
 
         for normalized_name, info in espn_data.items():
-            if not info.get("injured", False):
-                skipped_active += 1
-                continue
-
             espn_id = info.get("espn_id")
-            raw_status = info.get("injury_status") or "OUT"
-            status = ESPN_STATUS_MAP.get(raw_status.upper(), "Out")
 
-            # Try ESPN ID match first (most reliable)
+            # Resolve player_id regardless of injury flag (needed for both paths)
             player_id = espn_id_lookup.get(espn_id) if espn_id else None
-
-            # Fall back to name match
             if not player_id:
                 player_id = name_lookup.get(normalized_name)
+
+            if not info.get("injured", False):
+                # Player is active — clear any stale non-Available record
+                if player_id and player_id in stale_injured_ids:
+                    PlayerInjury.upsert_injury(
+                        player_id=player_id,
+                        report_date=report_date,
+                        status="Available",
+                        injury_type=None,
+                        injury_detail=None,
+                        expected_return=None,
+                        pipeline_run_id=ctx.run_id,
+                    )
+                    cleared += 1
+                else:
+                    skipped_active += 1
+                continue
+
+            raw_status = info.get("injury_status") or "OUT"
+            status = ESPN_STATUS_MAP.get(raw_status.upper(), "Out")
 
             if not player_id:
                 ctx.log.debug(
@@ -131,10 +149,41 @@ class ESPNInjuryStatusPipeline(BasePipeline):
         ctx.log.info(
             "processing_complete",
             matched=matched,
+            cleared=cleared,
             unmatched=unmatched,
             skipped_active=skipped_active,
             records=ctx.records_processed,
         )
+
+    def _get_stale_injured_player_ids(self, report_date: date) -> set[int]:
+        """
+        Return player_ids whose most recent injury record is non-Available.
+
+        Used to detect players who have returned from injury: ESPN now shows
+        them as active but we have a stale Out/Doubtful/etc. record in the DB.
+        """
+        from peewee import fn
+
+        subquery = (
+            PlayerInjury.select(
+                PlayerInjury.player_id,
+                fn.MAX(PlayerInjury.report_date).alias("max_date"),
+            )
+            .where(PlayerInjury.report_date <= report_date)
+            .group_by(PlayerInjury.player_id)
+        )
+        stale = (
+            PlayerInjury.select(PlayerInjury.player_id)
+            .join(
+                subquery,
+                on=(
+                    (PlayerInjury.player_id == subquery.c.player_id)
+                    & (PlayerInjury.report_date == subquery.c.max_date)
+                ),
+            )
+            .where(PlayerInjury.status != "Available")
+        )
+        return {row.player_id for row in stale}
 
     def _build_espn_id_lookup(self) -> dict[int, int]:
         """Build lookup dict mapping espn_id → player_id."""
