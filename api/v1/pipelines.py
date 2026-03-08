@@ -151,16 +151,26 @@ async def trigger_daily_matchup_scores(
 def _espn_scoring_period_advanced() -> bool:
     """
     Check whether ESPN's current scoring period has advanced beyond the latest
-    stored baseline. Called once per loop-mode poll (one ESPN API call).
+    stored baseline. Called once per post-game poll iteration (one ESPN API call).
 
-    Returns True if the pipeline should run (flip detected or no baseline yet).
-    Returns False if ESPN's period matches the baseline (no flip yet).
+    Returns True if the pipeline should run (flip detected, no baseline, or time fallback).
+    Returns False if ESPN's period matches the baseline and it's before the fallback time.
     """
     import json
     import requests
+    import pytz
+    from datetime import datetime
     from db.models.teams import Team
     from db.models.stats.daily_matchup_score import DailyMatchupScore
     from core.settings import settings
+
+    # Time fallback: if past 2:30 AM ET, run regardless of scoring period.
+    # Handles no-game days (scoring period may not advance) and ESPN API failures.
+    eastern = pytz.timezone("US/Eastern")
+    now_et = datetime.now(eastern)
+    if now_et.hour > 2 or (now_et.hour == 2 and now_et.minute >= 30):
+        log.info("espn_scoring_period_time_fallback", time_et=now_et.strftime("%H:%M"))
+        return True
 
     ESPN_ENDPOINT = (
         "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{}/segments/0/leagues/{}"
@@ -629,6 +639,12 @@ async def trigger_post_game(
                 continue
             if PipelineRun.is_running(name):
                 log.info("post_game_pipeline_concurrency_skip", pipeline=name)
+                continue
+
+            # ESPN-gated pipelines wait for ESPN's nightly batch before running.
+            # The gate checks latestScoringPeriod and has a 2:30 AM ET fallback.
+            if cls.config.espn_gated and not _espn_scoring_period_advanced():
+                log.info("post_game_espn_gate_not_ready", pipeline=name)
                 continue
 
         pipelines_to_run.append(name)

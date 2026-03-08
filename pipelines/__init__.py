@@ -42,6 +42,7 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "player_advanced_stats": PlayerAdvancedStatsPipeline,
     "team_stats": TeamStatsPipeline,
     "game_schedule": GameSchedulePipeline,
+    "daily_matchup_scores": DailyMatchupScoresPipeline,
     # PRE_GAME — run before games start (timed relative to first tip-off)
     "espn_injury_status": ESPNInjuryStatusPipeline,
     "breakout_detection": BreakoutDetectionPipeline,
@@ -51,7 +52,6 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     # SCHEDULED — hardcoded Railway cron; each has its own service trigger
     "player_profiles": PlayerProfilesPipeline,
     "game_start_times": GameStartTimesPipeline,
-    "daily_matchup_scores": DailyMatchupScoresPipeline,
 }
 
 

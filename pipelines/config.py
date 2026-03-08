@@ -68,6 +68,12 @@ class PipelineConfig:
     # Dependencies (other pipeline names that must complete first)
     depends_on: tuple[str, ...] = field(default_factory=tuple)
 
+    # ESPN batch gate (only meaningful for POST_GAME pipelines).
+    # When True, the post-game endpoint delays this pipeline until ESPN's
+    # latestScoringPeriod has advanced beyond the last stored baseline,
+    # with a 2:30 AM ET time fallback for no-game days.
+    espn_gated: bool = False
+
     def __post_init__(self):
         """Validate configuration."""
         if not self.name:

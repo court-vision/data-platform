@@ -35,9 +35,12 @@ class DailyMatchupScoresPipeline(BasePipeline):
         display_name="Daily Matchup Scores",
         description="Fetches current matchup scores for all saved teams",
         target_table="stats_s2.daily_matchup_score",
-        # ESPN matchup data isn't ready immediately after games end — it rolls over
-        # later in the morning. Run via a dedicated 10am ET cron instead.
-        category=PipelineCategory.SCHEDULED,
+        # ESPN matchup data (totalPoints + lineup slots) isn't ready until ESPN's
+        # nightly batch (~2 AM ET), which runs after games end (~midnight–1 AM ET).
+        # espn_gated=True tells the post-game endpoint to hold this pipeline until
+        # latestScoringPeriod has advanced, with a 2:30 AM ET time fallback.
+        category=PipelineCategory.POST_GAME,
+        espn_gated=True,
     )
 
     def __init__(self):
