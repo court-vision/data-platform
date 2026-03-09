@@ -74,6 +74,12 @@ class PipelineConfig:
     # with a 2:30 AM ET time fallback for no-game days.
     espn_gated: bool = False
 
+    # Skip the batch-level dedup gate in the pre-game endpoint.
+    # Set True for pipelines that manage their own internal dedup (e.g. lineup_alerts
+    # uses NotificationLog). Without this, a "success with 0 records" early in the day
+    # (outside the notification window) would block all subsequent invocations.
+    skip_batch_dedup: bool = False
+
     def __post_init__(self):
         """Validate configuration."""
         if not self.name:

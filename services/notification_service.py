@@ -26,6 +26,8 @@ class NotificationService:
     def __init__(self):
         self.log = get_logger("notification_service")
         self.resend_api_key = getattr(settings, "resend_api_key", None)
+        if not self.resend_api_key:
+            self.log.warning("resend_api_key_not_configured_emails_will_not_be_sent")
 
     def send_lineup_alert(
         self,

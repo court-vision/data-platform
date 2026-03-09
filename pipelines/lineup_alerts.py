@@ -49,6 +49,7 @@ class LineupAlertsPipeline(BasePipeline):
         description="Checks user lineups and sends alerts before games start",
         target_table="usr.notification_log",
         category=PipelineCategory.PRE_GAME,
+        skip_batch_dedup=True,
     )
 
     def __init__(self):

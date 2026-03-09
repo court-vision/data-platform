@@ -488,10 +488,13 @@ async def trigger_pre_game(
                     )
                     continue
 
-            # Dedup gate: skip if already ran successfully today
-            if PipelineRun.was_successful_on_date(name, nba_date):
-                log.info("pre_game_already_ran", pipeline=name, nba_date=str(nba_date))
-                continue
+            # Dedup gate: skip if already ran successfully today.
+            # Pipelines with skip_batch_dedup manage their own internal dedup
+            # and must not be blocked by an early "success with 0 records" run.
+            if not cls.config.skip_batch_dedup:
+                if PipelineRun.was_successful_on_date(name, nba_date):
+                    log.info("pre_game_already_ran", pipeline=name, nba_date=str(nba_date))
+                    continue
 
             # Concurrency gate: skip if already running
             if PipelineRun.is_running(name):
