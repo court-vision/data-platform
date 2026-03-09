@@ -135,13 +135,23 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
         severity="warning",
         sql="""
             SELECT COUNT(*) FROM (
+                WITH latest_season AS (
+                    SELECT DISTINCT ON (player_id)
+                        player_id,
+                        pts,
+                        gp,
+                        season
+                    FROM nba.player_season_stats
+                    ORDER BY player_id, as_of_date DESC
+                )
                 SELECT
                     pss.player_id,
-                    pss.pts          AS season_pts,
-                    SUM(pgs.pts)     AS game_log_pts
-                FROM nba.player_season_stats pss
+                    pss.pts      AS season_pts,
+                    SUM(pgs.pts) AS game_log_pts
+                FROM latest_season pss
                 JOIN nba.player_game_stats pgs
                   ON pgs.player_id = pss.player_id
+                 AND pgs.game_date >= (SPLIT_PART(pss.season, '-', 1) || '-10-01')::date
                 GROUP BY pss.player_id, pss.pts, pss.gp
                 HAVING pss.gp >= 5
                    AND ABS(pss.pts - SUM(pgs.pts)) > 50
