@@ -54,11 +54,10 @@ class PlayerGameStatsPipeline(BasePipeline):
         if ctx.date_override:
             game_date = ctx.date_override
         else:
+            # This is a POST_GAME pipeline — always fetch the previous night's games.
+            # Subtracting 1 day is correct at any time of day (1 AM or 9 AM both target yesterday).
             now_cst = ctx.started_at  # already in CST from PipelineContext
-            if now_cst.hour < 6:
-                game_date = (now_cst - timedelta(days=1)).date()
-            else:
-                game_date = now_cst.date()
+            game_date = (now_cst - timedelta(days=1)).date()
         date_str = game_date.strftime("%m/%d/%Y")
 
         # Determine season string (season starts in October)
