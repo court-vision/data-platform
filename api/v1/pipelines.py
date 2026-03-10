@@ -153,8 +153,8 @@ def _espn_scoring_period_advanced() -> bool:
     Check whether ESPN's current scoring period has advanced beyond the latest
     stored baseline. Called once per post-game poll iteration (one ESPN API call).
 
-    Returns True if the pipeline should run (flip detected, no baseline, or time fallback).
-    Returns False if ESPN's period matches the baseline and it's before the fallback time.
+    Returns True if the pipeline should run (flip detected, no baseline, 2:30 AM CST fallback, or ESPN API error).
+    Returns False if ESPN's period matches the baseline and it's before the 2:30 AM CST fallback.
     """
     import json
     import requests
@@ -164,12 +164,14 @@ def _espn_scoring_period_advanced() -> bool:
     from db.models.stats.daily_matchup_score import DailyMatchupScore
     from core.settings import settings
 
-    # Time fallback: if past 2:30 AM ET, run regardless of scoring period.
-    # Handles no-game days (scoring period may not advance) and ESPN API failures.
-    eastern = pytz.timezone("US/Eastern")
-    now_et = datetime.now(eastern)
-    if now_et.hour > 2 or (now_et.hour == 2 and now_et.minute >= 30):
-        log.info("espn_scoring_period_time_fallback", time_et=now_et.strftime("%H:%M"))
+    # Time fallback: if past 2:30 AM CST, run regardless of scoring period.
+    # Handles cases where ESPN's batch runs late or the scoring period doesn't
+    # advance as expected. CST (not ET) matches the rest of the pipeline's
+    # timezone convention.
+    central = pytz.timezone("US/Central")
+    now_cst = datetime.now(central)
+    if now_cst.hour > 2 or (now_cst.hour == 2 and now_cst.minute >= 30):
+        log.info("espn_scoring_period_time_fallback", time_cst=now_cst.strftime("%H:%M"))
         return True
 
     ESPN_ENDPOINT = (

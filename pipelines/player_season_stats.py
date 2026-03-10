@@ -11,6 +11,7 @@ from peewee import fn
 
 from core.settings import settings
 from db.models.nba import Player, PlayerSeasonStats
+from db.models.nba.player_game_stats import PlayerGameStats
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
@@ -140,6 +141,22 @@ class PlayerSeasonStatsPipeline(BasePipeline):
                     "pipeline_run_id": ctx.run_id,
                     **player_stats,
                 }
+
+        # Data readiness check: if player_game_stats already wrote records for
+        # game_date but we found zero GP increments, the NBA league leaders API
+        # hasn't processed tonight's games yet — raise so the pipeline retries.
+        if not entries and not ctx.date_override:
+            played_count = (
+                PlayerGameStats.select()
+                .where(PlayerGameStats.game_date == game_date)
+                .count()
+            )
+            if played_count > 0:
+                raise RuntimeError(
+                    f"NBA API season stats not yet updated for {game_date}: "
+                    f"0 GP increments detected but {played_count} player-game "
+                    "records already exist in the DB. Data not ready yet — will retry."
+                )
 
         if entries:
             # Insert new records

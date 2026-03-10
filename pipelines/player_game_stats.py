@@ -55,9 +55,11 @@ class PlayerGameStatsPipeline(BasePipeline):
             game_date = ctx.date_override
         else:
             # This is a POST_GAME pipeline — always fetch the previous night's games.
-            # Subtracting 1 day is correct at any time of day (1 AM or 9 AM both target yesterday).
             now_cst = ctx.started_at  # already in CST from PipelineContext
-            game_date = (now_cst - timedelta(days=1)).date()
+            if now_cst.hour < 6:
+                game_date = (now_cst - timedelta(days=1)).date()
+            else:
+                game_date = now_cst.date()
         date_str = game_date.strftime("%m/%d/%Y")
 
         # Determine season string (season starts in October)
@@ -75,6 +77,15 @@ class PlayerGameStatsPipeline(BasePipeline):
         stats = self.nba_extractor.get_game_logs(date_str, season)
 
         if stats.empty:
+            # Data readiness check: if games exist in the DB for this date but the
+            # NBA API returned nothing, the player game log API hasn't updated yet.
+            expected_games = Game.get_games_on_date(game_date)
+            if expected_games:
+                raise RuntimeError(
+                    f"NBA API returned no stats for {date_str} but "
+                    f"{len(expected_games)} game(s) were expected. "
+                    "Data not ready yet — will retry."
+                )
             ctx.log.info("no_games_found", date=date_str)
             return
 
