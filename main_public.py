@@ -8,7 +8,7 @@ internal APIs remain on the private port (::8001) only.
 Started alongside main.py by entrypoint.sh.
 """
 
-# Apply NBA API patch early, before any nba_api imports elsewhere
+# Apply NBA API patch early, before nba_api imports elsewhere
 import utils.patches  # noqa: F401 - imported for side effect (patches nba_api)
 
 from contextlib import asynccontextmanager
