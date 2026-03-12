@@ -1,6 +1,6 @@
 from playhouse.pool import PooledPostgresqlDatabase
 from playhouse.db_url import parse
-from peewee import Model
+from peewee import Model, IntegrityError
 import os
 
 # Get database credentials from environment variables
@@ -54,37 +54,48 @@ def init_db():
     from .models import User, Team, Lineup
     from .models.notifications import NotificationPreference, NotificationLog, NotificationTeamPreference
 
-    # Create tables if they don't exist (safe=True is idempotent)
+    # Create tables if they don't exist (safe=True = IF NOT EXISTS).
+    # Wrapped in try/except to handle the startup race condition: main.py and
+    # main_public.py both call init_db() concurrently. Both can pass the IF NOT
+    # EXISTS check simultaneously, then one loses the pg_type insert. The loser
+    # gets IntegrityError — but the table exists at that point, so we treat it
+    # as success and continue.
+    #
     # Note: Order matters for foreign key dependencies
     # 1. Dimension tables first (Player, NBATeam)
     # 2. Fact/aggregate tables second
     # 3. Extended data tables last (may reference dimension tables)
-    db.create_tables([
-        # NBA schema - audit
-        PipelineRun,
-        DataQualityRun,
-        DataQualityCheck,
-        # Legacy stats_s2 (DailyMatchupScoresPipeline still writes here)
-        DailyMatchupScore,
-        # NBA schema - dimension tables
-        Player, NBATeam,
-        # NBA schema - team stats (FK to NBATeam)
-        TeamStats,
-        # NBA schema - fact/aggregate tables
-        PlayerGameStats, PlayerSeasonStats, PlayerOwnership, PlayerRollingStats,
-        # NBA schema - extended data tables
-        PlayerProfile, PlayerAdvancedStats, Game, PlayerInjury,
-        # NBA schema - live data
-        LivePlayerStats,
-        # NBA schema - breakout detection
-        BreakoutCandidate,
-        # NBA schema - cron-runner audit
-        CronJobRun,
-        # User schema (referenced by lineup_alerts)
-        User, Team, Lineup,
-        # Notification tables (read/written by lineup_alerts pipeline)
-        NotificationPreference, NotificationLog, NotificationTeamPreference,
-    ], safe=True)
+    try:
+        db.create_tables([
+            # NBA schema - audit
+            PipelineRun,
+            DataQualityRun,
+            DataQualityCheck,
+            # Legacy stats_s2 (DailyMatchupScoresPipeline still writes here)
+            DailyMatchupScore,
+            # NBA schema - dimension tables
+            Player, NBATeam,
+            # NBA schema - team stats (FK to NBATeam)
+            TeamStats,
+            # NBA schema - fact/aggregate tables
+            PlayerGameStats, PlayerSeasonStats, PlayerOwnership, PlayerRollingStats,
+            # NBA schema - extended data tables
+            PlayerProfile, PlayerAdvancedStats, Game, PlayerInjury,
+            # NBA schema - live data
+            LivePlayerStats,
+            # NBA schema - breakout detection
+            BreakoutCandidate,
+            # NBA schema - cron-runner audit
+            CronJobRun,
+            # User schema (referenced by lineup_alerts)
+            User, Team, Lineup,
+            # Notification tables (read/written by lineup_alerts pipeline)
+            NotificationPreference, NotificationLog, NotificationTeamPreference,
+        ], safe=True)
+    except IntegrityError:
+        # Race condition: the other process (main.py/main_public.py) won the
+        # CREATE TABLE race and the tables already exist. Safe to continue.
+        pass
 
 # Function to close database connection
 def close_db():
