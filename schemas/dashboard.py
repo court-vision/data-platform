@@ -10,6 +10,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from schemas.pipeline import PipelineJobInfo
+from schemas.cron import CronJobRunEntry
 
 
 class PipelineHealthEntry(BaseModel):
@@ -62,6 +63,7 @@ class DashboardStatusData(BaseModel):
     quality_latest: Optional[QualityRunEntry] = None
     recent_quality_runs: list[QualityRunEntry] = Field(default_factory=list)
     quality_failed_checks: list[QualityCheckEntry] = Field(default_factory=list)
+    cron_job_runs: list[CronJobRunEntry] = Field(default_factory=list)
 
 
 class DashboardStatusResponse(BaseModel):

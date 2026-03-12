@@ -18,6 +18,7 @@ from db.models.nba.live_player_stats import LivePlayerStats
 from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.team_stats import TeamStats
 from db.models.nba.breakout_candidates import BreakoutCandidate
+from db.models.nba.cron_job_run import CronJobRun
 
 __all__ = [
     # Dimension tables
@@ -39,4 +40,6 @@ __all__ = [
     "LivePlayerStats",
     # Breakout detection
     "BreakoutCandidate",
+    # Cron-runner audit
+    "CronJobRun",
 ]

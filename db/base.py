@@ -47,6 +47,7 @@ def init_db():
         PlayerInjury,
         LivePlayerStats,
         BreakoutCandidate,
+        CronJobRun,
     )
 
     # User/team models (read by lineup_alerts pipeline for notification prefs)
@@ -77,6 +78,8 @@ def init_db():
         LivePlayerStats,
         # NBA schema - breakout detection
         BreakoutCandidate,
+        # NBA schema - cron-runner audit
+        CronJobRun,
         # User schema (referenced by lineup_alerts)
         User, Team, Lineup,
         # Notification tables (read/written by lineup_alerts pipeline)

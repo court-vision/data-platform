@@ -26,7 +26,7 @@ from core.correlation_middleware import CorrelationMiddleware
 from core.logging import setup_logging, get_logger
 from core.settings import settings
 from db.base import init_db, close_db
-from api.v1 import pipelines, live, dashboard, quality
+from api.v1 import pipelines, live, dashboard, quality, cron
 
 
 @asynccontextmanager
@@ -74,6 +74,7 @@ dashboard.set_templates(_templates)
 # Routes
 app.include_router(pipelines.router, prefix="/v1/internal")
 app.include_router(quality.router, prefix="/v1/internal")
+app.include_router(cron.router, prefix="/v1/internal")
 app.include_router(live.router, prefix="/v1/live")
 app.include_router(dashboard.router, prefix="/v1")
 

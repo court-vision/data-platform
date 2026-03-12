@@ -21,7 +21,9 @@ from core.job_manager import get_job_manager
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
 from db.models.pipeline_run import PipelineRun
+from db.models.nba.cron_job_run import CronJobRun
 from pipelines import PIPELINE_REGISTRY
+from schemas.cron import CronJobRunEntry
 from schemas.dashboard import (
     DashboardStatusData,
     DashboardStatusResponse,
@@ -85,9 +87,10 @@ async def get_dashboard_status(
 
     Also returns the last 10 background jobs from the in-memory job manager.
     """
-    pipeline_entries, quality_payload = await asyncio.gather(
+    pipeline_entries, quality_payload, cron_runs = await asyncio.gather(
         asyncio.to_thread(_build_pipeline_health),
         asyncio.to_thread(_build_quality_status),
+        asyncio.to_thread(_build_cron_runs),
     )
 
     job_manager = get_job_manager()
@@ -117,8 +120,37 @@ async def get_dashboard_status(
             quality_latest=quality_payload["quality_latest"],
             recent_quality_runs=quality_payload["recent_quality_runs"],
             quality_failed_checks=quality_payload["quality_failed_checks"],
+            cron_job_runs=cron_runs,
         ),
     )
+
+
+def _build_cron_runs() -> list[CronJobRunEntry]:
+    """
+    Query last 200 cron job runs for the dashboard timeline.
+    Runs synchronously — caller must wrap in asyncio.to_thread.
+    """
+    try:
+        rows = CronJobRun.recent(limit=200)
+        return [
+            CronJobRunEntry(
+                id=str(r.id),
+                job_name=r.job_name,
+                triggered_at=r.triggered_at,
+                completed_at=r.completed_at,
+                duration_ms=r.duration_ms,
+                duration_seconds=r.duration_seconds,
+                result=r.result,
+                http_status=r.http_status,
+                attempts=r.attempts,
+                error_message=r.error_message,
+                response_snippet=r.response_snippet,
+            )
+            for r in rows
+        ]
+    except Exception as exc:
+        log.warning("dashboard_cron_runs_failed", error=str(exc))
+        return []
 
 
 def _build_pipeline_health() -> list[PipelineHealthEntry]:

@@ -461,6 +461,121 @@
     }
     .btn-primary:hover { background: var(--orange-mid); }
 
+    /* ── Scheduler Timeline ─────────────────────────────────────────────── */
+    .scheduler-section { margin-bottom: 32px; }
+    .section-title.scheduler { color: var(--green); }
+
+    .timeline-wrap {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      overflow: hidden;
+    }
+
+    .timeline-axis {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      padding: 0 2px;
+    }
+    .timeline-axis span {
+      font-size: 9px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    .timeline-lanes { display: flex; flex-direction: column; gap: 10px; }
+
+    .timeline-lane {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .timeline-lane-label {
+      font-size: 10px;
+      color: var(--muted2);
+      width: 80px;
+      flex-shrink: 0;
+      text-align: right;
+      letter-spacing: 0.04em;
+    }
+    .timeline-track {
+      flex: 1;
+      height: 24px;
+      background: rgba(28,28,48,0.5);
+      border-radius: 3px;
+      position: relative;
+      overflow: visible;
+    }
+    .timeline-track-line {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: var(--border2);
+      transform: translateY(-50%);
+    }
+
+    .tl-marker {
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.12s, box-shadow 0.12s;
+      z-index: 2;
+    }
+    .tl-marker.success {
+      background: var(--green);
+      box-shadow: 0 0 4px rgba(34,197,94,0.5);
+    }
+    .tl-marker.failure {
+      background: var(--red);
+      box-shadow: 0 0 4px rgba(244,63,94,0.5);
+    }
+    .tl-marker.retried {
+      background: var(--yellow);
+      box-shadow: 0 0 4px rgba(234,179,8,0.5);
+    }
+    .tl-marker:hover, .tl-marker.active {
+      transform: translate(-50%, -50%) scale(1.5);
+      z-index: 10;
+    }
+
+    .tl-popover {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 5px;
+      padding: 8px 10px;
+      font-size: 10px;
+      white-space: nowrap;
+      z-index: 100;
+      pointer-events: none;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      min-width: 180px;
+    }
+    .tl-popover-row { display: flex; justify-content: space-between; gap: 16px; line-height: 1.8; }
+    .tl-popover-label { color: var(--muted2); }
+    .tl-popover-val { color: var(--text); }
+    .tl-popover-snippet {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 9px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-width: 260px;
+    }
+
     /* ── Toast ───────────────────────────────────────────────────────────── */
     .toast {
       position: fixed;
@@ -547,6 +662,19 @@
           <div class="skel" style="width:30%;height:10px"></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Scheduler Timeline -->
+  <div class="scheduler-section" id="schedulerSection">
+    <div class="section-header">
+      <span class="cat-dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></span>
+      <span class="section-title scheduler">Scheduler</span>
+      <span class="badge" id="schedulerRunCount">—</span>
+      <span class="section-desc">Cron-runner job execution history · last 6 hours</span>
+    </div>
+    <div id="schedulerWrap">
+      <div class="empty">Loading…</div>
     </div>
   </div>
 
@@ -680,6 +808,7 @@
       hideErr();
       lastPipelines = payload.data.pipelines || [];
       renderPipelineSections(lastPipelines);
+      renderScheduler(payload.data.cron_job_runs || []);
       renderQuality(payload.data || {});
       renderJobs(payload.data.recent_jobs || []);
       document.getElementById('lastUpdated').textContent =
@@ -996,6 +1125,129 @@
       setTimeout(() => { fetchStatus().then(startCountdown); }, 1500);
     }
   }
+
+  // ── Scheduler Timeline ────────────────────────────────────────────────────
+  const TIMELINE_WINDOW_MS = 6 * 60 * 60 * 1000; // 6 hours
+  const TIMELINE_JOBS = ['pre-game', 'live-stats', 'post-game'];
+  let activePopover = null;
+
+  function renderScheduler(cronRuns) {
+    const wrap = document.getElementById('schedulerWrap');
+    document.getElementById('schedulerRunCount').textContent = cronRuns.length;
+
+    if (!cronRuns.length) {
+      wrap.innerHTML = '<div class="empty">No cron runs recorded yet — runs appear after the first job fires</div>';
+      return;
+    }
+
+    const now = Date.now();
+    const windowStart = now - TIMELINE_WINDOW_MS;
+
+    // Build time axis labels (every 30 min, 12 ticks)
+    const axisLabels = [];
+    for (let i = 12; i >= 0; i--) {
+      const t = now - i * 30 * 60 * 1000;
+      const d = new Date(t);
+      axisLabels.push(d.toUTCString().slice(17, 22)); // "HH:MM"
+    }
+
+    // Group runs by job name
+    const byJob = {};
+    for (const j of TIMELINE_JOBS) byJob[j] = [];
+    for (const r of cronRuns) {
+      const t = new Date(r.triggered_at).getTime();
+      if (t >= windowStart && byJob[r.job_name]) byJob[r.job_name].push(r);
+    }
+
+    const lanesHTML = TIMELINE_JOBS.map(jobName => {
+      const runs = byJob[jobName] || [];
+      const markers = runs.map(r => {
+        const t = new Date(r.triggered_at).getTime();
+        const pct = Math.max(0, Math.min(100, ((t - windowStart) / TIMELINE_WINDOW_MS) * 100));
+        const cls = r.result === 'failure' ? 'failure' : (r.attempts > 1 ? 'retried' : 'success');
+        const dataId = encodeURIComponent(r.id);
+        return `<div class="tl-marker ${cls}" style="left:${pct.toFixed(2)}%"
+          data-run='${esc(JSON.stringify(r))}' onclick="togglePopover(this, event)"></div>`;
+      }).join('');
+
+      return `
+        <div class="timeline-lane">
+          <div class="timeline-lane-label">${esc(jobName)}</div>
+          <div class="timeline-track">
+            <div class="timeline-track-line"></div>
+            ${markers}
+          </div>
+        </div>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <div class="timeline-wrap">
+        <div class="timeline-axis">
+          ${axisLabels.map(l => `<span>${l}</span>`).join('')}
+        </div>
+        <div class="timeline-lanes">
+          ${lanesHTML}
+        </div>
+      </div>`;
+  }
+
+  function togglePopover(marker, e) {
+    e.stopPropagation();
+
+    // Close existing
+    if (activePopover) {
+      activePopover.remove();
+      const prev = document.querySelector('.tl-marker.active');
+      if (prev) prev.classList.remove('active');
+      if (activePopover._marker === marker) {
+        activePopover = null;
+        return;
+      }
+      activePopover = null;
+    }
+
+    marker.classList.add('active');
+
+    let r;
+    try { r = JSON.parse(marker.dataset.run); } catch { return; }
+
+    const ts = new Date(r.triggered_at);
+    const utcStr = ts.toUTCString().replace(' GMT', ' UTC');
+    const dur = r.duration_ms != null ? (r.duration_ms / 1000).toFixed(2) + 's' : '—';
+    const http = r.http_status != null ? r.http_status : '—';
+    const attempts = r.attempts ?? 1;
+    const resultCls = r.result === 'failure' ? 'style="color:var(--red)"'
+                    : r.result === 'success' && attempts > 1 ? 'style="color:var(--yellow)"'
+                    : 'style="color:var(--green)"';
+
+    const snippetHTML = r.response_snippet
+      ? `<div class="tl-popover-snippet">${esc(r.response_snippet)}</div>`
+      : '';
+
+    const pop = document.createElement('div');
+    pop.className = 'tl-popover';
+    pop._marker = marker;
+    pop.innerHTML = `
+      <div class="tl-popover-row"><span class="tl-popover-label">Time (UTC)</span><span class="tl-popover-val">${esc(utcStr)}</span></div>
+      <div class="tl-popover-row"><span class="tl-popover-label">Result</span><span class="tl-popover-val" ${resultCls}>${esc(r.result)}</span></div>
+      <div class="tl-popover-row"><span class="tl-popover-label">Duration</span><span class="tl-popover-val">${dur}</span></div>
+      <div class="tl-popover-row"><span class="tl-popover-label">HTTP</span><span class="tl-popover-val">${http}</span></div>
+      <div class="tl-popover-row"><span class="tl-popover-label">Attempts</span><span class="tl-popover-val">${attempts}</span></div>
+      ${r.error_message ? `<div class="tl-popover-row"><span class="tl-popover-label">Error</span><span class="tl-popover-val" style="color:var(--red);max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(r.error_message)}</span></div>` : ''}
+      ${snippetHTML}`;
+
+    marker.appendChild(pop);
+    activePopover = pop;
+  }
+
+  document.addEventListener('click', () => {
+    if (activePopover) {
+      activePopover.remove();
+      const prev = document.querySelector('.tl-marker.active');
+      if (prev) prev.classList.remove('active');
+      activePopover = null;
+    }
+  });
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function relTime(iso) {
