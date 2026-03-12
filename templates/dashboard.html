@@ -1151,18 +1151,21 @@
       axisLabels.push(d.toUTCString().slice(17, 22)); // "HH:MM"
     }
 
-    // Group runs by job name
+    // Group runs by job name.
+    // Naive datetime strings from the API have no timezone suffix — append 'Z'
+    // so JavaScript treats them as UTC instead of local time.
+    const toUtcMs = s => new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z').getTime();
     const byJob = {};
     for (const j of TIMELINE_JOBS) byJob[j] = [];
     for (const r of cronRuns) {
-      const t = new Date(r.triggered_at).getTime();
+      const t = toUtcMs(r.triggered_at);
       if (t >= windowStart && byJob[r.job_name]) byJob[r.job_name].push(r);
     }
 
     const lanesHTML = TIMELINE_JOBS.map(jobName => {
       const runs = byJob[jobName] || [];
       const markers = runs.map(r => {
-        const t = new Date(r.triggered_at).getTime();
+        const t = toUtcMs(r.triggered_at);
         const pct = Math.max(0, Math.min(100, ((t - windowStart) / TIMELINE_WINDOW_MS) * 100));
         const cls = r.result === 'failure' ? 'failure' : (r.attempts > 1 ? 'retried' : 'success');
         const dataId = encodeURIComponent(r.id);
@@ -1211,7 +1214,8 @@
     let r;
     try { r = JSON.parse(marker.dataset.run); } catch { return; }
 
-    const ts = new Date(r.triggered_at);
+    const toUtcMs = s => new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z').getTime();
+    const ts = new Date(toUtcMs(r.triggered_at));
     const utcStr = ts.toUTCString().replace(' GMT', ' UTC');
     const dur = r.duration_ms != null ? (r.duration_ms / 1000).toFixed(2) + 's' : '—';
     const http = r.http_status != null ? r.http_status : '—';
