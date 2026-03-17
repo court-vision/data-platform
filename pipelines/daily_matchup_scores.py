@@ -91,6 +91,18 @@ class DailyMatchupScoresPipeline(BasePipeline):
                         "matchup_period", matchup_info["matchup_number"]
                     )
 
+                    # Compute day_of_matchup from the actual matchup start date.
+                    # For 2-week playoff rounds the ESPN matchup period spans two
+                    # local schedule weeks, so the extractor returns the real start
+                    # date. This gives continuous indices (0-13) across the full
+                    # round instead of resetting to 0 in the second week.
+                    matchup_start = matchup_data.get("matchup_start")
+                    day_of_matchup = (
+                        (today - matchup_start).days
+                        if matchup_start
+                        else matchup_info["day_index"]
+                    )
+
                     # Upsert daily score
                     record = {
                         "team_id": team.team_id,
@@ -98,7 +110,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
                         "matchup_period": effective_matchup_period,
                         "opponent_team_name": matchup_data["opponent_team_name"],
                         "date": today,
-                        "day_of_matchup": matchup_info["day_index"],
+                        "day_of_matchup": day_of_matchup,
                         "current_score": matchup_data["current_score"],
                         "opponent_current_score": matchup_data["opponent_current_score"],
                         "scoring_period_id": matchup_data.get("scoring_period_id"),

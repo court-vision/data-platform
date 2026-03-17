@@ -20,6 +20,7 @@ from core.resilience import (
 )
 from pipelines.extractors.base import BaseExtractor
 from pipelines.transformers.names import normalize_name
+from services.schedule_service import get_dates_for_scoring_periods
 from utils.espn_helpers import POSITION_MAP, PRO_TEAM_MAP
 
 
@@ -153,7 +154,7 @@ class ESPNExtractor(BaseExtractor):
             Dict with team_name, current_score, opponent_team_name, opponent_current_score
             or None if not found
         """
-        params = {"view": ["mTeam", "mMatchup", "mSchedule"]}
+        params = {"view": ["mTeam", "mMatchup", "mSchedule", "mSettings"]}
         cookies = {"espn_s2": espn_s2, "SWID": swid}
         endpoint = ESPN_FANTASY_ENDPOINT.format(year, league_id)
 
@@ -170,9 +171,32 @@ class ESPNExtractor(BaseExtractor):
             self.log.warning("matchup_error", error=str(e), team=team_name)
             return None
 
-        # Extract ESPN's current scoring period for transition detection
+        # Extract ESPN's current matchup/scoring period.
+        # During playoffs, ESPN's currentMatchupPeriod stays on the 2-week playoff
+        # matchup ID even when our local schedule has rolled into the next week.
+        # Using ESPN's value here prevents the extractor from searching the wrong
+        # matchupPeriodId in the schedule array (which would return None).
         status = data.get("status", {})
         scoring_period_id = status.get("latestScoringPeriod")
+        current_matchup_period = status.get("currentMatchupPeriod", matchup_period)
+
+        # Determine the actual start date of this matchup period so the pipeline
+        # can compute the correct day_of_matchup index for 2-week playoff rounds.
+        # matchupPeriods maps each matchup period to its scoring period(s),
+        # e.g. {"20": [20, 21]} for a 2-week playoff spanning scoring periods 20-21.
+        league_settings = data.get("settings", {})
+        matchup_period_map = league_settings.get("scheduleSettings", {}).get("matchupPeriods", {})
+        scoring_periods = matchup_period_map.get(str(current_matchup_period), [current_matchup_period])
+        matchup_dates = get_dates_for_scoring_periods(scoring_periods)
+        matchup_start = matchup_dates[0] if matchup_dates else None
+
+        if current_matchup_period != matchup_period:
+            self.log.info(
+                "matchup_period_remapped",
+                local_period=matchup_period,
+                espn_period=current_matchup_period,
+                team=team_name,
+            )
 
         # Find our team
         teams = data.get("teams", [])
@@ -189,10 +213,10 @@ class ESPNExtractor(BaseExtractor):
             self.log.warning("team_not_found", team=team_name)
             return None
 
-        # Find current matchup
+        # Find current matchup using ESPN's authoritative matchup period
         schedule = data.get("schedule", [])
         for matchup in schedule:
-            if matchup.get("matchupPeriodId") == matchup_period:
+            if matchup.get("matchupPeriodId") == current_matchup_period:
                 home_data = matchup.get("home", {})
                 away_data = matchup.get("away", {})
                 home_id = home_data.get("teamId")
@@ -221,6 +245,8 @@ class ESPNExtractor(BaseExtractor):
                     "current_score": our_score,
                     "opponent_team_name": opponent_name,
                     "opponent_current_score": opponent_score,
+                    "matchup_period": current_matchup_period,
+                    "matchup_start": matchup_start,
                     "scoring_period_id": scoring_period_id,
                 }
 
