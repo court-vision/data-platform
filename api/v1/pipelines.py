@@ -1178,30 +1178,51 @@ async def trigger_deploy(
     _: str = Security(verify_pipeline_token),
 ) -> dict:
     """
-    Fire Railway deploy hooks for backend and data-platform production services.
+    Trigger nightly production deploys via GitHub repository_dispatch.
 
-    Called by cron-runner daily at 2AM CST and available for manual dashboard triggers.
-    Requires BACKEND_DEPLOY_HOOK_URL and DATA_PLATFORM_DEPLOY_HOOK_URL env vars to be set.
+    Sends a `nightly-deploy` event to both the backend and data-platform GitHub repos,
+    which fires their deploy workflows (railway up + smoke tests). Called by cron-runner
+    daily at 2AM CST and available for manual dashboard triggers.
+
+    Requires:
+        GITHUB_DEPLOY_TOKEN  — GitHub PAT with repo + workflow scopes
+        BACKEND_GITHUB_REPO  — e.g. "username/backend"
+        DATA_PLATFORM_GITHUB_REPO — e.g. "username/data-platform"
     """
     from core.settings import settings
 
-    hook_urls = {
-        "backend": settings.backend_deploy_hook_url,
-        "data_platform": settings.data_platform_deploy_hook_url,
+    token = settings.github_deploy_token.get_secret_value() if settings.github_deploy_token else None
+    repos = {
+        "backend": settings.backend_github_repo,
+        "data_platform": settings.data_platform_github_repo,
     }
-    missing = [k for k, v in hook_urls.items() if not v]
+
+    missing: list[str] = []
+    if not token:
+        missing.append("GITHUB_DEPLOY_TOKEN")
+    missing += [k for k, v in repos.items() if not v]
     if missing:
         raise HTTPException(
             status_code=503,
-            detail=f"Deploy hook URLs not configured: {missing}",
+            detail=f"GitHub deploy config not set: {missing}",
         )
 
-    log.info("deploy_hooks_firing", services=list(hook_urls.keys()))
+    log.info("github_dispatch_firing", repos=list(repos.values()))
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    async def dispatch(repo: str) -> httpx.Response:
+        url = f"https://api.github.com/repos/{repo}/dispatches"
+        return await client.post(url, json={"event_type": "nightly-deploy"}, headers=headers)
 
     async with httpx.AsyncClient(timeout=30) as client:
         results = await asyncio.gather(
-            client.post(hook_urls["backend"]),
-            client.post(hook_urls["data_platform"]),
+            dispatch(repos["backend"]),
+            dispatch(repos["data_platform"]),
             return_exceptions=True,
         )
 
@@ -1212,16 +1233,14 @@ async def trigger_deploy(
             outcomes[name] = {"ok": False, "error": str(result)}
             all_ok = False
         else:
-            ok = result.status_code < 300
-            outcomes[name] = {
-                "ok": ok,
-                "status": result.status_code,
-                "body": result.text[:200],
-            }
+            # GitHub returns 204 No Content on success
+            ok = result.status_code in (204, 200)
+            outcomes[name] = {"ok": ok, "status": result.status_code}
             if not ok:
+                outcomes[name]["body"] = result.text[:200]
                 all_ok = False
 
     status = "success" if all_ok else "partial_failure"
-    log.info("deploy_hooks_fired", status=status, outcomes=outcomes)
+    log.info("github_dispatch_fired", status=status, outcomes=outcomes)
 
-    return {"status": status, "message": f"Deploy hooks fired ({status})", "data": outcomes}
+    return {"status": status, "message": f"Deploy dispatched to GitHub ({status})", "data": outcomes}

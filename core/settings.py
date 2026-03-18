@@ -43,9 +43,11 @@ class Settings(BaseSettings):
     # Pipeline Auth
     pipeline_api_token: SecretStr
 
-    # Railway Deploy Hooks (created in Railway dashboard → Service → Settings → Deploy)
-    backend_deploy_hook_url: Optional[str] = None
-    data_platform_deploy_hook_url: Optional[str] = None
+    # GitHub repository_dispatch for nightly production deploys
+    # Token requires repo + workflow scopes. Repos are the GitHub repos for each service.
+    github_deploy_token: Optional[SecretStr] = None
+    backend_github_repo: Optional[str] = None        # e.g. "username/backend"
+    data_platform_github_repo: Optional[str] = None  # e.g. "username/data-platform"
 
     # Resend (email notifications)
     resend_api_key: Optional[SecretStr] = None
