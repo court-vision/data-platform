@@ -214,6 +214,7 @@
     .pipeline-card.cat-pre_game::before  { background: var(--cat-pre); }
     .pipeline-card.cat-post_game::before { background: var(--cat-post); }
     .pipeline-card.cat-scheduled::before { background: var(--cat-scheduled); }
+    .pipeline-card.cat-deploy::before    { background: var(--cat-deploy); }
 
     .pipeline-card:hover { border-color: var(--border2); }
     .pipeline-card.s-running { border-color: rgba(234,179,8,0.3); }
@@ -687,7 +688,6 @@
       <span class="section-title deploy">Deployments</span>
       <span class="badge" id="deployRunCount">—</span>
       <span class="section-desc">backend + data-platform · 2AM CST · via GitHub Actions</span>
-      <button class="btn-sm inline-run-btn" id="deployBtn" onclick="triggerDeploy()">Deploy Both Services</button>
     </div>
     <div id="deployWrap">
       <div class="empty">Loading…</div>
@@ -1227,18 +1227,17 @@
   let deployTriggering = false;
 
   function setDeployButtonState() {
-    const btn = document.getElementById('deployBtn');
-    if (!btn) return;
-    btn.textContent = deployTriggering ? 'deploying…' : 'Deploy Both Services';
-    btn.disabled = deployTriggering;
+    // Buttons live inside dynamically-rendered cards — re-render to reflect state.
+    const wrap = document.getElementById('deployWrap');
+    if (wrap?.__cronRuns) renderDeployments(wrap.__cronRuns);
   }
 
   function renderDeployments(cronRuns) {
     const wrap = document.getElementById('deployWrap');
+    wrap.__cronRuns = cronRuns; // cache for re-render during deploy button loading state
     const runs = cronRuns
       .filter(r => r.job_name === 'deploy')
-      .sort((a, b) => toUtcMs(b.triggered_at) - toUtcMs(a.triggered_at))
-      .slice(0, 10);
+      .sort((a, b) => toUtcMs(b.triggered_at) - toUtcMs(a.triggered_at));
 
     document.getElementById('deployRunCount').textContent = runs.length;
 
@@ -1247,32 +1246,83 @@
       return;
     }
 
-    const rows = runs.map(r => {
-      const ts = fmtCTLong(toUtcMs(r.triggered_at));
-      const dur = r.duration_ms != null ? (r.duration_ms / 1000).toFixed(1) + 's' : '—';
-      const cls = r.result === 'failure' ? 'failed' : (r.attempts > 1 ? 'retried' : 'success');
-      const snippet = r.response_snippet ? esc(r.response_snippet.slice(0, 100)) : '—';
-      return `<tr>
-        <td style="padding:5px 10px;color:var(--muted2)">${esc(ts)}</td>
-        <td style="padding:5px 10px"><span class="status-badge ${cls}">${esc(r.result)}</span></td>
-        <td style="padding:5px 10px;color:var(--muted)">${dur}</td>
-        <td style="padding:5px 10px;color:var(--muted);font-size:9px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${snippet}</td>
-      </tr>`;
-    }).join('');
+    // Parse per-service outcomes from response_snippet JSON.
+    // Cron-runner records the full response body: {status, data: {backend, data_platform}}
+    // Manual self-records store the outcomes dict directly: {backend, data_platform}
+    function parseOutcomes(snippet) {
+      if (!snippet) return {};
+      try {
+        const p = JSON.parse(snippet);
+        return p.data || p;
+      } catch { return {}; }
+    }
+
+    // Find last success for a given service key across all runs
+    function lastSuccess(serviceKey) {
+      const r = runs.find(r => {
+        const o = parseOutcomes(r.response_snippet);
+        return o[serviceKey]?.ok === true;
+      });
+      return r ? relTime(r.triggered_at) : 'never';
+    }
+
+    const latest = runs[0];
+    const latestOutcomes = parseOutcomes(latest.response_snippet);
+    const dur = latest.duration_ms != null ? `${(latest.duration_ms / 1000).toFixed(1)}s` : '—';
+    const isTrig = deployTriggering;
+    const btnDis = isTrig ? ' disabled' : '';
+    const btnLabel = isTrig ? 'deploying…' : 'Deploy Both';
+    const btnCls = isTrig ? ' triggering' : '';
+
+    function deployCard(serviceKey, displayName, keyLabel) {
+      const outcome = latestOutcomes[serviceKey];
+      const svcOk = outcome?.ok;
+      const svcStatus = svcOk === true ? 'success' : svcOk === false ? 'failed' : 'never';
+      const svcLabel = svcOk === true ? 'success' : svcOk === false ? 'failure' : 'never run';
+      const cardCls = svcOk === false ? 's-failed' : '';
+      const httpStatus = outcome?.status != null ? outcome.status : '—';
+
+      return `
+        <div class="pipeline-card cat-deploy ${cardCls}">
+          <div class="card-top">
+            <div>
+              <div class="p-name">${displayName}</div>
+              <div class="p-key">${keyLabel}</div>
+            </div>
+            <span class="status-badge ${svcStatus}">${svcLabel}</span>
+          </div>
+          <div class="card-meta">
+            <div>
+              <div class="meta-label">Last deploy</div>
+              <div class="meta-value">${relTime(latest.triggered_at)}</div>
+            </div>
+            <div>
+              <div class="meta-label">Duration</div>
+              <div class="meta-value">${dur}</div>
+            </div>
+            <div>
+              <div class="meta-label">HTTP</div>
+              <div class="meta-value">${httpStatus}</div>
+            </div>
+            <div>
+              <div class="meta-label">Last success</div>
+              <div class="meta-value">${lastSuccess(serviceKey)}</div>
+            </div>
+          </div>
+          <div class="card-footer">
+            <button
+              class="btn-run${btnCls}"
+              onclick="triggerDeploy()"
+              ${btnDis}
+            >${btnLabel}</button>
+          </div>
+        </div>`;
+    }
 
     wrap.innerHTML = `
-      <div class="timeline-wrap">
-        <table style="width:100%;border-collapse:collapse;font-size:10px">
-          <thead>
-            <tr style="color:var(--muted2);text-align:left;border-bottom:1px solid var(--border)">
-              <th style="padding:4px 10px;font-weight:400">Time (CT)</th>
-              <th style="padding:4px 10px;font-weight:400">Result</th>
-              <th style="padding:4px 10px;font-weight:400">Duration</th>
-              <th style="padding:4px 10px;font-weight:400">Response</th>
-            </tr>
-          </thead>
-          <tbody style="color:var(--text)">${rows}</tbody>
-        </table>
+      <div class="pipeline-grid">
+        ${deployCard('backend', 'Backend', 'deploy / backend')}
+        ${deployCard('data_platform', 'Data Platform', 'deploy / data-platform')}
       </div>`;
   }
 
@@ -1281,7 +1331,7 @@
     deployTriggering = true;
     setDeployButtonState();
     try {
-      const res = await fetch('/v1/internal/pipelines/deploy', {
+      const res = await fetch('/v1/internal/pipelines/deploy?source=manual', {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
       });
@@ -1297,7 +1347,7 @@
       }
       const body = await res.json().catch(() => ({}));
       const status = body?.status ?? 'triggered';
-      showToast(`Deploy hooks fired (${status})`, status === 'success' ? 'ok' : 'err');
+      showToast(`Deploy dispatched (${status})`, status === 'success' ? 'ok' : 'err');
     } catch (e) {
       showToast(`Deploy failed: ${e.message}`, 'err');
     } finally {

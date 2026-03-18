@@ -11,7 +11,7 @@ The /all endpoint uses a fire-and-forget pattern:
 """
 
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 import httpx
@@ -1175,6 +1175,7 @@ async def _run_pipelines_background(
 
 @router.post("/deploy")
 async def trigger_deploy(
+    source: Optional[str] = Query(None, description="'manual' when triggered from dashboard"),
     _: str = Security(verify_pipeline_token),
 ) -> dict:
     """
@@ -1184,11 +1185,16 @@ async def trigger_deploy(
     which fires their deploy workflows (railway up + smoke tests). Called by cron-runner
     daily at 2AM CST and available for manual dashboard triggers.
 
+    When source=manual the endpoint self-records to cron_job_runs so the result
+    appears in the scheduler timeline and deployments section immediately. Cron-runner
+    triggered runs are recorded by the cron-runner reporter instead.
+
     Requires:
         GITHUB_DEPLOY_TOKEN  — GitHub PAT with repo + workflow scopes
         BACKEND_GITHUB_REPO  — e.g. "username/backend"
         DATA_PLATFORM_GITHUB_REPO — e.g. "username/data-platform"
     """
+    import json as _json
     from core.settings import settings
 
     token = settings.github_deploy_token.get_secret_value() if settings.github_deploy_token else None
@@ -1207,7 +1213,8 @@ async def trigger_deploy(
             detail=f"GitHub deploy config not set: {missing}",
         )
 
-    log.info("github_dispatch_firing", repos=list(repos.values()))
+    log.info("github_dispatch_firing", repos=list(repos.values()), source=source)
+    triggered_at = datetime.now(timezone.utc)
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -1226,6 +1233,9 @@ async def trigger_deploy(
             return_exceptions=True,
         )
 
+    completed_at = datetime.now(timezone.utc)
+    duration_ms = int((completed_at - triggered_at).total_seconds() * 1000)
+
     outcomes: dict = {}
     all_ok = True
     for name, result in zip(["backend", "data_platform"], results):
@@ -1240,7 +1250,31 @@ async def trigger_deploy(
                 outcomes[name]["body"] = result.text[:200]
                 all_ok = False
 
-    status = "success" if all_ok else "partial_failure"
-    log.info("github_dispatch_fired", status=status, outcomes=outcomes)
+    deploy_status = "success" if all_ok else "partial_failure"
+    log.info("github_dispatch_fired", status=deploy_status, outcomes=outcomes)
 
-    return {"status": status, "message": f"Deploy dispatched to GitHub ({status})", "data": outcomes}
+    # Self-record when triggered manually from the dashboard so the run
+    # appears in the timeline and deployment cards without waiting for cron-runner.
+    if source == "manual":
+        snippet = _json.dumps(outcomes)[:300]
+        error_msg = None if all_ok else _json.dumps(
+            {k: v["error"] for k, v in outcomes.items() if not v.get("ok")}
+        )
+
+        def _record() -> None:
+            from db.models.nba.cron_job_run import CronJobRun
+            CronJobRun.create(
+                job_name="deploy",
+                triggered_at=triggered_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+                result="success" if all_ok else "failure",
+                http_status=None,
+                attempts=1,
+                error_message=error_msg,
+                response_snippet=snippet,
+            )
+
+        await asyncio.to_thread(_record)
+
+    return {"status": deploy_status, "message": f"Deploy dispatched to GitHub ({deploy_status})", "data": outcomes}
