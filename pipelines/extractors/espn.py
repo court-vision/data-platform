@@ -187,6 +187,10 @@ class ESPNExtractor(BaseExtractor):
         league_settings = data.get("settings", {})
         matchup_period_map = league_settings.get("scheduleSettings", {}).get("matchupPeriods", {})
         scoring_periods = matchup_period_map.get(str(current_matchup_period), [current_matchup_period])
+        # Extend with latestScoringPeriod when matchupPeriods doesn't include the
+        # playoff period key — ensures the full 2-week range is covered in week 2.
+        if scoring_period_id and scoring_period_id not in scoring_periods:
+            scoring_periods = list(scoring_periods) + [scoring_period_id]
         matchup_dates = get_dates_for_scoring_periods(scoring_periods)
         matchup_start = matchup_dates[0] if matchup_dates else None
 
