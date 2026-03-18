@@ -1176,6 +1176,7 @@ async def _run_pipelines_background(
 @router.post("/deploy")
 async def trigger_deploy(
     source: Optional[str] = Query(None, description="'manual' when triggered from dashboard"),
+    service: Optional[str] = Query(None, description="'backend' or 'data_platform'; omit to deploy both"),
     _: str = Security(verify_pipeline_token),
 ) -> dict:
     """
@@ -1198,10 +1199,11 @@ async def trigger_deploy(
     from core.settings import settings
 
     token = settings.github_deploy_token.get_secret_value() if settings.github_deploy_token else None
-    repos = {
+    all_repos = {
         "backend": settings.backend_github_repo,
         "data_platform": settings.data_platform_github_repo,
     }
+    repos = {service: all_repos[service]} if service and service in all_repos else all_repos
 
     missing: list[str] = []
     if not token:
@@ -1228,8 +1230,7 @@ async def trigger_deploy(
 
     async with httpx.AsyncClient(timeout=30) as client:
         results = await asyncio.gather(
-            dispatch(repos["backend"]),
-            dispatch(repos["data_platform"]),
+            *[dispatch(repo) for repo in repos.values()],
             return_exceptions=True,
         )
 
@@ -1238,7 +1239,7 @@ async def trigger_deploy(
 
     outcomes: dict = {}
     all_ok = True
-    for name, result in zip(["backend", "data_platform"], results):
+    for name, result in zip(repos.keys(), results):
         if isinstance(result, Exception):
             outcomes[name] = {"ok": False, "error": str(result)}
             all_ok = False

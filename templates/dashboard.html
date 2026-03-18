@@ -1224,7 +1224,7 @@
   }
 
   // ── Deployments ───────────────────────────────────────────────────────────
-  let deployTriggering = false;
+  let deployTriggering = new Set();
 
   function setDeployButtonState() {
     // Buttons live inside dynamically-rendered cards — re-render to reflect state.
@@ -1269,12 +1269,12 @@
     const latest = runs[0];
     const latestOutcomes = parseOutcomes(latest.response_snippet);
     const dur = latest.duration_ms != null ? `${(latest.duration_ms / 1000).toFixed(1)}s` : '—';
-    const isTrig = deployTriggering;
-    const btnDis = isTrig ? ' disabled' : '';
-    const btnLabel = isTrig ? 'deploying…' : 'Deploy Both';
-    const btnCls = isTrig ? ' triggering' : '';
-
     function deployCard(serviceKey, displayName, keyLabel) {
+      const isTrig = deployTriggering.has(serviceKey);
+      const btnDis = isTrig ? ' disabled' : '';
+      const svcLabel = serviceKey === 'backend' ? 'Deploy Backend' : 'Deploy Platform';
+      const btnLabel = isTrig ? 'deploying…' : svcLabel;
+      const btnCls = isTrig ? ' triggering' : '';
       const outcome = latestOutcomes[serviceKey];
       const svcOk = outcome?.ok;
       const svcStatus = svcOk === true ? 'success' : svcOk === false ? 'failed' : 'never';
@@ -1312,7 +1312,7 @@
           <div class="card-footer">
             <button
               class="btn-run${btnCls}"
-              onclick="triggerDeploy()"
+              onclick="triggerDeploy('${serviceKey}')"
               ${btnDis}
             >${btnLabel}</button>
           </div>
@@ -1326,12 +1326,13 @@
       </div>`;
   }
 
-  async function triggerDeploy() {
-    if (deployTriggering) return;
-    deployTriggering = true;
+  async function triggerDeploy(serviceKey) {
+    if (deployTriggering.has(serviceKey)) return;
+    deployTriggering.add(serviceKey);
     setDeployButtonState();
     try {
-      const res = await fetch('/v1/internal/pipelines/deploy?source=manual', {
+      const url = `/v1/internal/pipelines/deploy?source=manual&service=${serviceKey}`;
+      const res = await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
       });
@@ -1351,7 +1352,7 @@
     } catch (e) {
       showToast(`Deploy failed: ${e.message}`, 'err');
     } finally {
-      deployTriggering = false;
+      deployTriggering.delete(serviceKey);
       setDeployButtonState();
       setTimeout(() => { fetchStatus().then(startCountdown); }, 2000);
     }
@@ -1418,7 +1419,10 @@
   // ── Helpers ───────────────────────────────────────────────────────────────
   function relTime(iso) {
     if (!iso) return '—';
-    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    // Python datetime.isoformat() omits 'Z'; force UTC so browser doesn't treat as local time.
+    const ts = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z';
+    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    if (diff < 0)     return 'just now';
     if (diff < 60)    return `${diff}s ago`;
     if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
