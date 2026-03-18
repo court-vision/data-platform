@@ -11,6 +11,7 @@ Routes:
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Request, Security
@@ -127,11 +128,18 @@ async def get_dashboard_status(
 
 def _build_cron_runs() -> list[CronJobRunEntry]:
     """
-    Query last 200 cron job runs for the dashboard timeline.
+    Query cron job runs from the last 6 hours for the dashboard timeline.
+    Uses a time-window filter instead of a row-count limit so that pre-game
+    runs aren't crowded out by high-frequency live-stats runs.
     Runs synchronously — caller must wrap in asyncio.to_thread.
     """
     try:
-        rows = CronJobRun.recent(limit=200)
+        window_start = datetime.now(timezone.utc) - timedelta(hours=6)
+        rows = list(
+            CronJobRun.select()
+            .where(CronJobRun.triggered_at >= window_start)
+            .order_by(CronJobRun.triggered_at.desc())
+        )
         return [
             CronJobRunEntry(
                 id=str(r.id),

@@ -671,7 +671,7 @@
       <span class="cat-dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></span>
       <span class="section-title scheduler">Scheduler</span>
       <span class="badge" id="schedulerRunCount">—</span>
-      <span class="section-desc">Cron-runner job execution history · last 6 hours</span>
+      <span class="section-desc">Cron-runner job execution history · last 6 hours · CT</span>
     </div>
     <div id="schedulerWrap">
       <div class="empty">Loading…</div>
@@ -1131,6 +1131,17 @@
   const TIMELINE_JOBS = ['pre-game', 'live-stats', 'post-game'];
   let activePopover = null;
 
+  const _ctFmt = new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Chicago'
+  });
+  const _ctFmtLong = new Intl.DateTimeFormat('en-US', {
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
+    hour12: true, timeZone: 'America/Chicago'
+  });
+  const fmtCT = ms => _ctFmt.format(new Date(ms));
+  const fmtCTLong = ms => _ctFmtLong.format(new Date(ms)) + ' CT';
+
   function renderScheduler(cronRuns) {
     const wrap = document.getElementById('schedulerWrap');
     document.getElementById('schedulerRunCount').textContent = cronRuns.length;
@@ -1143,12 +1154,11 @@
     const now = Date.now();
     const windowStart = now - TIMELINE_WINDOW_MS;
 
-    // Build time axis labels (every 30 min, 12 ticks)
+    // Build time axis labels (every 30 min, 13 ticks) in 12h CST/CDT
     const axisLabels = [];
     for (let i = 12; i >= 0; i--) {
       const t = now - i * 30 * 60 * 1000;
-      const d = new Date(t);
-      axisLabels.push(d.toUTCString().slice(17, 22)); // "HH:MM"
+      axisLabels.push(fmtCT(t));
     }
 
     // Group runs by job name.
@@ -1215,8 +1225,8 @@
     try { r = JSON.parse(marker.dataset.run); } catch { return; }
 
     const toUtcMs = s => new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z').getTime();
-    const ts = new Date(toUtcMs(r.triggered_at));
-    const utcStr = ts.toUTCString().replace(' GMT', ' UTC');
+    const ts = toUtcMs(r.triggered_at);
+    const utcStr = fmtCTLong(ts);
     const dur = r.duration_ms != null ? (r.duration_ms / 1000).toFixed(2) + 's' : '—';
     const http = r.http_status != null ? r.http_status : '—';
     const attempts = r.attempts ?? 1;
@@ -1232,7 +1242,7 @@
     pop.className = 'tl-popover';
     pop._marker = marker;
     pop.innerHTML = `
-      <div class="tl-popover-row"><span class="tl-popover-label">Time (UTC)</span><span class="tl-popover-val">${esc(utcStr)}</span></div>
+      <div class="tl-popover-row"><span class="tl-popover-label">Time (CT)</span><span class="tl-popover-val">${esc(utcStr)}</span></div>
       <div class="tl-popover-row"><span class="tl-popover-label">Result</span><span class="tl-popover-val" ${resultCls}>${esc(r.result)}</span></div>
       <div class="tl-popover-row"><span class="tl-popover-label">Duration</span><span class="tl-popover-val">${dur}</span></div>
       <div class="tl-popover-row"><span class="tl-popover-label">HTTP</span><span class="tl-popover-val">${http}</span></div>
