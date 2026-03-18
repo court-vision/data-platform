@@ -1272,8 +1272,8 @@
     function deployCard(serviceKey, displayName, keyLabel) {
       const isTrig = deployTriggering.has(serviceKey);
       const btnDis = isTrig ? ' disabled' : '';
-      const svcLabel = serviceKey === 'backend' ? 'Deploy Backend' : 'Deploy Platform';
-      const btnLabel = isTrig ? 'deploying…' : svcLabel;
+      const deployLabel = serviceKey === 'backend' ? 'Deploy Backend' : 'Deploy Platform';
+      const btnLabel = isTrig ? 'deploying…' : deployLabel;
       const btnCls = isTrig ? ' triggering' : '';
       const outcome = latestOutcomes[serviceKey];
       const svcOk = outcome?.ok;
