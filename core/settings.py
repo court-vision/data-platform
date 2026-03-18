@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # Pipeline Auth
     pipeline_api_token: SecretStr
 
+    # Railway Deploy Hooks (created in Railway dashboard → Service → Settings → Deploy)
+    backend_deploy_hook_url: Optional[str] = None
+    data_platform_deploy_hook_url: Optional[str] = None
+
     # Resend (email notifications)
     resend_api_key: Optional[SecretStr] = None
     notification_from_email: str = "alerts@courtvision.dev"

@@ -29,6 +29,7 @@
       --cat-pre:       #eab308;
       --cat-post:      #a78bfa;
       --cat-scheduled: #60a5fa;
+      --cat-deploy:    #06b6d4;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -168,6 +169,7 @@
     .section-title.post_game { color: var(--cat-post);      }
     .section-title.scheduled { color: var(--cat-scheduled); }
     .section-title.quality   { color: var(--blue);          }
+    .section-title.deploy    { color: var(--cat-deploy);    }
     .section-title.jobs      { color: var(--muted2);        }
 
     .section-desc {
@@ -678,7 +680,21 @@
     </div>
   </div>
 
-  <!-- Recent Jobs -->
+  <!-- Deployments -->
+  <div class="deploy-section" id="deploySection">
+    <div class="section-header">
+      <span class="cat-dot" style="background:var(--cat-deploy);box-shadow:0 0 6px var(--cat-deploy)"></span>
+      <span class="section-title deploy">Deployments</span>
+      <span class="badge" id="deployRunCount">—</span>
+      <span class="section-desc">backend + data-platform · 2AM CST daily</span>
+      <button class="btn-sm inline-run-btn" id="deployBtn" onclick="triggerDeploy()">Deploy Both Services</button>
+    </div>
+    <div id="deployWrap">
+      <div class="empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Data Quality -->
   <div class="quality-section">
     <div class="section-header">
       <span class="section-title quality">Data Quality</span>
@@ -809,6 +825,7 @@
       lastPipelines = payload.data.pipelines || [];
       renderPipelineSections(lastPipelines);
       renderScheduler(payload.data.cron_job_runs || []);
+      renderDeployments(payload.data.cron_job_runs || []);
       renderQuality(payload.data || {});
       renderJobs(payload.data.recent_jobs || []);
       document.getElementById('lastUpdated').textContent =
@@ -1126,9 +1143,14 @@
     }
   }
 
+  // ── Shared time helpers ───────────────────────────────────────────────────
+  // Naive datetime strings from the API have no timezone suffix — append 'Z'
+  // so JavaScript treats them as UTC instead of local time.
+  const toUtcMs = s => new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z').getTime();
+
   // ── Scheduler Timeline ────────────────────────────────────────────────────
   const TIMELINE_WINDOW_MS = 6 * 60 * 60 * 1000; // 6 hours
-  const TIMELINE_JOBS = ['pre-game', 'live-stats', 'post-game'];
+  const TIMELINE_JOBS = ['pre-game', 'live-stats', 'post-game', 'deploy'];
   let activePopover = null;
 
   const _ctFmt = new Intl.DateTimeFormat('en-US', {
@@ -1162,9 +1184,6 @@
     }
 
     // Group runs by job name.
-    // Naive datetime strings from the API have no timezone suffix — append 'Z'
-    // so JavaScript treats them as UTC instead of local time.
-    const toUtcMs = s => new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z').getTime();
     const byJob = {};
     for (const j of TIMELINE_JOBS) byJob[j] = [];
     for (const r of cronRuns) {
@@ -1204,6 +1223,90 @@
       </div>`;
   }
 
+  // ── Deployments ───────────────────────────────────────────────────────────
+  let deployTriggering = false;
+
+  function setDeployButtonState() {
+    const btn = document.getElementById('deployBtn');
+    if (!btn) return;
+    btn.textContent = deployTriggering ? 'deploying…' : 'Deploy Both Services';
+    btn.disabled = deployTriggering;
+  }
+
+  function renderDeployments(cronRuns) {
+    const wrap = document.getElementById('deployWrap');
+    const runs = cronRuns
+      .filter(r => r.job_name === 'deploy')
+      .sort((a, b) => toUtcMs(b.triggered_at) - toUtcMs(a.triggered_at))
+      .slice(0, 10);
+
+    document.getElementById('deployRunCount').textContent = runs.length;
+
+    if (!runs.length) {
+      wrap.innerHTML = '<div class="empty">No deploy runs yet — first run at 2AM CST or trigger manually</div>';
+      return;
+    }
+
+    const rows = runs.map(r => {
+      const ts = fmtCTLong(toUtcMs(r.triggered_at));
+      const dur = r.duration_ms != null ? (r.duration_ms / 1000).toFixed(1) + 's' : '—';
+      const cls = r.result === 'failure' ? 'failed' : (r.attempts > 1 ? 'retried' : 'success');
+      const snippet = r.response_snippet ? esc(r.response_snippet.slice(0, 100)) : '—';
+      return `<tr>
+        <td style="padding:5px 10px;color:var(--muted2)">${esc(ts)}</td>
+        <td style="padding:5px 10px"><span class="status-badge ${cls}">${esc(r.result)}</span></td>
+        <td style="padding:5px 10px;color:var(--muted)">${dur}</td>
+        <td style="padding:5px 10px;color:var(--muted);font-size:9px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${snippet}</td>
+      </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <div class="timeline-wrap">
+        <table style="width:100%;border-collapse:collapse;font-size:10px">
+          <thead>
+            <tr style="color:var(--muted2);text-align:left;border-bottom:1px solid var(--border)">
+              <th style="padding:4px 10px;font-weight:400">Time (CT)</th>
+              <th style="padding:4px 10px;font-weight:400">Result</th>
+              <th style="padding:4px 10px;font-weight:400">Duration</th>
+              <th style="padding:4px 10px;font-weight:400">Response</th>
+            </tr>
+          </thead>
+          <tbody style="color:var(--text)">${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  async function triggerDeploy() {
+    if (deployTriggering) return;
+    deployTriggering = true;
+    setDeployButtonState();
+    try {
+      const res = await fetch('/v1/internal/pipelines/deploy', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (res.status === 401 || res.status === 403) {
+        nukeToken();
+        document.getElementById('tokenErr').classList.add('show');
+        document.getElementById('overlay').classList.remove('hidden');
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || body.message || `HTTP ${res.status}`);
+      }
+      const body = await res.json().catch(() => ({}));
+      const status = body?.status ?? 'triggered';
+      showToast(`Deploy hooks fired (${status})`, status === 'success' ? 'ok' : 'err');
+    } catch (e) {
+      showToast(`Deploy failed: ${e.message}`, 'err');
+    } finally {
+      deployTriggering = false;
+      setDeployButtonState();
+      setTimeout(() => { fetchStatus().then(startCountdown); }, 2000);
+    }
+  }
+
   function togglePopover(marker, e) {
     e.stopPropagation();
 
@@ -1224,7 +1327,6 @@
     let r;
     try { r = JSON.parse(marker.dataset.run); } catch { return; }
 
-    const toUtcMs = s => new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z').getTime();
     const ts = toUtcMs(r.triggered_at);
     const utcStr = fmtCTLong(ts);
     const dur = r.duration_ms != null ? (r.duration_ms / 1000).toFixed(2) + 's' : '—';

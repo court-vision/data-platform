@@ -20,8 +20,6 @@ on:
     workflows: ["Data Platform Tests"]
     types: [completed]
     branches: [main]
-  schedule:
-    - cron: '0 7 * * *'  # 2 AM ET daily — deploy previous day's changes to production
   workflow_dispatch:
 
 jobs:
