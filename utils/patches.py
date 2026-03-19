@@ -10,6 +10,7 @@ to ensure the patch is applied before any nba_api calls are made.
 
 from curl_cffi import requests
 from nba_api.library.http import NBAHTTP
+from core.settings import settings
 
 
 # Headers that properly impersonate a browser request to stats.nba.com
@@ -57,12 +58,14 @@ def browser_impersonation_request(
     clean_params = {k: v for k, v in parameters.items() if v is not None}
 
     # Send request with browser impersonation
+    proxies = {"http": settings.nba_api_proxy_url, "https": settings.nba_api_proxy_url} if settings.nba_api_proxy_url else None
     response = requests.get(
         base_url,
         params=clean_params,
         headers=request_headers,
         timeout=timeout or 30,
-        impersonate="chrome110"
+        impersonate="chrome110",
+        proxies=proxies,
     )
 
     status_code = response.status_code

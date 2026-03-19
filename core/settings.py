@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Get a free key at https://app.balldontlie.io
     balldontlie_api_key: Optional[SecretStr] = None
 
+    # Residential proxy for stats.nba.com (cloud IPs are often blocked)
+    # Format: http://username:password@host:port
+    nba_api_proxy_url: Optional[str] = None
+
     # Resilience
     retry_max_attempts: int = 3
     retry_base_delay: float = 2.0
