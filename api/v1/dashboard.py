@@ -128,18 +128,41 @@ async def get_dashboard_status(
 
 def _build_cron_runs() -> list[CronJobRunEntry]:
     """
-    Query cron job runs from the last 6 hours for the dashboard timeline.
-    Uses a time-window filter instead of a row-count limit so that pre-game
-    runs aren't crowded out by high-frequency live-stats runs.
+    Query cron job runs for the dashboard timeline and deployment cards.
+
+    Uses a 6-hour time window for high-frequency jobs (live-stats, pre-game,
+    post-game) so they don't crowd out other runs.  Deploy runs are fetched
+    separately with a 48-hour window so the Deployments section always shows
+    cards — the deploy job only fires once per day at 2 AM CST and would
+    otherwise fall outside the 6h window for most of the day.
+
     Runs synchronously — caller must wrap in asyncio.to_thread.
     """
     try:
-        window_start = datetime.now(timezone.utc) - timedelta(hours=6)
-        rows = list(
+        now = datetime.now(timezone.utc)
+        window_start = now - timedelta(hours=6)
+        deploy_window_start = now - timedelta(hours=48)
+
+        windowed_rows = list(
             CronJobRun.select()
             .where(CronJobRun.triggered_at >= window_start)
             .order_by(CronJobRun.triggered_at.desc())
         )
+
+        # Always include recent deploy runs so the Deployments cards render
+        # even when the last deploy happened more than 6 hours ago.
+        deploy_rows = list(
+            CronJobRun.select()
+            .where(
+                (CronJobRun.job_name == "deploy")
+                & (CronJobRun.triggered_at >= deploy_window_start)
+                & (CronJobRun.triggered_at < window_start)
+            )
+            .order_by(CronJobRun.triggered_at.desc())
+            .limit(10)
+        )
+
+        rows = windowed_rows + deploy_rows
         return [
             CronJobRunEntry(
                 id=str(r.id),
