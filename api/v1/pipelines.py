@@ -640,18 +640,25 @@ async def trigger_post_game(
         name = cls.config.name
 
         if not force:
-            if PipelineRun.was_successful_on_date(name, nba_date, after=estimated_end_utc):
-                log.info("post_game_pipeline_dedup_skip", pipeline=name, nba_date=str(nba_date))
-                continue
             if PipelineRun.is_running(name):
                 log.info("post_game_pipeline_concurrency_skip", pipeline=name)
                 continue
 
-            # ESPN-gated pipelines wait for ESPN's nightly batch before running.
-            # The gate checks latestScoringPeriod and has a 2:30 AM ET fallback.
-            if cls.config.espn_gated and not _espn_scoring_period_advanced():
-                log.info("post_game_espn_gate_not_ready", pipeline=name)
-                continue
+            if cls.config.espn_gated:
+                # For ESPN-gated pipelines the scoring-period check acts as the
+                # dedup. We intentionally skip was_successful_on_date here: the
+                # time fallback may have fired before ESPN's nightly batch ran,
+                # writing stale records. Once ESPN's latestScoringPeriod advances,
+                # _espn_scoring_period_advanced() flips to True and we re-run.
+                # After a correct run (stored period == ESPN period) it returns
+                # False, preventing further re-runs — no separate dedup needed.
+                if not _espn_scoring_period_advanced():
+                    log.info("post_game_espn_gate_not_ready", pipeline=name)
+                    continue
+            else:
+                if PipelineRun.was_successful_on_date(name, nba_date, after=estimated_end_utc):
+                    log.info("post_game_pipeline_dedup_skip", pipeline=name, nba_date=str(nba_date))
+                    continue
 
         pipelines_to_run.append(name)
 
