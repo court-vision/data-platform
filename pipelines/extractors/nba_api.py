@@ -45,7 +45,7 @@ class NBAApiExtractor(BaseExtractor):
         max_delay=settings.retry_max_delay,
     )
     @nba_api_circuit
-    def get_game_logs(self, date_str: str, season: str) -> pd.DataFrame:
+    def get_game_logs(self, date_str: str, season: str) -> "pd.DataFrame":
         """
         Fetch player game logs from NBA API for a specific date.
 
