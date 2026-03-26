@@ -7,7 +7,6 @@ then inserts into the nba schema tables.
 
 from datetime import timedelta
 
-import pandas as pd
 import pytz
 
 from core.settings import settings
@@ -47,6 +46,7 @@ class PlayerGameStatsPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the daily player stats pipeline."""
+        import pandas as pd
         central_tz = pytz.timezone("US/Central")
 
         # Determine the NBA game date. Use an explicit override for backfills;

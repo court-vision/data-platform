@@ -6,9 +6,10 @@ Fetches data from NBA Stats API via nba_api library.
 
 import json
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pandas as pd
+if TYPE_CHECKING:
+    import pandas as pd
 
 from core.settings import settings
 from core.resilience import (
