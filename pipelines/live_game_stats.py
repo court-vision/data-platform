@@ -12,7 +12,7 @@ endpoint (POST /v1/internal/pipelines/live-stats).
 from datetime import timedelta
 
 
-from db.models.nba import Player, LivePlayerStats
+from db.models.nba import Player, LivePlayerStats, LiveGameScoreSnapshot
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
@@ -70,6 +70,11 @@ class LiveGameStatsPipeline(BasePipeline):
         if deleted:
             ctx.log.info("live_stats_cleanup", deleted_count=deleted, game_date=str(game_date))
 
+        # Clean up score snapshots from previous game days.
+        LiveGameScoreSnapshot.delete().where(
+            LiveGameScoreSnapshot.game_date < game_date
+        ).execute()
+
         # Get all games on the scoreboard for today
         scoreboard_games = self.nba_extractor.get_scoreboard_games(game_date)
 
@@ -89,6 +94,17 @@ class LiveGameStatsPipeline(BasePipeline):
             game_status = game_meta["game_status"]
             period = game_meta.get("period") or None
             game_clock = game_meta.get("game_clock") or None
+
+            # Record a score snapshot for this game using scoreboard data.
+            # This appends one row per game per poll, building a time series
+            # for the score-over-time chart. No extra API call — scoreboard
+            # data already has home/away scores, team abbreviations, and status.
+            LiveGameScoreSnapshot.record_snapshot(
+                game_id=game_id,
+                game_date=game_date,
+                game_meta=game_meta,
+                pipeline_run_id=ctx.run_id,
+            )
 
             # Fetch live box score for this game
             game_data = self.nba_extractor.get_live_box_score(game_id)

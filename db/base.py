@@ -46,6 +46,7 @@ def init_db():
         Game,
         PlayerInjury,
         LivePlayerStats,
+        LiveGameScoreSnapshot,
         BreakoutCandidate,
         CronJobRun,
     )
@@ -83,6 +84,7 @@ def init_db():
             PlayerProfile, PlayerAdvancedStats, Game, PlayerInjury,
             # NBA schema - live data
             LivePlayerStats,
+            LiveGameScoreSnapshot,
             # NBA schema - breakout detection
             BreakoutCandidate,
             # NBA schema - cron-runner audit
