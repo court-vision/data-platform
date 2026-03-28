@@ -65,6 +65,11 @@ class GameStartTimesPipeline(BasePipeline):
         for game_date_entry in game_dates:
             for game in game_date_entry["games"]:
                 game_id = game["gameId"]
+
+                # Skip preseason games (game IDs starting with "001")
+                if game_id.startswith("001"):
+                    continue
+
                 game_status = game.get("gameStatus", 1)
                 status = GAME_STATUS_MAP.get(game_status, "scheduled")
 
