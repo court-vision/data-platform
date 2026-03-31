@@ -635,6 +635,7 @@ async def trigger_post_game(
     # Per-pipeline dedup: determine which pipelines still need to run
     post_game_pipelines = get_pipelines_by_category(PipelineCategory.POST_GAME)
     pipelines_to_run = []
+    time_gated_pipelines = []
 
     for cls in post_game_pipelines:
         name = cls.config.name
@@ -643,6 +644,21 @@ async def trigger_post_game(
             if PipelineRun.is_running(name):
                 log.info("post_game_pipeline_concurrency_skip", pipeline=name)
                 continue
+
+            # Time gate: skip until the pipeline's earliest_run_time_cst is reached.
+            # Tracked separately so the response can distinguish "deferred" from "done".
+            if cls.config.earliest_run_time_cst is not None:
+                central = pytz.timezone("US/Central")
+                now_cst = datetime.now(central)
+                if now_cst.time() < cls.config.earliest_run_time_cst:
+                    log.info(
+                        "post_game_pipeline_time_gated",
+                        pipeline=name,
+                        earliest_cst=str(cls.config.earliest_run_time_cst),
+                        current_cst=now_cst.strftime("%H:%M"),
+                    )
+                    time_gated_pipelines.append(name)
+                    continue
 
             if cls.config.espn_gated:
                 # For ESPN-gated pipelines the scoring-period check acts as the
@@ -663,6 +679,16 @@ async def trigger_post_game(
         pipelines_to_run.append(name)
 
     if not pipelines_to_run:
+        if time_gated_pipelines:
+            log.info(
+                "post_game_pipelines_time_gated",
+                nba_date=str(nba_date),
+                time_gated=time_gated_pipelines,
+            )
+            return PipelineResponse(
+                status=ApiStatus.SUCCESS,
+                message=f"Post-game pipelines deferred for {nba_date}: {time_gated_pipelines} waiting for earliest_run_time_cst, will retry",
+            )
         log.info("post_game_all_complete", nba_date=str(nba_date))
         return PipelineResponse(
             status=ApiStatus.SUCCESS,

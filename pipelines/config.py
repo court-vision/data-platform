@@ -5,6 +5,7 @@ Immutable configuration dataclass for pipeline metadata.
 """
 
 from dataclasses import dataclass, field
+from datetime import time
 from enum import Enum
 from typing import Optional
 
@@ -73,6 +74,13 @@ class PipelineConfig:
     # latestScoringPeriod has advanced beyond the last stored baseline,
     # with a 2:30 AM ET time fallback for no-game days.
     espn_gated: bool = False
+
+    # Wall-clock earliest run time gate (CST). Only meaningful for POST_GAME pipelines.
+    # When set, the post-game endpoint will not trigger this pipeline until the current
+    # CST time is at or after this value. Use to prevent premature execution when an
+    # external data source (e.g. ESPN) is known to publish on a fixed schedule.
+    # If None, no time gate is applied.
+    earliest_run_time_cst: Optional[time] = None
 
     # Skip the batch-level dedup gate in the pre-game endpoint.
     # Set True for pipelines that manage their own internal dedup (e.g. lineup_alerts

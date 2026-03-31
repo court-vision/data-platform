@@ -5,6 +5,7 @@ Fetches current matchup scores for all saved teams and records daily snapshots.
 """
 
 import json
+from datetime import time
 from typing import Optional
 
 import pytz
@@ -41,6 +42,10 @@ class DailyMatchupScoresPipeline(BasePipeline):
         # latestScoringPeriod has advanced, with a 2:30 AM ET time fallback.
         category=PipelineCategory.POST_GAME,
         espn_gated=True,
+        # ESPN publishes updated matchup scores (totalPoints, lineup slots) at
+        # ~2 AM CST nightly. Gate execution until then to avoid writing stale
+        # scores that would need to be overwritten anyway.
+        earliest_run_time_cst=time(2, 0),
     )
 
     def __init__(self):
