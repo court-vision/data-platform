@@ -20,6 +20,7 @@ from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.team_stats import TeamStats
 from db.models.nba.breakout_candidates import BreakoutCandidate
 from db.models.nba.cron_job_run import CronJobRun
+from db.models.nba.playoff_series import PlayoffSeries
 
 __all__ = [
     # Dimension tables
@@ -44,4 +45,6 @@ __all__ = [
     "BreakoutCandidate",
     # Cron-runner audit
     "CronJobRun",
+    # Playoff bracket
+    "PlayoffSeries",
 ]

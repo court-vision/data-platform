@@ -538,6 +538,46 @@ class NBAApiExtractor(BaseExtractor):
                 raise NetworkError(f"NBA API connection error: {e}")
             raise
 
+    @with_retry(
+        max_attempts=settings.retry_max_attempts,
+        base_delay=settings.retry_base_delay,
+        max_delay=settings.retry_max_delay,
+    )
+    @nba_api_circuit
+    def get_playoff_bracket(self, season_id: str) -> "pd.DataFrame":
+        """
+        Fetch playoff series standings from NBA Stats API.
+
+        Args:
+            season_id: Season ID in format "42025" (4=playoffs prefix, 2025=start year)
+                       For the 2025-26 playoffs: "42025"
+
+        Returns:
+            DataFrame with one row per series (series_id, conference, round,
+            home/visitor team IDs, abbreviations, wins/losses)
+        """
+        from nba_api.stats.endpoints import SeriesStandings
+
+        self.log.debug("playoff_bracket_start", season_id=season_id)
+
+        try:
+            standings = SeriesStandings(
+                league_id="00",
+                season_id=season_id,
+            )
+            df = standings.get_data_frames()[0]
+
+            self.log.info("playoff_bracket_complete", series_count=len(df))
+            return df
+
+        except Exception as e:
+            error_str = str(e).lower()
+            if "timeout" in error_str:
+                raise NetworkError(f"NBA API timeout: {e}")
+            if "connection" in error_str:
+                raise NetworkError(f"NBA API connection error: {e}")
+            raise
+
     def get_all_player_ids(self, season: str | None = None) -> list[int]:
         """
         Get all active player IDs for a season.

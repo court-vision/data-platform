@@ -49,6 +49,7 @@ def init_db():
         LiveGameScoreSnapshot,
         BreakoutCandidate,
         CronJobRun,
+        PlayoffSeries,
     )
 
     # User/team models (read by lineup_alerts pipeline for notification prefs)
@@ -89,6 +90,8 @@ def init_db():
             BreakoutCandidate,
             # NBA schema - cron-runner audit
             CronJobRun,
+            # NBA schema - playoff bracket
+            PlayoffSeries,
             # User schema (referenced by lineup_alerts)
             User, Team, Lineup,
             # Notification tables (read/written by lineup_alerts pipeline)

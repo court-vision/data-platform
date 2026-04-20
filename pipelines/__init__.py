@@ -26,6 +26,7 @@ from pipelines.live_game_stats import LiveGameStatsPipeline
 from pipelines.player_profiles import PlayerProfilesPipeline
 from pipelines.game_start_times import GameStartTimesPipeline
 from pipelines.daily_matchup_scores import DailyMatchupScoresPipeline
+from pipelines.playoff_bracket import PlayoffBracketPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -52,6 +53,7 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     # SCHEDULED — hardcoded Railway cron; each has its own service trigger
     "player_profiles": PlayerProfilesPipeline,
     "game_start_times": GameStartTimesPipeline,
+    "playoff_bracket": PlayoffBracketPipeline,
 }
 
 
@@ -165,6 +167,7 @@ __all__ = [
     "PlayerProfilesPipeline",
     "GameStartTimesPipeline",
     "DailyMatchupScoresPipeline",
+    "PlayoffBracketPipeline",
     # Registry
     "PIPELINE_REGISTRY",
     "get_pipelines_by_category",

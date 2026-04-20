@@ -1312,3 +1312,24 @@ async def trigger_deploy(
         await asyncio.to_thread(_record)
 
     return {"status": deploy_status, "message": f"Deploy dispatched to GitHub ({deploy_status})", "data": outcomes}
+
+
+# ── Playoffs ──────────────────────────────────────────────────────────────────
+
+@router.post("/playoffs", response_model=PipelineResponse)
+async def trigger_playoffs(
+    _: str = Security(verify_pipeline_token),
+) -> PipelineResponse:
+    """
+    Trigger the playoff bracket pipeline.
+
+    Fetches current NBA playoff series standings from NBA Stats API (SeriesStandings)
+    and upserts to nba.playoff_series. Called once nightly at ~1 AM ET by the
+    'playoffs' cron job in cron-runner.
+    """
+    result = await run_pipeline("playoff_bracket")
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
