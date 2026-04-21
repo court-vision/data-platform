@@ -9,6 +9,7 @@ complete (~1 AM ET via the 'playoffs' cron job).
 from datetime import datetime
 
 from db.models.nba import PlayoffSeries
+from db.models.nba.teams import NBATeam
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
@@ -19,9 +20,9 @@ class PlayoffBracketPipeline(BasePipeline):
     """
     Fetch playoff series standings and write to nba.playoff_series.
 
-    Columns returned by SeriesStandings vary slightly by NBA API version.
-    This pipeline normalizes what it can and stores enough to render
-    a bracket: conference, round, teams (abbr + id), wins per team.
+    Uses CommonPlayoffSeries (game structure) + LeagueGameLog (results) to
+    compute per-series win counts and store enough to render a bracket:
+    conference, round, teams (abbr + id), wins per team.
     """
 
     config = PipelineConfig(
@@ -46,13 +47,9 @@ class PlayoffBracketPipeline(BasePipeline):
         else:
             season = f"{now.year - 1}-{str(now.year)[-2:]}"
 
-        # Playoff season_id: "4" prefix + start year (e.g. "42025" for 2025-26)
-        start_year = int(season.split("-")[0])
-        playoff_season_id = f"4{start_year}"
+        ctx.log.info("fetching_playoff_bracket", season=season)
 
-        ctx.log.info("fetching_playoff_bracket", season=season, season_id=playoff_season_id)
-
-        df = self.nba_extractor.get_playoff_bracket(playoff_season_id)
+        df = self.nba_extractor.get_playoff_bracket(season)
 
         if df is None or df.empty:
             ctx.log.warning("no_playoff_data")
@@ -60,20 +57,10 @@ class PlayoffBracketPipeline(BasePipeline):
 
         ctx.log.debug("raw_columns", columns=list(df.columns))
 
-        # Normalize column names to uppercase for consistent access
-        df.columns = [c.upper() for c in df.columns]
-
-        # Map conference label from conference number or series_id prefix
-        def _conference(row) -> str:
-            conf_raw = str(row.get("CONFERENCE", "")).upper()
-            if "EAST" in conf_raw or conf_raw == "E":
-                return "East"
-            if "WEST" in conf_raw or conf_raw == "W":
-                return "West"
-            # Fallback: round 4 = Finals
-            if row.get("ROUND_NUM", 0) == 4:
-                return "Finals"
-            return conf_raw or "Unknown"
+        # Pre-load team_id → conference from nba.teams (avoids per-row queries)
+        team_conf: dict[int, str] = {}
+        for team in NBATeam.select(NBATeam.id, NBATeam.conference):
+            team_conf[team.id] = team.conference
 
         upserted = 0
         for _, row in df.iterrows():
@@ -84,18 +71,21 @@ class PlayoffBracketPipeline(BasePipeline):
                 continue
 
             round_num = int(row.get("ROUND_NUM", 0))
-            conference = _conference(row)
 
-            # Home team = top seed in NBA's convention for SeriesStandings
-            top_id = row.get("HOME_TEAM_ID") or row.get("TEAM_ID_HOME")
-            top_name = row.get("HOME_TEAM_CITY") or row.get("TEAM_CITY_HOME", "")
-            top_abbr = row.get("HOME_TEAM_ABBREVIATION") or row.get("TEAM_ABBREVIATION_HOME", "")
+            top_id = row.get("HOME_TEAM_ID")
+            top_name = row.get("HOME_TEAM_CITY", "")
+            top_abbr = row.get("HOME_TEAM_ABBREVIATION", "")
             top_wins = int(row.get("HOME_TEAM_WINS", 0))
 
-            bottom_id = row.get("VISITOR_TEAM_ID") or row.get("TEAM_ID_AWAY")
-            bottom_name = row.get("VISITOR_TEAM_CITY") or row.get("TEAM_CITY_AWAY", "")
-            bottom_abbr = row.get("VISITOR_TEAM_ABBREVIATION") or row.get("TEAM_ABBREVIATION_AWAY", "")
-            bottom_wins = int(row.get("VISITOR_TEAM_WINS", row.get("HOME_TEAM_LOSSES", 0)))
+            bottom_id = row.get("VISITOR_TEAM_ID")
+            bottom_name = row.get("VISITOR_TEAM_CITY", "")
+            bottom_abbr = row.get("VISITOR_TEAM_ABBREVIATION", "")
+            bottom_wins = int(row.get("VISITOR_TEAM_WINS", 0))
+
+            if round_num == 4:
+                conference = "Finals"
+            else:
+                conference = team_conf.get(int(top_id), "Unknown") if top_id else "Unknown"
 
             # Series complete when either team reaches 4 wins
             series_complete = top_wins == 4 or bottom_wins == 4

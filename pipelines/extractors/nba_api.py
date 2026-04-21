@@ -544,31 +544,118 @@ class NBAApiExtractor(BaseExtractor):
         max_delay=settings.retry_max_delay,
     )
     @nba_api_circuit
-    def get_playoff_bracket(self, season_id: str) -> "pd.DataFrame":
+    def get_playoff_bracket(self, season: str) -> "pd.DataFrame":
         """
-        Fetch playoff series standings from NBA Stats API.
+        Build playoff bracket from CommonPlayoffSeries + LeagueGameLog.
 
         Args:
-            season_id: Season ID in format "42025" (4=playoffs prefix, 2025=start year)
-                       For the 2025-26 playoffs: "42025"
+            season: Season string in "YYYY-YY" format (e.g. "2025-26")
 
         Returns:
-            DataFrame with one row per series (series_id, conference, round,
-            home/visitor team IDs, abbreviations, wins/losses)
+            DataFrame with one row per series and columns:
+            SERIES_ID, ROUND_NUM, HOME_TEAM_ID, HOME_TEAM_CITY,
+            HOME_TEAM_ABBREVIATION, HOME_TEAM_WINS, VISITOR_TEAM_ID,
+            VISITOR_TEAM_CITY, VISITOR_TEAM_ABBREVIATION, VISITOR_TEAM_WINS
         """
-        from nba_api.stats.endpoints import SeriesStandings
+        import time
+        import pandas as pd
+        from nba_api.stats.endpoints import CommonPlayoffSeries, LeagueGameLog
 
-        self.log.debug("playoff_bracket_start", season_id=season_id)
+        self.log.debug("playoff_bracket_start", season=season)
 
         try:
-            standings = SeriesStandings(
-                league_id="00",
-                season_id=season_id,
-            )
-            df = standings.get_data_frames()[0]
+            # Step 1: game structure — one row per playoff game with SERIES_ID
+            time.sleep(0.6)
+            series_games = CommonPlayoffSeries(
+                league_id="00", season=season
+            ).get_data_frames()[0]
 
-            self.log.info("playoff_bracket_complete", series_count=len(df))
-            return df
+            if series_games.empty:
+                self.log.warning("playoff_series_empty", season=season)
+                return pd.DataFrame()
+
+            # Step 2: team-level game results for wins + team name/abbr
+            time.sleep(0.6)
+            game_log = LeagueGameLog(
+                league_id="00",
+                season=season,
+                season_type_all_star="Playoffs",
+                player_or_team_abbreviation="T",
+            ).get_data_frames()[0]
+
+            # Parse round number from GAME_ID.
+            # NBA playoff game_id is 10 digits: 004[YY]00[R][S][G]
+            # Position 7 (0-indexed) encodes the round (1=first, 4=finals).
+            def _round(game_id: str) -> int:
+                try:
+                    return int(str(game_id).zfill(10)[7])
+                except (ValueError, IndexError):
+                    return 0
+
+            series_games["ROUND_NUM"] = series_games["GAME_ID"].apply(_round)
+
+            # One metadata row per series (home/visitor IDs + round)
+            series_meta = (
+                series_games.groupby("SERIES_ID")
+                .agg(
+                    HOME_TEAM_ID=("HOME_TEAM_ID", "first"),
+                    VISITOR_TEAM_ID=("VISITOR_TEAM_ID", "first"),
+                    ROUND_NUM=("ROUND_NUM", "first"),
+                )
+                .reset_index()
+            )
+
+            # Step 3: map GAME_ID → SERIES_ID, then count wins per team
+            game_to_series = series_games[["GAME_ID", "SERIES_ID"]].drop_duplicates()
+
+            played = game_log[game_log["WL"].notna()][
+                ["GAME_ID", "TEAM_ID", "TEAM_ABBREVIATION", "TEAM_NAME", "WL"]
+            ].copy()
+            played = played.merge(game_to_series, on="GAME_ID", how="left")
+
+            wins = (
+                played[played["WL"] == "W"]
+                .groupby(["SERIES_ID", "TEAM_ID"])
+                .size()
+                .reset_index(name="WINS")
+            )
+
+            # Build one output row per series
+            rows = []
+            for _, meta in series_meta.iterrows():
+                sid = meta["SERIES_ID"]
+                home_id = int(meta["HOME_TEAM_ID"])
+                vis_id = int(meta["VISITOR_TEAM_ID"])
+                round_num = int(meta["ROUND_NUM"])
+
+                s_wins = wins[wins["SERIES_ID"] == sid]
+                home_wins = int(s_wins[s_wins["TEAM_ID"] == home_id]["WINS"].sum())
+                vis_wins = int(s_wins[s_wins["TEAM_ID"] == vis_id]["WINS"].sum())
+
+                home_rows = played[(played["SERIES_ID"] == sid) & (played["TEAM_ID"] == home_id)]
+                vis_rows = played[(played["SERIES_ID"] == sid) & (played["TEAM_ID"] == vis_id)]
+
+                home_abbr = home_rows["TEAM_ABBREVIATION"].iloc[0] if not home_rows.empty else ""
+                home_name = home_rows["TEAM_NAME"].iloc[0] if not home_rows.empty else ""
+                vis_abbr = vis_rows["TEAM_ABBREVIATION"].iloc[0] if not vis_rows.empty else ""
+                vis_name = vis_rows["TEAM_NAME"].iloc[0] if not vis_rows.empty else ""
+
+                rows.append({
+                    "SERIES_ID": sid,
+                    "ROUND_NUM": round_num,
+                    "HOME_TEAM_ID": home_id,
+                    "HOME_TEAM_CITY": home_name,
+                    "HOME_TEAM_ABBREVIATION": home_abbr,
+                    "HOME_TEAM_WINS": home_wins,
+                    "VISITOR_TEAM_ID": vis_id,
+                    "VISITOR_TEAM_CITY": vis_name,
+                    "VISITOR_TEAM_ABBREVIATION": vis_abbr,
+                    "VISITOR_TEAM_WINS": vis_wins,
+                })
+
+            result = pd.DataFrame(rows)
+            self.log.info("playoff_bracket_complete", series_count=len(result))
+            return result
 
         except Exception as e:
             error_str = str(e).lower()
