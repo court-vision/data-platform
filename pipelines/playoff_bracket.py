@@ -57,10 +57,11 @@ class PlayoffBracketPipeline(BasePipeline):
 
         ctx.log.debug("raw_columns", columns=list(df.columns))
 
-        # Pre-load team_id → conference from nba.teams (avoids per-row queries)
-        team_conf: dict[int, str] = {}
+        # Pre-load abbreviation → conference from nba.teams (avoids per-row queries).
+        # NBATeam.id is the 3-letter abbreviation (primary key), not the numeric NBA API id.
+        team_conf: dict[str, str] = {}
         for team in NBATeam.select(NBATeam.id, NBATeam.conference):
-            team_conf[team.id] = team.conference
+            team_conf[str(team.id)] = team.conference
 
         upserted = 0
         for _, row in df.iterrows():
@@ -85,7 +86,7 @@ class PlayoffBracketPipeline(BasePipeline):
             if round_num == 4:
                 conference = "Finals"
             else:
-                conference = team_conf.get(int(top_id), "Unknown") if top_id else "Unknown"
+                conference = team_conf.get(top_abbr, "Unknown") if top_abbr else "Unknown"
 
             # Series complete when either team reaches 4 wins
             series_complete = top_wins == 4 or bottom_wins == 4
