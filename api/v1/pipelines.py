@@ -782,50 +782,86 @@ async def trigger_live_stats(
     else:
         game_date = now_et.date()
 
-    # Check if there are any games today
+    # Check if there are any games today (DB path, covers regular season + known playoff dates)
     games_today = Game.get_games_on_date(game_date)
+    scoreboard_fallback = False
+
     if not games_today:
-        log.info("live_stats_no_games", game_date=str(game_date))
-        return LiveStatsResponse(
-            status=ApiStatus.SUCCESS,
-            message=f"No games scheduled for {game_date}",
-            data=LiveStatsData(
-                pipeline_name="live_game_stats",
-                status="skipped",
-                games_total=0,
-                all_games_complete=True,
-                done=True,
-                duration_seconds=round(time.monotonic() - start_time, 3),
-            ),
-        )
+        # DB has no games for this date — may be a playoff round whose dates weren't
+        # in the static schedule file (rounds 2+ are unscheduled until bracket finalizes).
+        # Fall back to the live NBA scoreboard to check for actual games.
+        fallback_extractor = NBAApiExtractor()
+        try:
+            scoreboard_games = fallback_extractor.get_scoreboard_games(game_date)
+        except Exception as e:
+            log.warning("live_stats_scoreboard_fallback_failed", error=str(e), game_date=str(game_date))
+            scoreboard_games = []
 
-    # Pre-tip-off gate: don't run until 15 min before first game
-    earliest_start = Game.get_earliest_game_time_on_date(game_date)
-    if earliest_start:
-        now_et_naive = now_et.replace(tzinfo=None)
-        earliest_dt = datetime.combine(game_date, earliest_start)
-        gate_dt = earliest_dt - timedelta(minutes=15)
-
-        if now_et_naive < gate_dt:
-            log.info(
-                "live_stats_pregame",
-                game_date=str(game_date),
-                earliest_start=str(earliest_start),
-                gate_time=str(gate_dt),
-                current_time=str(now_et_naive),
-            )
+        if not scoreboard_games:
+            log.info("live_stats_no_games", game_date=str(game_date))
             return LiveStatsResponse(
                 status=ApiStatus.SUCCESS,
-                message=f"Games haven't started yet. First tip-off at {earliest_start} ET.",
+                message=f"No games scheduled for {game_date}",
                 data=LiveStatsData(
                     pipeline_name="live_game_stats",
                     status="skipped",
-                    games_total=len(games_today),
+                    games_total=0,
+                    all_games_complete=True,
+                    done=True,
+                    duration_seconds=round(time.monotonic() - start_time, 3),
+                ),
+            )
+
+        # Scoreboard has games not in DB — use status to gate pre-tip-off.
+        # game_status: 1=scheduled, 2=in-progress, 3=final
+        games_count = len(scoreboard_games)
+        if all(g["game_status"] == 1 for g in scoreboard_games):
+            log.info("live_stats_pregame_scoreboard_fallback", game_date=str(game_date), games=games_count)
+            return LiveStatsResponse(
+                status=ApiStatus.SUCCESS,
+                message=f"Games haven't started yet (scoreboard fallback).",
+                data=LiveStatsData(
+                    pipeline_name="live_game_stats",
+                    status="skipped",
+                    games_total=games_count,
                     all_games_complete=False,
                     done=False,
                     duration_seconds=round(time.monotonic() - start_time, 3),
                 ),
             )
+
+        scoreboard_fallback = True
+        log.info("live_stats_scoreboard_fallback", game_date=str(game_date), games=games_count)
+    else:
+        games_count = len(games_today)
+
+        # Pre-tip-off gate: don't run until 15 min before first game
+        earliest_start = Game.get_earliest_game_time_on_date(game_date)
+        if earliest_start:
+            now_et_naive = now_et.replace(tzinfo=None)
+            earliest_dt = datetime.combine(game_date, earliest_start)
+            gate_dt = earliest_dt - timedelta(minutes=15)
+
+            if now_et_naive < gate_dt:
+                log.info(
+                    "live_stats_pregame",
+                    game_date=str(game_date),
+                    earliest_start=str(earliest_start),
+                    gate_time=str(gate_dt),
+                    current_time=str(now_et_naive),
+                )
+                return LiveStatsResponse(
+                    status=ApiStatus.SUCCESS,
+                    message=f"Games haven't started yet. First tip-off at {earliest_start} ET.",
+                    data=LiveStatsData(
+                        pipeline_name="live_game_stats",
+                        status="skipped",
+                        games_total=games_count,
+                        all_games_complete=False,
+                        done=False,
+                        duration_seconds=round(time.monotonic() - start_time, 3),
+                    ),
+                )
 
     # Run the pipeline
     pipeline = LiveGameStatsPipeline()
@@ -865,7 +901,7 @@ async def trigger_live_stats(
             pipeline_name="live_game_stats",
             status=result.status,
             records_processed=result.records_processed or 0,
-            games_total=len(games_today),
+            games_total=games_count,
             all_games_complete=all_complete,
             done=all_complete,
             duration_seconds=result.duration_seconds,
