@@ -21,7 +21,8 @@ from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.player_season_stats import PlayerSeasonStats
 from db.models.nba.players import Player
 from db.models.pipeline_run import PipelineRun
-from services.data_quality_service import DataQualityService
+from pipelines import PIPELINE_REGISTRY
+from services.data_quality_service import DataQualityService, _MANUAL_PIPELINES
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +52,9 @@ def clean_quality_tables(quality_tables):
 # ---------------------------------------------------------------------------
 
 NOW = "NOW()"
+
+# 9 structural checks + one timing check per non-manual registered pipeline
+EXPECTED_CHECK_COUNT = 9 + sum(1 for name in PIPELINE_REGISTRY if name not in _MANUAL_PIPELINES)
 
 
 def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
@@ -102,14 +106,11 @@ def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
         ftm=4.0, fta=5.0, ft_pct=0.8000,
     )
     # Seed a successful run for every timed pipeline so timing checks pass.
-    # player_profiles and game_start_times are excluded (manual ad-hoc).
-    _TIMED_PIPELINES = [
-        "player_game_stats", "player_ownership", "player_season_stats",
-        "player_rolling_stats", "player_advanced_stats", "team_stats",
-        "game_schedule", "espn_injury_status", "breakout_detection",
-        "lineup_alerts", "live_game_stats", "daily_matchup_scores",
-    ]
-    for pipeline_name in _TIMED_PIPELINES:
+    # Derived from the registry the same way the service builds its checks, so a
+    # newly registered pipeline can't silently break the happy path.
+    for pipeline_name in PIPELINE_REGISTRY:
+        if pipeline_name in _MANUAL_PIPELINES:
+            continue
         PipelineRun.create(
             pipeline_name=pipeline_name,
             started_at=datetime.utcnow(),
@@ -526,7 +527,7 @@ class TestDataQualityServiceIntegration:
         assert stored_run.triggered_by == "test"
 
         checks = list(DataQualityCheck.select().where(DataQualityCheck.run_id == run.id))
-        assert len(checks) == 21  # 9 structural + 12 timing checks
+        assert len(checks) == EXPECTED_CHECK_COUNT
 
     def test_selective_check_execution(self, integration_db, quality_tables):
         """Running a subset of checks only executes those checks."""
@@ -562,7 +563,7 @@ class TestDataQualityServiceIntegration:
         detail = service.get_run(str(run.id))
         assert detail is not None
         assert "checks" in detail
-        assert len(detail["checks"]) == 21
+        assert len(detail["checks"]) == EXPECTED_CHECK_COUNT
         for check in detail["checks"]:
             assert "check_name" in check
             assert "status" in check
