@@ -21,6 +21,7 @@ from core.resilience import (
 from pipelines.extractors.base import BaseExtractor
 from pipelines.transformers.names import normalize_name
 from services.schedule_service import get_dates_for_scoring_periods
+from pipelines.transformers.category_scores import espn_category_scores, espn_scoring_format
 from utils.espn_helpers import POSITION_MAP, PRO_TEAM_MAP
 
 
@@ -228,14 +229,22 @@ class ESPNExtractor(BaseExtractor):
 
                 if home_id == our_team_id:
                     opponent_id = away_id
-                    our_score = home_data.get("totalPoints", 0)
-                    opponent_score = away_data.get("totalPoints", 0)
+                    our_side, opp_side = home_data, away_data
                 elif away_id == our_team_id:
                     opponent_id = home_id
-                    our_score = away_data.get("totalPoints", 0)
-                    opponent_score = home_data.get("totalPoints", 0)
+                    our_side, opp_side = away_data, home_data
                 else:
                     continue
+                our_score = our_side.get("totalPoints", 0)
+                opponent_score = opp_side.get("totalPoints", 0)
+
+                # Category leagues: snapshot per-category totals; scores become categories won/lost
+                category_scores = None
+                if espn_scoring_format(league_settings) == "categories":
+                    category_scores = espn_category_scores(our_side, opp_side)
+                    if category_scores is not None:
+                        our_score = category_scores["wins"]
+                        opponent_score = category_scores["losses"]
 
                 # Find opponent name
                 opponent_name = "Unknown"
@@ -252,6 +261,7 @@ class ESPNExtractor(BaseExtractor):
                     "matchup_period": current_matchup_period,
                     "matchup_start": matchup_start,
                     "scoring_period_id": scoring_period_id,
+                    "category_scores": category_scores,
                 }
 
         return None

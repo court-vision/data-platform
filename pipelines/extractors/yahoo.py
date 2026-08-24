@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Any
 
 import requests
+from pipelines.transformers.category_scores import yahoo_category_scores
 
 from core.logging import get_logger
 from core.settings import settings
@@ -308,10 +309,16 @@ class YahooExtractor(BaseExtractor):
             self.log.warning("matchup_not_found", team=team_name, week=matchup_period)
             return None, new_tokens
 
+        category_scores = yahoo_category_scores(target_matchup_info, team_key)
+        if category_scores is not None:
+            our_score = category_scores["wins"]
+            opponent_score = category_scores["losses"]
+
         return {
             "team_name": team_name,
             "current_score": our_score,
             "opponent_team_name": opponent_name,
             "opponent_current_score": opponent_score,
             "matchup_period": yahoo_week,
+            "category_scores": category_scores,
         }, new_tokens
