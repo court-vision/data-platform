@@ -37,10 +37,12 @@ redistributes ~10-15 extra minutes, enough to push a 20 min/game
 player to 30+ with proportionally higher fantasy output.
 """
 
+import math
 from datetime import date, timedelta
 
 from peewee import fn
 
+from core.season import season_for_date
 from db.models.nba import (
     Player,
     PlayerGameStats,
@@ -52,16 +54,22 @@ from db.models.nba import (
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
+from services import schedule_service
 
 
 # Min avg minutes for a player to be considered "prominent" (starter-level)
 PROMINENT_MIN_THRESHOLD = 28.0
-# Min games played to have a reliable avg (avoids small sample aberrations)
+# Min games played to have a reliable avg (avoids small sample aberrations).
+# Full-season value; scaled down early in the season by scaled_floor().
 PROMINENT_MIN_GP = 20
 # Min avg minutes for a teammate to be in the depth chart
 TEAMMATE_MIN_THRESHOLD = 12.0
-# Min games played for depth chart eligibility
+# Min games played for depth chart eligibility (full-season value, see scaled_floor)
 TEAMMATE_MIN_GP = 10
+# Smallest GP floor ever applied
+MIN_GP_FLOOR = 2
+# How far back to look for opportunity games (bounded by the season's opening night)
+OPPORTUNITY_LOOKBACK_DAYS = 120
 # High-usage game threshold: candidate played this much above their avg
 HIGH_USAGE_MULTIPLIER = 1.25
 # Floor for high-usage games (eliminates DNP-like edge cases)
@@ -71,6 +79,19 @@ MIN_OPP_SAMPLES = 2
 
 # Depth rank score bonuses (diminishing returns beyond #3)
 DEPTH_RANK_BONUSES = {1: 35, 2: 25, 3: 15, 4: 8}
+
+
+def scaled_floor(default: int, max_gp_in_season: int | None) -> int:
+    """
+    GP floor that grows with the season: min(default, max(2, ceil(0.5 * max_gp))).
+
+    In week 1 nobody has 20 games, so the full-season floors would silence the
+    pipeline until December; half of the league-leading GP (never below 2)
+    keeps the "reliable sample" intent while the season fills in.
+    """
+    max_gp = max_gp_in_season or 0
+    return min(default, max(MIN_GP_FLOOR, math.ceil(0.5 * max_gp)))
+
 
 # Position group adjacency: who absorbs whose minutes
 # Maps a position → set of positions in the same rotation group
@@ -117,18 +138,34 @@ class BreakoutDetectionPipeline(BasePipeline):
             else:
                 as_of_date = now_cst.date()
 
-        ctx.log.info("breakout_detection_start", as_of_date=str(as_of_date))
+        # Every season-stats lookup below is scoped to this season so the first
+        # weeks after rollover don't read last season's rows.
+        season = season_for_date(as_of_date)
+        max_gp = self._max_gp_in_season(season)
+        prominent_min_gp = scaled_floor(PROMINENT_MIN_GP, max_gp)
+        teammate_min_gp = scaled_floor(TEAMMATE_MIN_GP, max_gp)
+        earliest_game_date = self._season_opening_night(season)
 
-        injured_starters = self._get_prominent_injured_players(as_of_date)
+        ctx.log.info(
+            "breakout_detection_start",
+            as_of_date=str(as_of_date),
+            season=season,
+            max_gp=max_gp,
+            prominent_min_gp=prominent_min_gp,
+            teammate_min_gp=teammate_min_gp,
+            lookback_floor=str(earliest_game_date) if earliest_game_date else None,
+        )
+
+        injured_starters = self._get_prominent_injured_players(as_of_date, season, prominent_min_gp)
         ctx.log.info("prominent_injured_found", count=len(injured_starters))
 
         if not injured_starters:
             ctx.log.info("no_prominent_injuries_today")
             return
 
-        latest_stats_date = self._get_latest_stats_date()
+        latest_stats_date = self._get_latest_stats_date(season)
         if not latest_stats_date:
-            ctx.log.warning("no_season_stats_available")
+            ctx.log.warning("no_season_stats_available", season=season)
             return
 
         total_candidates = 0
@@ -154,6 +191,8 @@ class BreakoutDetectionPipeline(BasePipeline):
                 team_id=team_id,
                 injured_player_id=player_id,
                 injured_position=injured_position,
+                season=season,
+                min_gp=teammate_min_gp,
             )
 
             if not depth_chart:
@@ -185,6 +224,7 @@ class BreakoutDetectionPipeline(BasePipeline):
                     team_id=team_id,
                     position_peer_ids=all_position_peer_ids - {candidate_id},
                     as_of_date=as_of_date,
+                    earliest_date=earliest_game_date,
                 )
 
                 depth_rank = candidate["depth_rank"]
@@ -237,9 +277,26 @@ class BreakoutDetectionPipeline(BasePipeline):
     # Core helpers
     # -------------------------------------------------------------------------
 
-    def _get_prominent_injured_players(self, as_of_date: date) -> list[dict]:
+    def _max_gp_in_season(self, season: str) -> int | None:
+        """League-leading games played this season (None before the first post-game run)."""
+        return (
+            PlayerSeasonStats.select(fn.MAX(PlayerSeasonStats.gp))
+            .where(PlayerSeasonStats.season == season)
+            .scalar()
+        )
+
+    def _season_opening_night(self, season: str) -> date | None:
+        """Opening night from the season calendar, or None if it isn't available."""
+        try:
+            return schedule_service.get_season_bounds(season).opening_night
+        except (FileNotFoundError, ValueError):
+            return None
+
+    def _get_prominent_injured_players(
+        self, as_of_date: date, season: str, min_gp: int = PROMINENT_MIN_GP
+    ) -> list[dict]:
         """
-        Find starters (>=28 min/g, >=20 gp) currently listed Out or Doubtful.
+        Find starters (>=28 min/g, >=min_gp gp this season) currently listed Out or Doubtful.
         """
         all_injured = PlayerInjury.get_injured_players(as_of_date)
         latest_injuries = [inj for inj in all_injured if inj.status in ("Out", "Doubtful")]
@@ -257,7 +314,10 @@ class BreakoutDetectionPipeline(BasePipeline):
                 PlayerSeasonStats.player_id,
                 fn.MAX(PlayerSeasonStats.as_of_date).alias("max_date"),
             )
-            .where(PlayerSeasonStats.player.in_(injured_player_ids))
+            .where(
+                (PlayerSeasonStats.player.in_(injured_player_ids))
+                & (PlayerSeasonStats.season == season)
+            )
             .group_by(PlayerSeasonStats.player_id)
         )
 
@@ -271,7 +331,10 @@ class BreakoutDetectionPipeline(BasePipeline):
                     & (PlayerSeasonStats.as_of_date == latest_per_player.c.max_date)
                 ),
             )
-            .where(PlayerSeasonStats.gp >= PROMINENT_MIN_GP)
+            .where(
+                (PlayerSeasonStats.season == season)
+                & (PlayerSeasonStats.gp >= min_gp)
+            )
         )
 
         results = []
@@ -295,9 +358,10 @@ class BreakoutDetectionPipeline(BasePipeline):
 
         return results
 
-    def _get_latest_stats_date(self) -> date | None:
+    def _get_latest_stats_date(self, season: str) -> date | None:
         return (
             PlayerSeasonStats.select(fn.MAX(PlayerSeasonStats.as_of_date))
+            .where(PlayerSeasonStats.season == season)
             .scalar()
         )
 
@@ -306,6 +370,8 @@ class BreakoutDetectionPipeline(BasePipeline):
         team_id: str,
         injured_player_id: int,
         injured_position: str,
+        season: str,
+        min_gp: int = TEAMMATE_MIN_GP,
     ) -> list[dict]:
         """
         Return rotation players at the injured player's position group,
@@ -327,7 +393,10 @@ class BreakoutDetectionPipeline(BasePipeline):
                 PlayerSeasonStats.player_id,
                 fn.MAX(PlayerSeasonStats.as_of_date).alias("max_date"),
             )
-            .where(PlayerSeasonStats.team == team_id)
+            .where(
+                (PlayerSeasonStats.team == team_id)
+                & (PlayerSeasonStats.season == season)
+            )
             .group_by(PlayerSeasonStats.player_id)
         )
 
@@ -343,8 +412,9 @@ class BreakoutDetectionPipeline(BasePipeline):
             )
             .where(
                 (PlayerSeasonStats.team == team_id)
+                & (PlayerSeasonStats.season == season)
                 & (PlayerSeasonStats.player != injured_player_id)
-                & (PlayerSeasonStats.gp >= TEAMMATE_MIN_GP)
+                & (PlayerSeasonStats.gp >= min_gp)
             )
         )
 
@@ -388,7 +458,8 @@ class BreakoutDetectionPipeline(BasePipeline):
         team_id: str,
         position_peer_ids: set[int],
         as_of_date: date,
-        lookback_days: int = 120,
+        lookback_days: int = OPPORTUNITY_LOOKBACK_DAYS,
+        earliest_date: date | None = None,
     ) -> tuple[float | None, float | None, int]:
         """
         Return (avg_min, avg_fpts, game_count) for position-validated
@@ -402,12 +473,17 @@ class BreakoutDetectionPipeline(BasePipeline):
         This filters blowout garbage time while capturing any positional
         absence — not just the currently injured player specifically.
 
+        The lookback never reaches before `earliest_date` (the season's
+        opening night) so October runs don't count last season's games.
+
         Returns (None, None, 0) if fewer than MIN_OPP_SAMPLES valid games.
         """
         if not position_peer_ids:
             return None, None, 0
 
         start_date = as_of_date - timedelta(days=lookback_days)
+        if earliest_date is not None and earliest_date > start_date:
+            start_date = earliest_date
         min_threshold = max(candidate_avg_min * HIGH_USAGE_MULTIPLIER, HIGH_USAGE_MIN_FLOOR)
 
         # Step 1: Find candidate's high-usage games on this team

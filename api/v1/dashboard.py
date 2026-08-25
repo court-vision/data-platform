@@ -81,6 +81,7 @@ PIPELINE_TRIGGER_ENDPOINTS: dict[str, str] = {
 PIPELINE_CRON_JOB_MAP: dict[str, str] = {
     "live_game_stats":      "live-stats",
     "playoff_bracket":      "playoffs",
+    "game_start_times":     "schedule-sync",
     # Post-game category (all share the same cron trigger)
     "player_game_stats":    "post-game",
     "player_ownership":     "post-game",

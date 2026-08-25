@@ -17,7 +17,7 @@ from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, YahooExtractor
-from services.schedule_service import get_matchup_dates
+from services.schedule_service import get_current_matchup
 
 
 class DailyMatchupScoresPipeline(BasePipeline):
@@ -235,19 +235,13 @@ class DailyMatchupScoresPipeline(BasePipeline):
             )
 
     def _get_current_matchup_info(self, current_date) -> Optional[dict]:
-        """Determine current matchup period and day index from schedule."""
-        for matchup_num in range(1, 25):  # Assume max 24 matchup periods
-            try:
-                dates = get_matchup_dates(matchup_num)
-                if dates:
-                    start_date, end_date = dates
-                    if start_date <= current_date <= end_date:
-                        return {
-                            "matchup_number": matchup_num,
-                            "start_date": start_date,
-                            "end_date": end_date,
-                            "day_index": (current_date - start_date).days,
-                        }
-            except Exception:
-                break
-        return None
+        """Current matchup period and day index from the season calendar (None outside it)."""
+        matchup = get_current_matchup(current_date)
+        if not matchup:
+            return None
+        return {
+            "matchup_number": matchup["matchup_number"],
+            "start_date": matchup["start_date"],
+            "end_date": matchup["end_date"],
+            "day_index": matchup["current_day_index"],
+        }

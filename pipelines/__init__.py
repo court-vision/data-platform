@@ -82,7 +82,11 @@ def get_pipeline(name: str) -> BasePipeline:
     return PIPELINE_REGISTRY[name]()
 
 
-async def run_pipeline(name: str, date_override: Optional[date] = None) -> PipelineResult:
+async def run_pipeline(
+    name: str,
+    date_override: Optional[date] = None,
+    options: Optional[dict] = None,
+) -> PipelineResult:
     """
     Run a pipeline by name.
 
@@ -90,12 +94,13 @@ async def run_pipeline(name: str, date_override: Optional[date] = None) -> Pipel
         name: Pipeline name
         date_override: If provided, the pipeline uses this date instead of
                        computing from the current time. Useful for backfills.
+        options: Per-run options exposed to the pipeline as ctx.options.
 
     Returns:
         PipelineResult with status and details
     """
     pipeline = get_pipeline(name)
-    return await pipeline.run(date_override=date_override)
+    return await pipeline.run(date_override=date_override, options=options)
 
 
 async def run_all_pipelines(date_override: Optional[date] = None) -> dict[str, PipelineResult]:

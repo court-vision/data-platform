@@ -8,6 +8,7 @@ from datetime import datetime
 
 import pytz
 
+from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Game
 from pipelines.base import BasePipeline
@@ -45,11 +46,7 @@ class GameSchedulePipeline(BasePipeline):
         """Execute the game schedule pipeline."""
         central_tz = pytz.timezone("US/Central")
 
-        # Determine season string
-        now = ctx.started_at
-        season = f"{now.year}-{str(now.year + 1)[-2:]}"
-        if now.month < 8:
-            season = f"{now.year - 1}-{str(now.year)[-2:]}"
+        season = season_for_date(ctx.started_at.date())
 
         ctx.log.info("fetching_game_log", season=season)
 

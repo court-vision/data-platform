@@ -20,7 +20,7 @@ from core.resilience import (
 )
 from pipelines.extractors.base import BaseExtractor
 from pipelines.transformers.names import normalize_name
-from services.schedule_service import get_dates_for_scoring_periods
+from services.schedule_service import get_espn_matchup_dates
 from pipelines.transformers.category_scores import espn_category_scores, espn_scoring_format
 from utils.espn_helpers import POSITION_MAP, PRO_TEAM_MAP
 
@@ -183,16 +183,16 @@ class ESPNExtractor(BaseExtractor):
 
         # Determine the actual start date of this matchup period so the pipeline
         # can compute the correct day_of_matchup index for 2-week playoff rounds.
-        # matchupPeriods maps each matchup period to its scoring period(s),
+        # matchupPeriods maps each matchup period to its WEEKLY scoring period(s),
         # e.g. {"20": [20, 21]} for a 2-week playoff spanning scoring periods 20-21.
+        # latestScoringPeriod is a DAY index (1 = opening night) — never mix it
+        # into the weekly ids; schedule_service uses it only as a safety net to
+        # pick the calendar week containing that day if ESPN's numbering diverges.
         league_settings = data.get("settings", {})
         matchup_period_map = league_settings.get("scheduleSettings", {}).get("matchupPeriods", {})
-        scoring_periods = matchup_period_map.get(str(current_matchup_period), [current_matchup_period])
-        # Extend with latestScoringPeriod when matchupPeriods doesn't include the
-        # playoff period key — ensures the full 2-week range is covered in week 2.
-        if scoring_period_id and scoring_period_id not in scoring_periods:
-            scoring_periods = list(scoring_periods) + [scoring_period_id]
-        matchup_dates = get_dates_for_scoring_periods(scoring_periods)
+        matchup_dates = get_espn_matchup_dates(
+            matchup_period_map, current_matchup_period, scoring_period_id
+        )
         matchup_start = matchup_dates[0] if matchup_dates else None
 
         if current_matchup_period != matchup_period:

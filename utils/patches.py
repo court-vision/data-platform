@@ -1,30 +1,33 @@
 """
 NBA API Patches
 
-Patches the nba_api library to use browser impersonation via curl_cffi
-to avoid timeout/blocking issues from stats.nba.com.
+Replaces nba_api's ``NBAHTTP.send_api_request`` with a curl_cffi request that
+impersonates Chrome (TLS fingerprint) and sends the Chrome-131 header set from
+``utils.nba_cdn`` — the combination stats.nba.com and cdn.nba.com both accept.
+``Host`` is derived from the request URL, so the one patch serves both hosts:
 
-This module must be imported early in application startup (e.g., in main.py)
-to ensure the patch is applied before any nba_api calls are made.
+- ``nba_api.stats``  (NBAStatsHTTP → https://stats.nba.com/stats/...)
+- ``nba_api.live``   (NBALiveHTTP  → https://cdn.nba.com/static/json/liveData/...)
+  NBALiveHTTP subclasses NBAHTTP without overriding send_api_request, so the
+  live scoreboard/boxscore calls inherit the patch automatically.
+
+An optional residential proxy (``settings.nba_api_proxy_url``) is used when set;
+cloud egress IPs are sometimes blocked by stats.nba.com.
+
+This module must be imported early in application startup (see main.py) so the
+patch is applied before any nba_api call is made.
 """
+
+from urllib.parse import urlsplit
 
 from curl_cffi import requests
 from nba_api.library.http import NBAHTTP
+
 from core.settings import settings
+from utils.nba_cdn import nba_cdn_headers
 
-
-# Headers that properly impersonate a browser request to stats.nba.com
-NBA_BROWSER_HEADERS = {
-    'Host': 'stats.nba.com',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Referer': 'https://www.nba.com/',
-    'Origin': 'https://www.nba.com',
-    'Connection': 'keep-alive',
-    'x-nba-stats-origin': 'stats',
-    'x-nba-stats-token': 'true',
-}
+# curl_cffi 0.7.x supports impersonation targets up to "chrome124".
+IMPERSONATE = "chrome124"
 
 
 def browser_impersonation_request(
@@ -35,19 +38,19 @@ def browser_impersonation_request(
     proxy=None,
     headers=None,
     timeout=None,
-    raise_exception_on_error=False
+    raise_exception_on_error=False,
 ):
     """
     Replacement for NBAHTTP.send_api_request that uses curl_cffi
     with browser impersonation to avoid NBA API blocking.
     """
     base_url = self.base_url.format(endpoint=endpoint)
-    endpoint = endpoint.lower()
 
-    # Build headers: start with browser headers, then merge any custom ones
-    request_headers = NBA_BROWSER_HEADERS.copy()
-    if self.headers:
-        request_headers.update(self.headers)
+    # Library defaults first (they carry x-nba-stats-origin / x-nba-stats-token
+    # for stats.nba.com), then the browser set wins for everything it names,
+    # then per-call overrides.
+    request_headers = dict(self.headers or {})
+    request_headers.update(nba_cdn_headers(urlsplit(base_url).netloc))
     if headers:
         request_headers.update(headers)
     if referer:
@@ -57,25 +60,25 @@ def browser_impersonation_request(
     # but curl_cffi sends them as the string "None". Filter them out.
     clean_params = {k: v for k, v in parameters.items() if v is not None}
 
-    # Send request with browser impersonation
-    proxies = {"http": settings.nba_api_proxy_url, "https": settings.nba_api_proxy_url} if settings.nba_api_proxy_url else None
+    proxy_url = proxy or settings.nba_api_proxy_url
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+
     response = requests.get(
         base_url,
         params=clean_params,
         headers=request_headers,
         timeout=timeout or 30,
-        impersonate="chrome110",
+        impersonate=IMPERSONATE,
         proxies=proxies,
     )
 
-    status_code = response.status_code
-    contents = response.text
-
     data = self.nba_response(
-        response=contents,
-        status_code=status_code,
-        url=base_url
+        response=response.text,
+        status_code=response.status_code,
+        url=base_url,
     )
+    if raise_exception_on_error and not data.valid_json():
+        raise Exception("InvalidResponse: Response is not in a valid JSON format.")
     return data
 
 

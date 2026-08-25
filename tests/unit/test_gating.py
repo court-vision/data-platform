@@ -11,6 +11,8 @@ from unittest.mock import MagicMock, patch
 
 from freezegun import freeze_time
 
+from core.settings import settings
+
 
 # ---------------------------------------------------------------------------
 # NBA date convention
@@ -119,7 +121,8 @@ class TestPostGameWindowGating:
     """
     Post-game pipelines open at (latest_game_start + estimated_duration)
     and close at (open_time + window_minutes).
-    Defaults: estimated_duration=150min, window=120min.
+    Defaults come from settings (estimated_game_duration_minutes,
+    post_game_pipeline_window_minutes).
     """
 
     @staticmethod
@@ -127,8 +130,8 @@ class TestPostGameWindowGating:
         now_et_naive: datetime,
         latest_game_time: time,
         nba_date: date,
-        estimated_duration: int = 150,
-        window_minutes: int = 120,
+        estimated_duration: int = settings.estimated_game_duration_minutes,
+        window_minutes: int = settings.post_game_pipeline_window_minutes,
     ) -> bool:
         """Replicate the post-game window check from trigger_post_game()."""
         latest_game_dt = datetime.combine(nba_date, latest_game_time)
@@ -154,8 +157,12 @@ class TestPostGameWindowGating:
     def test_after_window_expires(self):
         """Long after games ended → window closed."""
         nba_date = date(2026, 3, 4)
-        latest_start = time(22, 0)  # 10 PM → estimated end 12:30 AM → window end 2:30 AM
-        now = datetime(2026, 3, 5, 5, 0)  # 5 AM (well past window)
+        latest_start = time(22, 0)  # 10 PM → estimated end 12:30 AM
+        estimated_end = datetime(2026, 3, 5, 0, 30)
+        window_end = estimated_end + timedelta(minutes=settings.post_game_pipeline_window_minutes)
+        assert self._is_post_game_window_open(window_end, latest_start, nba_date)
+        assert not self._is_post_game_window_open(window_end + timedelta(minutes=1), latest_start, nba_date)
+        now = datetime(2026, 3, 5, 9, 0)  # 9 AM (well past any window)
         assert not self._is_post_game_window_open(now, latest_start, nba_date)
 
     def test_at_exact_estimated_end(self):

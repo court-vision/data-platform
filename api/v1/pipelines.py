@@ -12,7 +12,7 @@ The /all endpoint uses a fire-and-forget pattern:
 
 import asyncio
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Security, HTTPException, Query
@@ -336,15 +336,28 @@ async def trigger_game_schedule(
 async def trigger_game_start_times(
     _: str = Security(verify_pipeline_token),
     date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
+    source: Literal["cdn", "static"] = Query(
+        "cdn",
+        description="Schedule feed source: 'cdn' fetches cdn.nba.com (falls back to the static file), 'static' reads static/schedule_raw{YYYY}-{YYYY+1}.json.",
+    ),
+    include_preseason: bool = Query(
+        False,
+        description="Also upsert preseason games. Only honoured with DEVELOPMENT_MODE=true.",
+    ),
 ) -> PipelineResponse:
     """
     Trigger the game start times pipeline.
 
-    Fetches scheduled tip-off times for upcoming games and upserts
-    to nba.games. Used by the live stats and post-game gates.
-    Pass ?date=YYYY-MM-DD to backfill a specific date.
+    Loads the NBA schedule feed for settings.nba_season and upserts every
+    regular-season game's tip-off time to nba.games. Used by the pre-game,
+    post-game and live gates. Fired weekly by the cron-runner "schedule-sync"
+    job with ?source=cdn.
     """
-    result = await run_pipeline("game_start_times", date_override=date)
+    result = await run_pipeline(
+        "game_start_times",
+        date_override=date,
+        options={"source": source, "include_preseason": include_preseason},
+    )
     return PipelineResponse(
         status=result.status,
         message=result.message,

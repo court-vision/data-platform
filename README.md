@@ -148,9 +148,10 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 |---|---|---|---|
 | `DATABASE_URL` | Yes | — | PostgreSQL connection URL (e.g. `postgresql://user:pass@host/db`) |
 | `PIPELINE_API_TOKEN` | Yes | — | Bearer token required by all `/v1/internal/*` endpoints |
-| `ESPN_YEAR` | No | `2026` | ESPN Fantasy season year |
+| `ESPN_YEAR` | No | derived (season end year, e.g. `2027`) | ESPN Fantasy season year; set to pin |
 | `ESPN_LEAGUE_ID` | No | `993431466` | ESPN Fantasy league ID |
-| `NBA_SEASON` | No | `"2025-26"` | nba_api season string |
+| `NBA_SEASON` | No | derived from today (`"2026-27"` from Aug 1, 2026) | nba_api season string; also selects `static/schedule{yy}-{yy}.json`; set to pin |
+| `NBA_API_PROXY_URL` | No | — | Residential proxy for stats.nba.com (cloud IPs are sometimes blocked) |
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
@@ -216,7 +217,7 @@ All `/v1/internal/*` endpoints require the `Authorization: Bearer <PIPELINE_API_
 | `POST` | `/v1/internal/pipelines/player-rolling-stats` | Individual: rolling averages |
 | `POST` | `/v1/internal/pipelines/team-stats` | Individual: team-level stats |
 | `POST` | `/v1/internal/pipelines/game-schedule` | Individual: NBA game schedule |
-| `POST` | `/v1/internal/pipelines/game-start-times` | Individual: game tip-off times |
+| `POST` | `/v1/internal/pipelines/game-start-times` | Individual: game tip-off times from the NBA schedule feed. `?source=cdn` (default; falls back to `static/schedule_raw{YYYY}-{YYYY+1}.json`) or `?source=static`; `?include_preseason=true` is honoured only with `DEVELOPMENT_MODE=true`. Fired weekly by the cron-runner `schedule-sync` job |
 | `POST` | `/v1/internal/pipelines/daily-matchup-scores` | Individual: ESPN matchup scores |
 | `POST` | `/v1/internal/pipelines/espn-injury-status` | Individual: ESPN injury status |
 | `POST` | `/v1/internal/pipelines/breakout-detection` | Individual: breakout candidate detection |

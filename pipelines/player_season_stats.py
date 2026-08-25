@@ -9,6 +9,7 @@ from datetime import timedelta
 import pytz
 from peewee import fn
 
+from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerSeasonStats
 from db.models.nba.player_game_stats import PlayerGameStats
@@ -60,10 +61,7 @@ class PlayerSeasonStatsPipeline(BasePipeline):
             else:
                 game_date = now_cst.date()
 
-        # Determine season string
-        season = f"{game_date.year}-{str(game_date.year + 1)[-2:]}"
-        if game_date.month < 8:
-            season = f"{game_date.year - 1}-{str(game_date.year)[-2:]}"
+        season = season_for_date(game_date)
 
         ctx.log.info("fetching_data", date=str(game_date), season=season)
 
@@ -75,11 +73,17 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         api_data = self.nba_extractor.get_league_leaders(season)
         ctx.log.info("nba_data_fetched", player_count=len(api_data))
 
-        # Get latest GP for each player from database
-        subquery = PlayerSeasonStats.select(
-            PlayerSeasonStats.player_id,
-            fn.MAX(PlayerSeasonStats.as_of_date).alias("max_date"),
-        ).group_by(PlayerSeasonStats.player_id)
+        # Latest GP per player *this season* — without the season filter the
+        # first runs after rollover would compare against last season's totals
+        # and never detect new games.
+        subquery = (
+            PlayerSeasonStats.select(
+                PlayerSeasonStats.player_id,
+                fn.MAX(PlayerSeasonStats.as_of_date).alias("max_date"),
+            )
+            .where(PlayerSeasonStats.season == season)
+            .group_by(PlayerSeasonStats.player_id)
+        )
 
         latest_records = (
             PlayerSeasonStats.select(PlayerSeasonStats.player_id, PlayerSeasonStats.gp)
@@ -90,6 +94,7 @@ class PlayerSeasonStatsPipeline(BasePipeline):
                     & (PlayerSeasonStats.as_of_date == subquery.c.max_date)
                 ),
             )
+            .where(PlayerSeasonStats.season == season)
         )
         db_gp_map = {record.player_id: record.gp for record in latest_records}
 

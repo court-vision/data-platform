@@ -8,6 +8,7 @@ complete (~1 AM ET via the 'playoffs' cron job).
 
 from datetime import datetime
 
+from core.season import season_for_date
 from db.models.nba import PlayoffSeries
 from db.models.nba.teams import NBATeam
 from pipelines.base import BasePipeline
@@ -39,13 +40,7 @@ class PlayoffBracketPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Fetch and upsert playoff series standings."""
-        now = ctx.started_at
-
-        # Season string: "2025-26" format
-        if now.month >= 8:
-            season = f"{now.year}-{str(now.year + 1)[-2:]}"
-        else:
-            season = f"{now.year - 1}-{str(now.year)[-2:]}"
+        season = season_for_date(ctx.started_at.date())
 
         ctx.log.info("fetching_playoff_bracket", season=season)
 

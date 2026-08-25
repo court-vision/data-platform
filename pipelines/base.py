@@ -76,7 +76,11 @@ class BasePipeline(ABC):
         """
         pass
 
-    def _run_sync(self, date_override: Optional[date] = None) -> PipelineResult:
+    def _run_sync(
+        self,
+        date_override: Optional[date] = None,
+        options: Optional[dict] = None,
+    ) -> PipelineResult:
         """
         Run the full pipeline lifecycle synchronously.
 
@@ -91,7 +95,11 @@ class BasePipeline(ABC):
             db.connect()
 
         try:
-            ctx = PipelineContext(self.config.name, date_override=date_override)
+            ctx = PipelineContext(
+                self.config.name,
+                date_override=date_override,
+                options=dict(options or {}),
+            )
             ctx.start_tracking()
 
             try:
@@ -105,7 +113,11 @@ class BasePipeline(ABC):
             if not db.is_closed():
                 db.close()
 
-    async def run(self, date_override: Optional[date] = None) -> PipelineResult:
+    async def run(
+        self,
+        date_override: Optional[date] = None,
+        options: Optional[dict] = None,
+    ) -> PipelineResult:
         """
         Run the pipeline with full lifecycle management.
 
@@ -116,11 +128,13 @@ class BasePipeline(ABC):
         Args:
             date_override: If provided, pipelines use this date instead of
                            computing from the current time. Useful for backfills.
+            options: Free-form per-run options exposed as ctx.options
+                     (e.g. {"source": "static"}). Defaults to {}.
 
         Returns:
             PipelineResult with status, timing, and records processed
         """
-        return await asyncio.to_thread(self._run_sync, date_override)
+        return await asyncio.to_thread(self._run_sync, date_override, options)
 
     def before_execute(self, ctx: PipelineContext) -> None:
         """

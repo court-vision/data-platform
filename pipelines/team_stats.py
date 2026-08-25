@@ -10,6 +10,7 @@ them by team abbreviation before upserting to nba.team_stats.
 
 from datetime import timedelta
 
+from core.season import season_for_date
 from db.models.nba.team_stats import TeamStats
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -60,10 +61,7 @@ class TeamStatsPipeline(BasePipeline):
             else:
                 as_of_date = now_cst.date()
 
-        # Determine season string (NBA season spans two calendar years)
-        season = f"{as_of_date.year}-{str(as_of_date.year + 1)[-2:]}"
-        if as_of_date.month < 8:
-            season = f"{as_of_date.year - 1}-{str(as_of_date.year)[-2:]}"
+        season = season_for_date(as_of_date)
 
         ctx.log.info("fetching_team_stats", season=season, as_of_date=str(as_of_date))
 

@@ -28,6 +28,7 @@ class PipelineContext:
     - PipelineRun database record
     - Timing information
     - Records processed counter
+    - Free-form run options from the trigger (e.g. {"source": "cdn"})
 
     Usage:
         ctx = PipelineContext("daily_player_stats")
@@ -47,6 +48,9 @@ class PipelineContext:
     )
     records_processed: int = 0
     date_override: Optional[date] = None
+    # Per-run options passed through from the trigger endpoint; pipelines that
+    # don't declare any simply ignore it (default {}).
+    options: dict = field(default_factory=dict)
 
     _db_run: Optional[PipelineRun] = field(default=None, repr=False)
     _log: Any = field(default=None, repr=False)

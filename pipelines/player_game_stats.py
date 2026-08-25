@@ -9,6 +9,7 @@ from datetime import timedelta
 
 import pytz
 
+from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerGameStats
 from db.models.nba.games import Game
@@ -62,10 +63,7 @@ class PlayerGameStatsPipeline(BasePipeline):
                 game_date = now_cst.date()
         date_str = game_date.strftime("%m/%d/%Y")
 
-        # Determine season string (season starts in October)
-        season = f"{game_date.year}-{str(game_date.year + 1)[-2:]}"
-        if game_date.month < 8:
-            season = f"{game_date.year - 1}-{str(game_date.year)[-2:]}"
+        season = season_for_date(game_date)
 
         ctx.log.info("fetching_data", date=date_str, season=season)
 

@@ -26,6 +26,7 @@ from core.correlation_middleware import CorrelationMiddleware
 from core.logging import setup_logging, get_logger
 from core.settings import settings
 from db.base import init_db, close_db
+from services.schedule_service import assert_calendar_available
 from api.v1 import pipelines, live, dashboard, quality, cron
 
 
@@ -41,6 +42,14 @@ async def lifespan(app: FastAPI):
 
     init_db()
     log.info("database_initialized")
+
+    # The season's fantasy calendar ships with the image (static/schedule{yy}-{yy}.json
+    # + matchupsPerDay{yy}-{yy}.json). Warn rather than fail: most pipelines don't
+    # need it, and the ones that do raise a clear FileNotFoundError when they run.
+    try:
+        assert_calendar_available()
+    except FileNotFoundError as e:
+        log.warning("calendar_unavailable", season=settings.nba_season, error=str(e))
 
     from db.models.pipeline_run import PipelineRun
     reset_count = PipelineRun.reset_stale_runs()

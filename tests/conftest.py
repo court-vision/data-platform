@@ -8,6 +8,8 @@ from freezegun import freeze_time
 # Ensure required env vars exist before importing app modules.
 os.environ.setdefault("DATABASE_URL", "postgresql://cv:cv@localhost:5432/cv_test")
 os.environ.setdefault("PIPELINE_API_TOKEN", "test-token")
+# Deterministic season for the suite (settings would derive it from today's date)
+os.environ.setdefault("NBA_SEASON", "2025-26")
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ from datetime import timedelta
 
 import pytz
 
+from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerAdvancedStats
 from pipelines.base import BasePipeline
@@ -58,10 +59,7 @@ class PlayerAdvancedStatsPipeline(BasePipeline):
             else:
                 as_of_date = now_cst.date()
 
-        # Determine season string
-        season = f"{as_of_date.year}-{str(as_of_date.year + 1)[-2:]}"
-        if as_of_date.month < 8:
-            season = f"{as_of_date.year - 1}-{str(as_of_date.year)[-2:]}"
+        season = season_for_date(as_of_date)
 
         ctx.log.info("fetching_advanced_stats", season=season, as_of_date=str(as_of_date))
 
