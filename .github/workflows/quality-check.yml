@@ -7,6 +7,7 @@ name: Production Quality Check
 #
 # Required GitHub secrets (court-vision / production environment):
 #   PRODUCTION_PIPELINE_TOKEN — value of PIPELINE_API_TOKEN on production service
+#   ALERT_WEBHOOK_URL         — Discord webhook for #cv-alerts (optional; failures post there)
 #
 # Required GitHub variables (court-vision / production environment):
 #   PRODUCTION_URL — public Railway URL for the production data-platform
@@ -66,3 +67,39 @@ jobs:
           if [ "$failed" != "0" ]; then
             echo "WARNING: $failed check(s) failed (non-critical) — review results in the dashboard"
           fi
+
+      # Reached only when a step above failed (unreachable trigger, non-200, or a
+      # critical check). No-op when ALERT_WEBHOOK_URL is not configured.
+      - name: Notify Discord on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW: ${{ github.workflow }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ -z "$ALERT_WEBHOOK_URL" ]; then
+            echo "ALERT_WEBHOOK_URL not set — skipping Discord notification"
+            exit 0
+          fi
+          payload=$(jq -n \
+            --arg title "$WORKFLOW failed" \
+            --arg url "$RUN_URL" \
+            --arg repo "$REPOSITORY" \
+            --arg event "$EVENT_NAME" \
+            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{embeds: [{
+                title: $title,
+                description: ("Production data quality checks failed or could not run. Run: " + $url),
+                color: 15158332,
+                fields: [
+                  {name: "Repository", value: $repo, inline: true},
+                  {name: "Event", value: $event, inline: true}
+                ],
+                timestamp: $ts
+             }]}')
+          http_status=$(curl -s -o /dev/null -w "%{http_code}" -m 15 \
+            -H "Content-Type: application/json" \
+            -d "$payload" "$ALERT_WEBHOOK_URL" || true)
+          echo "Discord webhook responded HTTP $http_status"
