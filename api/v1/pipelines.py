@@ -23,6 +23,7 @@ from core.job_manager import (
 )
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
+from db.base import run_in_db_thread
 from pipelines import (
     run_pipeline,
     run_all_pipelines,
@@ -121,7 +122,7 @@ async def trigger_daily_matchup_scores(
     the pipeline runs once and returns done=true, signalling the loop to exit.
     """
     if watch and not date:
-        flipped = await asyncio.to_thread(_espn_scoring_period_advanced)
+        flipped = await run_in_db_thread(_espn_scoring_period_advanced)
         if not flipped:
             log.info("espn_scoring_period_unchanged_skipping")
             from datetime import datetime
@@ -1358,7 +1359,7 @@ async def trigger_deploy(
                 response_snippet=snippet,
             )
 
-        await asyncio.to_thread(_record)
+        await run_in_db_thread(_record)
 
     return {"status": deploy_status, "message": f"Deploy dispatched to GitHub ({deploy_status})", "data": outcomes}
 

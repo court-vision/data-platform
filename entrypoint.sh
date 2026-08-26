@@ -16,11 +16,11 @@ cleanup() {
 trap cleanup EXIT SIGTERM SIGINT
 
 echo "Starting private server on ::${PRIVATE_PORT}"
-uvicorn main:app --host :: --port "$PRIVATE_PORT" &
+uvicorn main:app --host :: --port "$PRIVATE_PORT" --no-access-log &
 PRIVATE_PID=$!
 
 echo "Starting public server on 0.0.0.0:${PUBLIC_PORT}"
-uvicorn main_public:app --host 0.0.0.0 --port "$PUBLIC_PORT" &
+uvicorn main_public:app --host 0.0.0.0 --port "$PUBLIC_PORT" --no-access-log &
 PUBLIC_PID=$!
 
 # Block until either process exits, then cleanup kills the other

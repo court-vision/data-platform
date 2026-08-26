@@ -13,8 +13,9 @@ from datetime import date, datetime
 from typing import Optional, Any
 
 import pytz
+import sentry_sdk
 
-from core.logging import get_logger
+from core.logging import get_correlation_id, get_logger
 from db.models.pipeline_run import PipelineRun
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
@@ -56,11 +57,17 @@ class PipelineContext:
     _log: Any = field(default=None, repr=False)
 
     def __post_init__(self):
-        """Initialize the bound logger."""
-        self._log = get_logger("pipeline").bind(
-            pipeline=self.pipeline_name,
-            run_id=str(self.run_id),
-        )
+        """Initialize the bound logger.
+
+        The triggering request's correlation id is bound explicitly: pipelines
+        run in worker threads (`asyncio.to_thread` copies contextvars, so it is
+        reachable) and a bound field survives any later context changes.
+        """
+        bindings = {"pipeline": self.pipeline_name, "run_id": str(self.run_id)}
+        correlation_id = get_correlation_id()
+        if correlation_id:
+            bindings["correlation_id"] = correlation_id
+        self._log = get_logger("pipeline").bind(**bindings)
 
     @property
     def log(self):
@@ -137,6 +144,7 @@ class PipelineContext:
             error=error_msg,
             traceback=tb,
         )
+        self._report_failure(error)
 
         return PipelineResult(
             status=ApiStatus.ERROR,
@@ -146,3 +154,18 @@ class PipelineContext:
             duration_seconds=duration,
             error=f"{error_msg}\n{tb}",
         )
+
+    def _report_failure(self, error: Exception) -> None:
+        """Send the failure to Sentry tagged with the pipeline and run (no-op without a DSN)."""
+        if not sentry_sdk.is_initialized():
+            return
+        try:
+            with sentry_sdk.new_scope() as scope:
+                scope.set_tag("pipeline", self.pipeline_name)
+                scope.set_tag("run_id", str(self.run_id))
+                correlation_id = get_correlation_id()
+                if correlation_id:
+                    scope.set_tag("correlation_id", correlation_id)
+                sentry_sdk.capture_exception(error)
+        except Exception as exc:  # reporting must never mask the pipeline result
+            self._log.warning("sentry_capture_failed", error=type(exc).__name__)

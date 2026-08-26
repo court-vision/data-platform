@@ -9,6 +9,7 @@ class ApiStatus(str, Enum):
     SUCCESS = "success"
     ERROR = "error"
     SKIPPED = "skipped"
+    BAD_REQUEST = "bad_request"
     VALIDATION_ERROR = "validation_error"
     AUTHENTICATION_ERROR = "authentication_error"
     AUTHORIZATION_ERROR = "authorization_error"

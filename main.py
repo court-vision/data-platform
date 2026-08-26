@@ -22,12 +22,18 @@ from fastapi.templating import Jinja2Templates
 
 from core.middleware import setup_middleware
 from core.db_middleware import DatabaseMiddleware
-from core.correlation_middleware import CorrelationMiddleware
+from core.correlation_middleware import RequestContextMiddleware
+from core.health import health_response
 from core.logging import setup_logging, get_logger
 from core.settings import settings
+from core.telemetry import init_sentry
 from db.base import init_db, close_db
 from services.schedule_service import assert_calendar_available
 from api.v1 import pipelines, live, dashboard, quality, cron
+
+# Sentry must be initialised before the app exists so its ASGI integration wraps it.
+# No SENTRY_DSN (dev, tests) -> nothing happens.
+init_sentry(settings, process="private")
 
 
 @asynccontextmanager
@@ -36,9 +42,11 @@ async def lifespan(app: FastAPI):
         log_level=settings.log_level,
         json_format=settings.log_format == "json",
         service_name=settings.service_name,
+        version=settings.version,
     )
     log = get_logger()
-    log.info("application_starting", service=settings.service_name)
+    log.info("application_starting", service=settings.service_name, process="private",
+             version=settings.version, environment=settings.environment)
 
     init_db()
     log.info("database_initialized")
@@ -72,9 +80,9 @@ app = FastAPI(
 )
 
 # Middlewares (order matters — first added = outermost)
-app.add_middleware(CorrelationMiddleware)
-app.add_middleware(DatabaseMiddleware)
-setup_middleware(app)
+app.add_middleware(RequestContextMiddleware)  # correlation id + one http_request log line
+app.add_middleware(DatabaseMiddleware)        # per-request connection on the loop thread
+setup_middleware(app)                         # exception handlers + CORS
 
 # Templates
 _templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -93,6 +101,13 @@ async def root():
     return {"message": "Court Vision Data Platform"}
 
 
+# Liveness only; never touches the database
 @app.get("/ping")
 async def ping():
     return {"message": "Pong!"}
+
+
+# Readiness: database + calendar. 503 "degraded" when the database is unreachable.
+@app.get("/health")
+async def health():
+    return await health_response()

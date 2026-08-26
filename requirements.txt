@@ -40,6 +40,7 @@ curl_cffi==0.7.4
 circuitbreaker==2.0.0
 tenacity==9.0.0
 structlog==24.4.0
+sentry-sdk[fastapi]==2.68.1
 
 # Email (lineup_alerts pipeline)
 resend==2.19.0

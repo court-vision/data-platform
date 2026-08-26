@@ -6,11 +6,10 @@ Endpoints for running and inspecting SQL-based data quality checks.
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, HTTPException, Query, Security
 
 from core.pipeline_auth import verify_pipeline_token
+from db.base import run_in_db_thread
 from schemas.common import ApiStatus
 from schemas.quality import (
     DataQualityRunResponse,
@@ -48,8 +47,8 @@ async def run_quality_checks(
     if checks:
         check_names = [c.strip() for c in checks.split(",") if c.strip()]
 
-    run = await asyncio.to_thread(_service.run_checks, check_names, triggered_by)
-    detail = await asyncio.to_thread(_service.get_run, str(run.id))
+    run = await run_in_db_thread(_service.run_checks, check_names, triggered_by)
+    detail = await run_in_db_thread(_service.get_run, str(run.id))
     if detail is None:
         raise HTTPException(status_code=500, detail="Failed to load quality run details")
 
@@ -65,7 +64,7 @@ async def list_quality_runs(
     _: str = Security(verify_pipeline_token),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> DataQualityRunListResponse:
-    runs = await asyncio.to_thread(_service.list_runs, limit)
+    runs = await run_in_db_thread(_service.list_runs, limit)
     return DataQualityRunListResponse(
         status=ApiStatus.SUCCESS,
         message=f"Found {len(runs)} quality runs",
@@ -78,7 +77,7 @@ async def get_quality_run(
     run_id: str,
     _: str = Security(verify_pipeline_token),
 ) -> DataQualityRunResponse:
-    detail = await asyncio.to_thread(_service.get_run, run_id)
+    detail = await run_in_db_thread(_service.get_run, run_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Quality run {run_id} not found")
 

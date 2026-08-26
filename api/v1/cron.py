@@ -9,12 +9,11 @@ Routes:
     GET  /v1/internal/cron/job-runs   — list recent runs (dashboard)
 """
 
-import asyncio
-
 from fastapi import APIRouter, HTTPException, Query, Security
 
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
+from db.base import run_in_db_thread
 from db.models.nba.cron_job_run import CronJobRun
 from schemas.cron import CronJobRunCreate, CronJobRunEntry
 
@@ -60,7 +59,7 @@ async def ingest_cron_run(
             response_snippet=body.response_snippet,
         )
 
-    await asyncio.to_thread(_write)
+    await run_in_db_thread(_write)
     log.info("cron_run_ingested", job=body.job_name, result=body.result)
     return {"status": "ok"}
 
@@ -80,5 +79,5 @@ async def list_cron_runs(
             return CronJobRun.recent_for_job(job_name, limit=limit)
         return CronJobRun.recent(limit=limit)
 
-    rows = await asyncio.to_thread(_query)
+    rows = await run_in_db_thread(_query)
     return [_row_to_entry(r) for r in rows]

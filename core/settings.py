@@ -71,6 +71,21 @@ class Settings(BaseSettings):
     # Development mode
     development_mode: bool = False
 
+    # Deployment metadata (Railway injects these at runtime; unset locally)
+    railway_git_commit_sha: Optional[str] = None
+    railway_environment_name: Optional[str] = None
+    railway_service_name: Optional[str] = None
+
+    # Sentry. No DSN -> SDK not initialised (dev, tests).
+    sentry_dsn: Optional[SecretStr] = None
+    sentry_environment: Optional[str] = None  # defaults to the Railway environment name, else "development"
+    sentry_traces_sample_rate: float = 0.0
+
+    # The private uvicorn process (main.py) as seen from the public one (main_public.py).
+    # uvicorn binds `::` IPv6-only (asyncio sets IPV6_V6ONLY), hence the [::1] loopback.
+    private_port: int = 8001
+    private_health_url: Optional[str] = None  # derived from private_port when unset
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -106,6 +121,24 @@ class Settings(BaseSettings):
         if not self.espn_year:
             self.espn_year = espn_year_for(self.nba_season)
         return self
+
+    @model_validator(mode="after")
+    def derive_sentry_environment(self) -> "Settings":
+        if not self.sentry_environment:
+            self.sentry_environment = self.environment
+        if not self.private_health_url:
+            self.private_health_url = f"http://[::1]:{self.private_port}/health"
+        return self
+
+    @property
+    def environment(self) -> str:
+        """Deployment environment name: Railway's, else "development"."""
+        return self.railway_environment_name or "development"
+
+    @property
+    def version(self) -> str:
+        """Short git SHA of the deployed build ("dev" outside Railway)."""
+        return (self.railway_git_commit_sha or "")[:7] or "dev"
 
 
 def get_settings() -> Settings:

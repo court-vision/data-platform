@@ -21,6 +21,7 @@ from fastapi.templating import Jinja2Templates
 from core.job_manager import get_job_manager
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
+from db.base import run_in_db_thread
 from db.models.pipeline_run import PipelineRun
 from db.models.nba.cron_job_run import CronJobRun
 from pipelines import PIPELINE_REGISTRY
@@ -120,9 +121,9 @@ async def get_dashboard_status(
     Also returns the last 10 background jobs from the in-memory job manager.
     """
     pipeline_entries, quality_payload, cron_runs = await asyncio.gather(
-        asyncio.to_thread(_build_pipeline_health),
-        asyncio.to_thread(_build_quality_status),
-        asyncio.to_thread(_build_cron_runs),
+        run_in_db_thread(_build_pipeline_health),
+        run_in_db_thread(_build_quality_status),
+        run_in_db_thread(_build_cron_runs),
     )
 
     job_manager = get_job_manager()
