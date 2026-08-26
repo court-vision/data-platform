@@ -118,7 +118,7 @@ def init_sentry(
     sentry_sdk.init(
         dsn=dsn,
         environment=settings.sentry_environment,
-        release=settings.railway_git_commit_sha or None,
+        release=settings.release,
         traces_sample_rate=settings.sentry_traces_sample_rate,
         send_default_pii=False,
         integrations=[StarletteIntegration(), FastApiIntegration()],

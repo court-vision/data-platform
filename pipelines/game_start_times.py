@@ -112,6 +112,7 @@ class GameStartTimesPipeline(BasePipeline):
                 except ValueError:
                     ctx.log.warning("invalid_datetime", game_id=game_id, dt_str=dt_str)
                     skipped["no_datetime"] += 1
+                    ctx.increment_failed(1, "invalid_datetime")
                     continue
 
                 game_date = dt.date()
@@ -151,6 +152,9 @@ class GameStartTimesPipeline(BasePipeline):
                 Game.upsert_game(game_id, game_data)
                 ctx.increment_records()
 
+        for reason, count in skipped.items():
+            if count:
+                ctx.increment_skipped(count, reason)
         ctx.log.info("processing_complete", records=ctx.records_processed, skipped=skipped)
 
     def _load_feed(self, ctx: PipelineContext, source: str) -> dict:
@@ -167,6 +171,8 @@ class GameStartTimesPipeline(BasePipeline):
                     error=f"{type(e).__name__}: {e}",
                     fallback=nba_cdn.static_schedule_path(season).name,
                 )
+                # The run completes on the image's static copy: still a success, but partial
+                ctx.increment_failed(1, "cdn_schedule_unavailable")
         data = nba_cdn.load_static_schedule(season)
         ctx.log.info("schedule_source", source="static", path=str(nba_cdn.static_schedule_path(season)), season=season)
         return data

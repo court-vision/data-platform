@@ -9,7 +9,7 @@ from __future__ import annotations
 import traceback
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional, Any
 
 import pytz
@@ -19,6 +19,12 @@ from core.logging import get_correlation_id, get_logger
 from db.models.pipeline_run import PipelineRun
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
+from services.alert_service import AlertEvent, get_alert_service
+
+# A successful run alerts (`pipeline_partial`, warning) when nothing succeeded
+# or more than this share of attempted records failed.
+PARTIAL_ALERT_FAILED_SHARE = 0.20
+PARTIAL_ALERT_DEDUPE = timedelta(hours=24)
 
 
 @dataclass
@@ -28,7 +34,7 @@ class PipelineContext:
     - Correlation ID for log tracing
     - PipelineRun database record
     - Timing information
-    - Records processed counter
+    - Records processed / failed / skipped counters (partial-success reporting)
     - Free-form run options from the trigger (e.g. {"source": "cdn"})
 
     Usage:
@@ -37,9 +43,13 @@ class PipelineContext:
         try:
             # Do work
             ctx.increment_records(10)
-            return ctx.mark_success()
+            ctx.increment_failed(1, "team_processing_error")   # kept going, one item lost
+            return ctx.mark_success()                          # -> result.partial is True
         except Exception as e:
             return ctx.mark_failed(e)
+
+    Counters live only on the context / `PipelineResult` / the run's message and
+    logs — `nba.pipeline_runs` keeps its schema (owned by backend/migrations).
     """
 
     pipeline_name: str
@@ -48,6 +58,10 @@ class PipelineContext:
         default_factory=lambda: datetime.now(pytz.timezone("US/Central"))
     )
     records_processed: int = 0
+    records_failed: int = 0
+    records_skipped: int = 0
+    failure_reasons: dict[str, int] = field(default_factory=dict)
+    skip_reasons: dict[str, int] = field(default_factory=dict)
     date_override: Optional[date] = None
     # Per-run options passed through from the trigger endpoint; pipelines that
     # don't declare any simply ignore it (default {}).
@@ -90,9 +104,39 @@ class PipelineContext:
         """Increment the records processed counter."""
         self.records_processed += count
 
+    def increment_failed(self, count: int = 1, reason: Optional[str] = None) -> None:
+        """Count items the pipeline gave up on but kept running past (makes the run partial)."""
+        self.records_failed += count
+        if reason:
+            self.failure_reasons[reason] = self.failure_reasons.get(reason, 0) + count
+
+    def increment_skipped(self, count: int = 1, reason: Optional[str] = None) -> None:
+        """Count items intentionally not processed (not started, filtered out); informational only."""
+        self.records_skipped += count
+        if reason:
+            self.skip_reasons[reason] = self.skip_reasons.get(reason, 0) + count
+
+    @property
+    def partial(self) -> bool:
+        return self.records_failed > 0
+
+    @property
+    def failed_share(self) -> float:
+        """Failed items over attempted items (processed + failed); 0 when nothing was attempted."""
+        attempted = self.records_processed + self.records_failed
+        return self.records_failed / attempted if attempted else 0.0
+
+    @staticmethod
+    def _format_reasons(reasons: dict[str, int]) -> str:
+        return ", ".join(f"{reason}={count}" for reason, count in sorted(reasons.items())) or "unspecified"
+
     def mark_success(self, message: Optional[str] = None) -> PipelineResult:
         """
         Mark pipeline as successful and return result.
+
+        A run with `records_failed > 0` is still a success but `partial`; the
+        message names the failure reasons and a `pipeline_partial` alert goes
+        out when nothing succeeded or the failed share exceeds 20 %.
 
         Args:
             message: Optional custom success message
@@ -102,24 +146,73 @@ class PipelineContext:
         """
         completed_at = datetime.now(pytz.timezone("US/Central"))
         duration = (completed_at - self.started_at).total_seconds()
+        partial = self.partial
 
         if self._db_run:
             self._db_run.mark_success(records_processed=self.records_processed)
 
+        message = message or f"{self.pipeline_name} completed successfully"
+        if partial:
+            message = (
+                f"{message} — {self.records_failed} of "
+                f"{self.records_processed + self.records_failed} records failed "
+                f"({self._format_reasons(self.failure_reasons)})"
+            )
+
         self._log.info(
             "pipeline_completed",
             records_processed=self.records_processed,
+            records_failed=self.records_failed,
+            records_skipped=self.records_skipped,
+            partial=partial,
             duration_seconds=duration,
         )
+        if partial:
+            self._log.warning(
+                "pipeline_partial",
+                records_processed=self.records_processed,
+                records_failed=self.records_failed,
+                failed_share=round(self.failed_share, 3),
+                failure_reasons=self.failure_reasons,
+            )
+            self._alert_partial()
 
         return PipelineResult(
             status=ApiStatus.SUCCESS,
-            message=message or f"{self.pipeline_name} completed successfully",
+            message=message,
             started_at=self.started_at.isoformat(),
             completed_at=completed_at.isoformat(),
             duration_seconds=duration,
             records_processed=self.records_processed,
+            records_failed=self.records_failed,
+            records_skipped=self.records_skipped,
+            partial=partial,
         )
+
+    def _alert_partial(self) -> None:
+        """`pipeline_partial` (warning) when nothing succeeded or > 20 % of attempts failed."""
+        nothing_succeeded = self.records_processed == 0
+        if not nothing_succeeded and self.failed_share <= PARTIAL_ALERT_FAILED_SHARE:
+            return
+        reasons = self._format_reasons(self.failure_reasons)
+        get_alert_service().notify(AlertEvent(
+            key=f"pipeline_partial:{self.pipeline_name}",
+            severity="warning",
+            title=f"Pipeline partial: {self.pipeline_name}",
+            body=(
+                f"{self.records_failed} of {self.records_processed + self.records_failed} records failed "
+                f"({'nothing succeeded' if nothing_succeeded else f'{self.failed_share:.0%} of attempts'}): {reasons}"
+            ),
+            fields={
+                "pipeline": self.pipeline_name,
+                "run_id": str(self.run_id),
+                "processed": self.records_processed,
+                "failed": self.records_failed,
+                "skipped": self.records_skipped,
+                "reasons": reasons,
+            },
+            dedupe=PARTIAL_ALERT_DEDUPE,
+        ))
 
     def mark_failed(self, error: Exception) -> PipelineResult:
         """

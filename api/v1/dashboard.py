@@ -311,7 +311,8 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
             # CronJobRun has fresher data than PipelineRun — use it for recency/status.
             # Map cron result ("success"/"failure") to PipelineRun status vocabulary.
             last_run_at = cron_run_at
-            last_status = "success" if cron_run.result == "success" else "failed" if not is_running else None
+            # A finished cron run is always "success" or "failed" (never None); is_running is reported separately.
+            last_status = "success" if cron_run.result == "success" else "failed"
             last_duration_seconds = cron_run.duration_ms / 1000.0 if cron_run.duration_ms else None
             # Record counts are only available from PipelineRun; show whatever we have.
             last_records_processed = latest_run.records_processed if latest_run else None

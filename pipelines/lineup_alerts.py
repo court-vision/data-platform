@@ -112,6 +112,7 @@ class LineupAlertsPipeline(BasePipeline):
                         team_id=team.team_id,
                         error=str(e),
                     )
+                    ctx.increment_failed(1, type(e).__name__)
                     continue
 
     def _process_team(

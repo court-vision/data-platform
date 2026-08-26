@@ -148,6 +148,8 @@ class DailyMatchupScoresPipeline(BasePipeline):
                         score=matchup_data["current_score"],
                         opponent_score=matchup_data["opponent_current_score"],
                     )
+                else:
+                    ctx.increment_skipped(1, "no_matchup_data")
 
             except Exception as e:
                 ctx.log.warning(
@@ -155,6 +157,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
                     team_id=team.team_id,
                     error=str(e),
                 )
+                ctx.increment_failed(1, type(e).__name__)
                 continue
 
         if teams and ctx.records_processed == 0:

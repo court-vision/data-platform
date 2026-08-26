@@ -51,6 +51,15 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # `railway up` uploads a tarball, so RAILWAY_GIT_COMMIT_SHA is never set in the
+      # container; APP_VERSION is what /health, logs, alerts and Sentry report instead.
+      - name: Set APP_VERSION on data-platform-staging
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway variable set "APP_VERSION=${GITHUB_SHA::7}" --service data-platform-staging --skip-deploys \
+            || echo "::warning::could not set APP_VERSION"
+
       - name: Deploy to staging
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
@@ -182,6 +191,15 @@ jobs:
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
+
+      # `railway up` uploads a tarball, so RAILWAY_GIT_COMMIT_SHA is never set in the
+      # container; APP_VERSION is what /health, logs, alerts and Sentry report instead.
+      - name: Set APP_VERSION on data-platform
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway variable set "APP_VERSION=${GITHUB_SHA::7}" --service data-platform --skip-deploys \
+            || echo "::warning::could not set APP_VERSION"
 
       - name: Deploy to production
         env:

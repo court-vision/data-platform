@@ -71,7 +71,12 @@ class Settings(BaseSettings):
     # Development mode
     development_mode: bool = False
 
-    # Deployment metadata (Railway injects these at runtime; unset locally)
+    # Deployment metadata (Railway injects these at runtime; unset locally).
+    # Deploys go through `railway up` (a tarball upload), which does NOT set
+    # RAILWAY_GIT_COMMIT_SHA; the deploy workflow sets APP_VERSION on the service
+    # right before `railway up` instead. Version resolution: APP_VERSION, then
+    # RAILWAY_GIT_COMMIT_SHA[:7], then "dev".
+    app_version: Optional[str] = None
     railway_git_commit_sha: Optional[str] = None
     railway_environment_name: Optional[str] = None
     railway_service_name: Optional[str] = None
@@ -80,6 +85,23 @@ class Settings(BaseSettings):
     sentry_dsn: Optional[SecretStr] = None
     sentry_environment: Optional[str] = None  # defaults to the Railway environment name, else "development"
     sentry_traces_sample_rate: float = 0.0
+
+    # Ops alerts: one Discord (or Slack) incoming webhook for #cv-alerts. No URL
+    # -> services.alert_service is a no-op (set on production only).
+    alert_webhook_url: Optional[SecretStr] = None
+    alert_webhook_format: str = "discord"  # "discord" (embeds) or "slack" ({"text": ...})
+    alerts_enabled: bool = True
+    # cron_failure_streak fires when a cron job's consecutive failures reach its
+    # threshold (JSON in the env var; unknown jobs use the default).
+    alert_cron_streak_thresholds: dict[str, int] = {
+        "live-stats": 3,
+        "pre-game": 2,
+        "post-game": 2,
+        "playoffs": 2,
+        "schedule-sync": 1,
+        "deploy": 1,
+    }
+    alert_cron_streak_default_threshold: int = 2
 
     # The private uvicorn process (main.py) as seen from the public one (main_public.py).
     # uvicorn binds `::` IPv6-only (asyncio sets IPV6_V6ONLY), hence the [::1] loopback.
@@ -112,6 +134,14 @@ class Settings(BaseSettings):
             raise ValueError("log_format must be 'json' or 'console'")
         return lower_v
 
+    @field_validator("alert_webhook_format")
+    @classmethod
+    def validate_alert_webhook_format(cls, v: str) -> str:
+        lower_v = v.lower()
+        if lower_v not in {"discord", "slack"}:
+            raise ValueError("alert_webhook_format must be 'discord' or 'slack'")
+        return lower_v
+
     @model_validator(mode="after")
     def derive_season(self) -> "Settings":
         """NBA_SEASON defaults to today's season; ESPN_YEAR to the season's end year."""
@@ -136,9 +166,14 @@ class Settings(BaseSettings):
         return self.railway_environment_name or "development"
 
     @property
+    def release(self) -> Optional[str]:
+        """The deployed build's identifier (APP_VERSION, else the Railway commit SHA); None locally."""
+        return (self.app_version or "").strip() or (self.railway_git_commit_sha or "").strip() or None
+
+    @property
     def version(self) -> str:
-        """Short git SHA of the deployed build ("dev" outside Railway)."""
-        return (self.railway_git_commit_sha or "")[:7] or "dev"
+        """Short build identifier for /health, logs and alert footers ("dev" outside a deploy)."""
+        return (self.release or "")[:7] or "dev"
 
 
 def get_settings() -> Settings:

@@ -109,7 +109,11 @@ class LiveGameStatsPipeline(BasePipeline):
             # Fetch live box score for this game
             game_data = self.nba_extractor.get_live_box_score(game_id)
             if not game_data:
-                ctx.log.warning("live_box_score_skip", game_id=game_id)
+                ctx.log.warning("live_box_score_skip", game_id=game_id, game_status=game_status)
+                if game_status == 1:  # not tipped off yet: nothing to fetch
+                    ctx.increment_skipped(1, "not_started")
+                else:
+                    ctx.increment_failed(1, "live_box_score_unavailable")
                 continue
 
             # Combine home and away players

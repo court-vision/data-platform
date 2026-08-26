@@ -6,6 +6,11 @@ Runs SQL-based data quality checks and stores run/check history.
 Check groups:
   STRUCTURAL_CHECKS  — schema integrity, referential consistency, field validity
   TIMING_CHECKS      — per-pipeline execution recency (generated from registry)
+
+Alerting (`quality_critical`): once a run is recorded, every critical check that
+failed (or could not execute) posts one critical alert to the ops webhook,
+deduped per check for 24 h. Warning-severity checks never alert here (the
+nightly quality-check workflow reports them).
 """
 
 from __future__ import annotations
@@ -13,11 +18,15 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from db.base import db
 from db.models.data_quality_check import DataQualityCheck
 from db.models.data_quality_run import DataQualityRun
+from services.alert_service import AlertEvent, get_alert_service
+
+QUALITY_ALERT_DEDUPE = timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -243,6 +252,7 @@ class DataQualityService:
         run = DataQualityRun.start_run(triggered_by=triggered_by)
         passed = 0
         failed = 0
+        critical_failures: list[dict[str, Any]] = []
 
         try:
             for check in selected_checks:
@@ -283,6 +293,13 @@ class DataQualityService:
                     passed += 1
                 else:
                     failed += 1
+                    if check.severity == "critical":
+                        critical_failures.append({
+                            "name": check.name,
+                            "status": check_status,
+                            "failures": failures,
+                            "message": message,
+                        })
 
             run.mark_completed(
                 total_checks=len(selected_checks),
@@ -297,7 +314,28 @@ class DataQualityService:
                 error_message=str(exc),
             )
 
+        self._alert_critical(run, critical_failures)
         return run
+
+    @staticmethod
+    def _alert_critical(run: DataQualityRun, critical_failures: list[dict[str, Any]]) -> None:
+        """One `quality_critical` alert per failed/errored critical check (never raises)."""
+        alerts = get_alert_service()
+        for failure in critical_failures:
+            alerts.notify(AlertEvent(
+                key=f"quality_critical:{failure['name']}",
+                severity="critical",
+                title=f"Data quality: {failure['name']}",
+                body=failure["message"] or "critical check failed",
+                fields={
+                    "check": failure["name"],
+                    "status": failure["status"],
+                    "failures": failure["failures"],
+                    "triggered_by": run.triggered_by,
+                    "run_id": str(run.id),
+                },
+                dedupe=QUALITY_ALERT_DEDUPE,
+            ))
 
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         rows = (

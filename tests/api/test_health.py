@@ -119,3 +119,30 @@ def test_ping_stays_static(app):
     res = TestClient(app).get("/ping")
     assert res.status_code == 200
     assert res.json() == {"message": "Pong!"}
+
+
+# ---- health_degraded alert ----------------------------------------------------
+
+
+@pytest.mark.api
+def test_degraded_health_alerts_once_per_window(db_down, alerts):
+    from datetime import timedelta
+
+    client = TestClient(main.app, raise_server_exceptions=False)
+    assert client.get("/health").status_code == 503
+    assert client.get("/health").status_code == 503  # pollers keep asking; one alert
+
+    assert alerts.keys() == ["health_degraded"]
+    event = alerts.events[0]
+    assert event.severity == "critical"
+    assert event.dedupe == timedelta(minutes=30)
+    assert event.title == "Health degraded: court-vision-data-platform"
+    assert "database: OperationalError" in event.body
+    assert event.fields["failing"] == "database"
+    assert event.fields["environment"] == "development"
+
+
+@pytest.mark.api
+def test_healthy_response_never_alerts(db_ok, alerts):
+    assert TestClient(main.app, raise_server_exceptions=False).get("/health").status_code == 200
+    assert alerts.events == []

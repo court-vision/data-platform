@@ -155,6 +155,14 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
+| `ALERT_WEBHOOK_URL` | No | — | Discord (or Slack) incoming webhook for ops alerts (`#cv-alerts`). Unset → alerts are a no-op; set on **production only**. See [Alerting](#alerting) |
+| `ALERT_WEBHOOK_FORMAT` | No | `discord` | `discord` (embeds) or `slack` (`{"text": ...}`) |
+| `ALERTS_ENABLED` | No | `true` | `false` silences a configured webhook |
+| `ALERT_CRON_STREAK_THRESHOLDS` | No | `{"live-stats":3,"pre-game":2,"post-game":2,"playoffs":2,"schedule-sync":1,"deploy":1}` | JSON map: consecutive cron-runner failures before `cron_failure_streak` fires |
+| `ALERT_CRON_STREAK_DEFAULT_THRESHOLD` | No | `2` | Threshold for jobs not in the map |
+| `SENTRY_DSN` | No | — | Sentry DSN; unset → the SDK is not initialised |
+| `SENTRY_ENVIRONMENT` | No | Railway environment name, else `development` | Sentry environment tag |
+| `APP_VERSION` | No | — | Build identifier reported by `/health`, logs, alert footers and Sentry's release. The deploy workflow sets it (`railway variable set APP_VERSION=<sha7>`) before `railway up`; falls back to `RAILWAY_GIT_COMMIT_SHA[:7]`, then `dev` |
 | `LOG_LEVEL` | No | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 | `LOG_FORMAT` | No | `json` | `json` (production) or `console` (development) |
 | `SERVICE_NAME` | No | `court-vision-data-platform` | Appears in all log entries |
@@ -226,6 +234,17 @@ All `/v1/internal/*` endpoints require the `Authorization: Bearer <PIPELINE_API_
 
 All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query param for backfills.
 
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/internal/pipelines/deploy` | Nightly production deploy: GitHub `repository_dispatch` (`nightly-deploy`) to the backend and data-platform repos. `?service=backend\|data_platform` limits it to one; `?source=manual` (dashboard) self-records the run in `nba.cron_job_runs`. Answers **502** `{"status":"error","error_code":"DEPLOY_DISPATCH_FAILED","data":{...}}` when any dispatch fails (so cron-runner records a failure) and posts a `deploy_dispatch_failed` alert |
+
+### Cron Job Runs
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/v1/internal/cron/job-runs` | Ingest one cron-runner execution report (fires `cron_failure_streak` / recovered alerts) |
+| `GET` | `/v1/internal/cron/job-runs` | Recent runs for the dashboard timeline (`?limit`, `?job_name`) |
+
 ### Background Job Status
 
 | Method | Path | Description |
@@ -259,7 +278,8 @@ All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query par
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/` | Service info |
-| `GET` | `/ping` | Liveness check |
+| `GET` | `/ping` | Liveness only (static; never touches the database) |
+| `GET` | `/health` | Readiness: `200 {"status":"ok",...}` or `503 {"status":"degraded",...}` with `service`, `version`, `environment`, `uptime_s` and `checks` (`database` gates; `calendar` is informational; the public port adds `private_server`, which also gates). A 503 posts a `health_degraded` alert (30 min dedupe per process). Railway, Better Stack and CI assert `.status == "ok"` |
 
 ## Pipeline Architecture
 
@@ -308,10 +328,13 @@ Category endpoints self-gate — the service decides whether work is needed:
 
 `PipelineContext` is passed to `execute()` and provides:
 
-- `ctx.log` — bound structlog logger with `pipeline` and `run_id` fields
+- `ctx.log` — bound structlog logger with `pipeline`, `run_id` and the triggering request's `correlation_id`
 - `ctx.increment_records(n)` — counter for records upserted
+- `ctx.increment_failed(n, reason)` — items the pipeline gave up on but kept running past; makes the run `partial` (see [Partial success](#partial-success))
+- `ctx.increment_skipped(n, reason)` — items intentionally not processed (not started, filtered out); informational
 - `ctx.date_override` — backfill date (None = use today)
-- Auto-creates a `pipeline_run` audit record on start; marks success/failure on completion
+- `ctx.options` — free-form per-run options from the trigger (e.g. `{"source": "cdn"}`)
+- Auto-creates a `pipeline_run` audit record on start; marks success/failure on completion; a failure is reported to Sentry and posts a `pipeline_failed` alert
 
 ### Audit Trail
 
@@ -340,6 +363,64 @@ Extractors in `pipelines/extractors/` wrap external data sources:
 ### Background Jobs (`/all` endpoint)
 
 The `/v1/internal/pipelines/all` endpoint returns immediately with a `job_id`. Pipelines run in the background sequentially. Use `GET /v1/internal/pipelines/jobs/{job_id}` to poll status. The in-memory `JobManager` keeps the last 100 jobs; jobs are lost on restart.
+
+## Alerting
+
+`services/alert_service.py` posts ops alerts to one Discord (or Slack) incoming webhook, `ALERT_WEBHOOK_URL` — set on production only; unset (local, tests, staging) every event is a logged no-op. The GitHub Actions failure steps, Railway's project webhook and Sentry's Discord integration post to the same channel.
+
+- **Dedupe is in memory, per `key`, per process.** An event whose key was sent less than its window ago is dropped (`alert_deduped` log line). The private and public uvicorn processes keep separate maps and a restart clears them, so a crash-looping service can re-send once per restart — Railway's "crashed" webhook is the primary signal there. The stamp is recorded before the POST, so a dead webhook cannot turn every event into a 5 s stall.
+- **Never raises.** A failed POST is one `alert_send_failed` warning; pipeline threads, request handlers and `/health` are never affected. The call is synchronous (`httpx.Client`, 5 s timeout); async callers use `notify_async`.
+- Discord embeds carry the title (prefixed `[CRITICAL]`, `[WARNING]` or `[RECOVERED]`), description, colour by severity, fields, timestamp and a footer `<environment> · <version>`; Slack gets the same as `{"text": ...}`. Bodies are scrubbed for `token=`/`espn_s2=`-style secrets.
+- `recovered(key, ...)` posts a green note and clears `key`'s dedupe stamp so the next occurrence alerts again.
+
+### Event catalogue
+
+| `key` | Severity | Fires when | Dedupe | Hook |
+|---|---|---|---|---|
+| `pipeline_failed:<pipeline>` | critical | `execute()` raised; the run is recorded as `failed` and the exception is captured by Sentry. Live-stats failing all night is one message | 6 h | `pipelines/base.py` `_run_sync` |
+| `pipeline_partial:<pipeline>` | warning | A *successful* run with `records_failed > 0` where nothing succeeded (`records_processed == 0`) or more than 20 % of attempted records (processed + failed) failed | 24 h | `PipelineContext.mark_success` |
+| `cron_failure_streak:<job>` | critical | A cron-runner failure report brings the job's consecutive failures (counted over its last 10 rows) to **exactly** its threshold: `live-stats` 3, `pre-game` / `post-game` / `playoffs` 2, `schedule-sync` / `deploy` 1, unknown jobs 2 (`ALERT_CRON_STREAK_THRESHOLDS`) | 6 h | `POST /v1/internal/cron/job-runs` |
+| `cron_failure_streak:<job>:recovered` | info | A success report follows a streak ≥ threshold; also clears the streak key's dedupe | — | same |
+| `deploy_dispatch_failed` | critical | Any GitHub `repository_dispatch` in `POST /v1/internal/pipelines/deploy` raised or answered non-2xx; the endpoint answers 502 so cron-runner records a failure (which in turn feeds the `deploy` streak, threshold 1) | 12 h | `api/v1/pipelines.py` |
+| `quality_critical:<check>` | critical | A `critical`-severity data-quality check failed or errored in a run (warnings never alert here; the nightly `quality-check` workflow reports those) | 24 h | `DataQualityService.run_checks` |
+| `health_degraded` | critical | `GET /health` answered 503 — per process, so a database outage can produce one embed from the private process and one from the public one | 30 min | `core/health.py` |
+
+### Partial success
+
+`PipelineResult` carries `records_processed`, `records_failed`, `records_skipped` and `partial` (a success with failures); the run's message names the failure reasons (`… — 2 of 10 records failed (KeyError=2)`) and `pipeline_partial` is logged at warning. `nba.pipeline_runs` is unchanged — its schema belongs to `backend/migrations`, so the counters live only in the result, the message and the logs. Wired in:
+
+| Pipeline | `increment_failed` | `increment_skipped` |
+|---|---|---|
+| `daily_matchup_scores` | a team's ESPN/Yahoo fetch or upsert raised | team returned no matchup data |
+| `lineup_alerts` | a team's alert processing raised | — |
+| `playoff_bracket` | a series upsert raised | — |
+| `game_start_times` | a game with an unparseable `gameDateTimeEst`; the CDN → static-file fallback counts as one failed fetch | preseason / placeholder / non-NBA games |
+| `live_game_stats` | a tipped-off game with no live box score | games not started yet |
+
+### Production drills
+
+The cron router is mounted on the private process only, so the streak drill runs from inside the container (`railway ssh --service data-platform --environment production`, then `python3` — the image has no `curl`). `alert-test` is an unknown job, so its threshold is 2:
+
+```bash
+railway ssh --service data-platform --environment production
+python3 - <<'PY'
+import json, os, urllib.request
+BASE = "http://[::1]:8001/v1/internal/cron/job-runs"
+def report(result, minute):
+    body = {"job_name": "alert-test", "triggered_at": f"2026-08-26T01:{minute:02d}:00Z",
+            "completed_at": f"2026-08-26T01:{minute:02d}:02Z", "duration_ms": 2000, "result": result,
+            "http_status": 200 if result == "success" else 502, "attempts": 1,
+            "error_message": None if result == "success" else "alert drill"}
+    req = urllib.request.Request(BASE, data=json.dumps(body).encode(), method="POST",
+        headers={"Authorization": f"Bearer {os.environ['PIPELINE_API_TOKEN']}", "Content-Type": "application/json"})
+    print(result, minute, urllib.request.urlopen(req).status)
+report("failure", 1); report("failure", 2)  # -> one "[CRITICAL] Cron job failing: alert-test (2 in a row)" embed
+report("failure", 3)                        # -> nothing (streak 3 != threshold 2)
+report("success", 4)                        # -> "[RECOVERED] Cron job recovered: alert-test"
+PY
+```
+
+The four `alert-test` rows show up in the dashboard timeline; remove them with `DELETE FROM nba.cron_job_runs WHERE job_name = 'alert-test'` when done. Other drills: point `DATA_PLATFORM_GITHUB_REPO` on staging at a bogus repo and `POST /v1/internal/pipelines/deploy?source=manual&service=data_platform` → 502 + a `deploy_dispatch_failed` embed (staging has no webhook, so watch the `alert_skipped` / `github_dispatch_failed` log lines there); trigger a pipeline against a broken upstream → one `pipeline_failed` embed however many times it is retried within 6 h.
 
 ## Database Schema Overview
 
@@ -379,3 +460,5 @@ Deployed on Railway. The container runs `entrypoint.sh`, which starts:
 - **Public server** (`0.0.0.0:$PORT`) — routed from `data.courtvision.dev`; serves the dashboard UI only
 
 Environment variables are set as Railway service variables. `DATABASE_URL` uses Railway's private PostgreSQL URL.
+
+Deploys go through `railway up` (a tarball upload), which does **not** set `RAILWAY_GIT_COMMIT_SHA` in the container. Both deploy jobs in `.github/workflows/deploy.yml` therefore run `railway variable set "APP_VERSION=${GITHUB_SHA::7}" --service <service> --skip-deploys` right before `railway up` (warn-only, so a CLI hiccup never blocks a deploy); `APP_VERSION` is what `/health`, the logs, alert footers and Sentry's `release` report. Without it the version reads `dev`.

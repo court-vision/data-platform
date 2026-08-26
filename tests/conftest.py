@@ -13,6 +13,47 @@ os.environ.setdefault("NBA_SEASON", "2025-26")
 
 
 # ---------------------------------------------------------------------------
+# Ops alerts: a recording AlertService with a webhook configured, installed as
+# the process singleton. `alerts.events` are the AlertEvents that were sent
+# (after dedupe), `alerts.payloads` the webhook bodies; nothing leaves the box.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def alerts(monkeypatch):
+    from pydantic import SecretStr
+
+    from core.settings import settings
+    from services import alert_service as alert_module
+    from services.alert_service import AlertService
+
+    class RecordingAlertService(AlertService):
+        def __init__(self):
+            super().__init__(settings, post=self._record)
+            self.events = []
+            self.payloads = []
+
+        def notify(self, event):
+            sent = super().notify(event)
+            if sent:
+                self.events.append(event)
+            return sent
+
+        def _record(self, url, payload):
+            self.payloads.append((url, payload))
+
+        def keys(self):
+            return [event.key for event in self.events]
+
+    monkeypatch.setattr(settings, "alert_webhook_url", SecretStr("https://hooks.test/cv-alerts"))
+    monkeypatch.setattr(settings, "alert_webhook_format", "discord")
+    monkeypatch.setattr(settings, "alerts_enabled", True)
+    service = RecordingAlertService()
+    monkeypatch.setattr(alert_module, "_service", service)
+    return service
+
+
+# ---------------------------------------------------------------------------
 # Time-freezing fixtures for testing self-gating logic
 # ---------------------------------------------------------------------------
 

@@ -11,11 +11,12 @@ The /all endpoint uses a fire-and-forget pattern:
 """
 
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Security, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from core.job_manager import (
     get_job_manager,
@@ -46,9 +47,13 @@ from schemas.pipeline import (
     LiveStatsData,
 )
 from schemas.common import ApiStatus
+from services.alert_service import AlertEvent, get_alert_service
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 log = get_logger("pipeline_api")
+
+DEPLOY_DISPATCH_FAILED_CODE = "DEPLOY_DISPATCH_FAILED"
+DEPLOY_ALERT_DEDUPE = timedelta(hours=12)
 
 
 @router.get("/")
@@ -1273,6 +1278,10 @@ async def trigger_deploy(
     appears in the scheduler timeline and deployments section immediately. Cron-runner
     triggered runs are recorded by the cron-runner reporter instead.
 
+    Any dispatch failing answers **502** `{status: "error", data: outcomes}` (so the
+    cron-runner records a failure and its streak alert can fire) and posts a
+    `deploy_dispatch_failed` alert to the ops webhook.
+
     Requires:
         GITHUB_DEPLOY_TOKEN  — GitHub PAT with repo + workflow scopes
         BACKEND_GITHUB_REPO  — e.g. "username/backend"
@@ -1334,16 +1343,35 @@ async def trigger_deploy(
                 outcomes[name]["body"] = result.text[:200]
                 all_ok = False
 
-    deploy_status = "success" if all_ok else "partial_failure"
-    log.info("github_dispatch_fired", status=deploy_status, outcomes=outcomes)
+    deploy_status = "success" if all_ok else "error"
+    failed_repos = {
+        name: outcome.get("error") or f"HTTP {outcome.get('status')}: {outcome.get('body', '')}".strip()
+        for name, outcome in outcomes.items()
+        if not outcome.get("ok")
+    }
+    if all_ok:
+        log.info("github_dispatch_fired", status=deploy_status, outcomes=outcomes)
+    else:
+        log.error("github_dispatch_failed", status=deploy_status, outcomes=outcomes, source=source)
+        await get_alert_service().notify_async(AlertEvent(
+            key="deploy_dispatch_failed",
+            severity="critical",
+            title="Nightly deploy dispatch failed",
+            body="\n".join(f"{name} ({repos[name]}): {reason[:300]}" for name, reason in failed_repos.items()),
+            fields={
+                "source": source or "cron",
+                "service": service or "both",
+                "failed": ", ".join(failed_repos),
+                "ok": ", ".join(name for name, outcome in outcomes.items() if outcome.get("ok")) or None,
+            },
+            dedupe=DEPLOY_ALERT_DEDUPE,
+        ))
 
     # Self-record when triggered manually from the dashboard so the run
     # appears in the timeline and deployment cards without waiting for cron-runner.
     if source == "manual":
         snippet = _json.dumps(outcomes)[:300]
-        error_msg = None if all_ok else _json.dumps(
-            {k: v["error"] for k, v in outcomes.items() if not v.get("ok")}
-        )
+        error_msg = None if all_ok else _json.dumps(failed_repos)
 
         def _record() -> None:
             from db.models.nba.cron_job_run import CronJobRun
@@ -1360,6 +1388,17 @@ async def trigger_deploy(
             )
 
         await run_in_db_thread(_record)
+
+    if not all_ok:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": deploy_status,
+                "message": f"Deploy dispatch failed for: {', '.join(failed_repos)}",
+                "data": outcomes,
+                "error_code": DEPLOY_DISPATCH_FAILED_CODE,
+            },
+        )
 
     return {"status": deploy_status, "message": f"Deploy dispatched to GitHub ({deploy_status})", "data": outcomes}
 

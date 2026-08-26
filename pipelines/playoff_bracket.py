@@ -138,6 +138,7 @@ class PlayoffBracketPipeline(BasePipeline):
 
             except Exception as e:
                 ctx.log.error("upsert_failed", series_id=series_id, error=str(e))
+                ctx.increment_failed(1, "upsert_failed")
 
         ctx.increment_records(upserted)
         ctx.log.info("playoff_bracket_complete", upserted=upserted)

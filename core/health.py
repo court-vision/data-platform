@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import timedelta
 from typing import Any, Iterable, Optional
 
 from fastapi.responses import JSONResponse
@@ -22,6 +23,7 @@ from fastapi.responses import JSONResponse
 from core.logging import get_logger
 from core.settings import settings
 from db.base import db
+from services.alert_service import AlertEvent, get_alert_service
 from services.schedule_service import get_max_week
 
 DB_TIMEOUT_S = 2.0
@@ -29,6 +31,9 @@ DB_TIMEOUT_S = 2.0
 _STARTED_AT = time.monotonic()
 _DEGRADED_LOG_INTERVAL_S = 60.0
 _last_degraded_log_at = 0.0
+# `health_degraded` to the ops webhook at most once per window per process
+# (the private and public processes each alert when they see a 503).
+HEALTH_ALERT_DEDUPE = timedelta(minutes=30)
 
 
 def _probe_database() -> float:
@@ -83,6 +88,10 @@ async def build_health(
     }
 
 
+def failing_checks(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {name: check for name, check in payload["checks"].items() if not check.get("ok")}
+
+
 def _log_degraded(payload: dict[str, Any]) -> None:
     """One `health_degraded` line per minute, however often the pollers ask."""
     global _last_degraded_log_at
@@ -90,8 +99,26 @@ def _log_degraded(payload: dict[str, Any]) -> None:
     if now - _last_degraded_log_at < _DEGRADED_LOG_INTERVAL_S:
         return
     _last_degraded_log_at = now
-    failing = {name: check for name, check in payload["checks"].items() if not check.get("ok")}
-    get_logger("health").error("health_degraded", checks=failing, version=payload["version"])
+    get_logger("health").error("health_degraded", checks=failing_checks(payload), version=payload["version"])
+
+
+def degraded_event(payload: dict[str, Any]) -> AlertEvent:
+    failing = failing_checks(payload)
+    return AlertEvent(
+        key="health_degraded",
+        severity="critical",
+        title=f"Health degraded: {payload['service']}",
+        body="GET /health is answering 503 — " + "; ".join(
+            f"{name}: {check.get('error') or 'failing'}" for name, check in failing.items()
+        ),
+        fields={
+            "failing": ", ".join(failing) or "unknown",
+            "environment": payload["environment"],
+            "version": payload["version"],
+            "uptime_s": payload["uptime_s"],
+        },
+        dedupe=HEALTH_ALERT_DEDUPE,
+    )
 
 
 async def health_response(extra_checks: Optional[dict[str, dict[str, Any]]] = None) -> JSONResponse:
@@ -99,4 +126,5 @@ async def health_response(extra_checks: Optional[dict[str, dict[str, Any]]] = No
     status_code = 200 if payload["status"] == "ok" else 503
     if status_code != 200:
         _log_degraded(payload)
+        await get_alert_service().notify_async(degraded_event(payload))
     return JSONResponse(status_code=status_code, content=payload, headers={"Cache-Control": "no-store"})

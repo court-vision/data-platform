@@ -14,6 +14,9 @@ class PipelineResult(BaseModel):
     completed_at: Optional[str] = None
     duration_seconds: Optional[float] = None
     records_processed: Optional[int] = None
+    records_failed: int = 0    # items the pipeline gave up on (ctx.increment_failed)
+    records_skipped: int = 0   # items intentionally not processed (ctx.increment_skipped)
+    partial: bool = False      # success with records_failed > 0
     error: Optional[str] = None
     done: bool = True  # Loop completion signal for cron-runner loop mode
 

@@ -6,13 +6,18 @@ Abstract base class for all data pipelines.
 
 import asyncio
 from abc import ABC, abstractmethod
-from datetime import date
+from datetime import date, timedelta
 from typing import ClassVar, Optional
 
 from db.base import db
 from pipelines.config import PipelineConfig
 from pipelines.context import PipelineContext
 from schemas.pipeline import PipelineResult
+from services.alert_service import AlertEvent, get_alert_service
+
+# One `pipeline_failed` alert per pipeline per window (live-stats failing all
+# night is one message).
+PIPELINE_FAILED_DEDUPE = timedelta(hours=6)
 
 
 class BasePipeline(ABC):
@@ -108,10 +113,30 @@ class BasePipeline(ABC):
                 self.after_execute(ctx)
                 return ctx.mark_success()
             except Exception as e:
-                return ctx.mark_failed(e)
+                result = ctx.mark_failed(e)
+                self._notify_failure(ctx, e)
+                return result
         finally:
             if not db.is_closed():
                 db.close()
+
+    def _notify_failure(self, ctx: PipelineContext, error: Exception) -> None:
+        """`pipeline_failed` (critical) to the ops webhook; never raises."""
+        get_alert_service().notify(AlertEvent(
+            key=f"pipeline_failed:{self.config.name}",
+            severity="critical",
+            title=f"Pipeline failed: {self.config.display_name}",
+            body=f"{type(error).__name__}: {str(error)[:500]}",
+            fields={
+                "pipeline": self.config.name,
+                "category": self.config.category.value,
+                "run_id": str(ctx.run_id),
+                "date_override": str(ctx.date_override) if ctx.date_override else None,
+                "records_processed": ctx.records_processed,
+                "target_table": self.config.target_table,
+            },
+            dedupe=PIPELINE_FAILED_DEDUPE,
+        ))
 
     async def run(
         self,
