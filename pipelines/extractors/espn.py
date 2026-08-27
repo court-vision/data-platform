@@ -261,6 +261,7 @@ class ESPNExtractor(BaseExtractor):
                     "matchup_period": current_matchup_period,
                     "matchup_start": matchup_start,
                     "scoring_period_id": scoring_period_id,
+                    "scoring_period_source": "provider" if scoring_period_id else "unknown",
                     "category_scores": category_scores,
                 }
 

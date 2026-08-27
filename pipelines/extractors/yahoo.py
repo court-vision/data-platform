@@ -20,6 +20,7 @@ from core.resilience import (
     ServerError,
 )
 from pipelines.extractors.base import BaseExtractor
+from services.schedule_service import get_nba_today, season_day
 
 
 YAHOO_TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
@@ -320,5 +321,11 @@ class YahooExtractor(BaseExtractor):
             "opponent_team_name": opponent_name,
             "opponent_current_score": opponent_score,
             "matchup_period": yahoo_week,
+            # Yahoo has no day-granular watermark, so derive it from our own
+            # calendar on the fantasy day (2 AM ET) -- the same instant a
+            # provider's day flips. Tagged so it is never mistaken for a
+            # provider-reported value.
+            "scoring_period_id": season_day(get_nba_today()),
+            "scoring_period_source": "calendar",
             "category_scores": category_scores,
         }, new_tokens
