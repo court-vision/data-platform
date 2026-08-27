@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     private_port: int = 8001
     private_health_url: Optional[str] = None  # derived from private_port when unset
 
+    # Envelope-encryption keys for stored provider credentials, as
+    # "1:<fernet-key>,2:<fernet-key>" (newest last). Must match the backend's
+    # value -- both services decrypt the same rows. Empty disables the store and
+    # falls back to the legacy plaintext column. See core/crypto.py.
+    credential_keys: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

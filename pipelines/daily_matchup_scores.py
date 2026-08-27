@@ -12,6 +12,7 @@ import pytz
 
 from core.settings import settings
 from db.models.teams import Team
+from services import credential_service
 from db.models.stats.daily_matchup_score import DailyMatchupScore
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -76,7 +77,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
 
         for team in teams:
             try:
-                league_info = json.loads(team.league_info)
+                league_info = credential_service.hydrate(team, json.loads(team.league_info))
                 team_name = league_info.get("team_name", "")
                 provider = league_info.get("provider", "espn")  # Default to ESPN for backward compatibility
 
@@ -219,8 +220,23 @@ class DailyMatchupScoresPipeline(BasePipeline):
         league_info: dict,
         new_tokens: dict,
     ) -> None:
-        """Persist refreshed Yahoo tokens back to the database."""
+        """Persist refreshed Yahoo tokens wherever this team's credentials live."""
         try:
+            # Migrated teams: the encrypted store owns the tokens. Take this
+            # branch before touching league_info -- `league_info` here has been
+            # hydrated, so writing it back would re-plant the secrets in
+            # plaintext in the very column this migration empties.
+            if credential_service.update_yahoo_tokens(
+                team,
+                new_tokens["access_token"],
+                new_tokens["refresh_token"],
+                new_tokens["token_expiry"],
+            ):
+                ctx.log.debug("yahoo_tokens_refreshed", team_id=team.team_id, store="encrypted")
+                return
+
+            # Not yet migrated: the secrets are still in league_info, so this
+            # round-trip is lossless.
             league_info["yahoo_access_token"] = new_tokens["access_token"]
             league_info["yahoo_refresh_token"] = new_tokens["refresh_token"]
             league_info["yahoo_token_expiry"] = new_tokens["token_expiry"]

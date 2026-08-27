@@ -12,6 +12,8 @@ Safe to call frequently (every 15 min); deduplication prevents repeat notificati
 """
 
 import json
+
+from services import credential_service
 import time as time_mod
 from datetime import datetime, timedelta, time
 
@@ -128,7 +130,7 @@ class LineupAlertsPipeline(BasePipeline):
     ) -> None:
         """Process a single team for lineup alerts."""
         # Parse league info
-        league_info = json.loads(team.league_info)
+        league_info = credential_service.hydrate(team, json.loads(team.league_info))
         provider = league_info.get("provider", "espn")
 
         # ESPN only for now

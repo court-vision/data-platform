@@ -169,6 +169,7 @@ def _espn_scoring_period_advanced() -> bool:
     from datetime import datetime
     from db.models.teams import Team
     from db.models.stats.daily_matchup_score import DailyMatchupScore
+    from services import credential_service
     from core.settings import settings
 
     # Time fallback: if past 2:30 AM CST, run regardless of scoring period.
@@ -191,7 +192,7 @@ def _espn_scoring_period_advanced() -> bool:
     espn_league_info = None
     for team in teams:
         try:
-            league_info = json.loads(team.league_info)
+            league_info = credential_service.hydrate(team, json.loads(team.league_info))
             if league_info.get("provider", "espn") == "espn":
                 espn_team = team
                 espn_league_info = league_info
