@@ -155,22 +155,120 @@ async def trigger_daily_matchup_scores(
     )
 
 
-def _espn_scoring_period_advanced() -> bool:
+_ESPN_ENDPOINT = (
+    "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{}/segments/0/leagues/{}"
+)
+
+
+def _first_espn_league():
+    """(team, league_info) for the first ESPN team found, or (None, None).
+
+    A single league is enough for both the gate and the watermark probe:
+    `latestScoringPeriod` is ESPN's league-level day index, and every NBA league
+    shares the same calendar.
+    """
+    import json
+    from db.models.teams import Team
+    from services import credential_service
+
+    for team in Team.select().limit(10):
+        try:
+            league_info = credential_service.hydrate(team, json.loads(team.league_info))
+            if league_info.get("provider", "espn") == "espn":
+                return team, league_info
+        except Exception:
+            continue
+    return None, None
+
+
+def _fetch_espn_league(league_info, views):
+    """One GET against a league. Returns the parsed payload, or None on any failure."""
+    import requests
+    from core.settings import settings
+
+    endpoint = _ESPN_ENDPOINT.format(
+        league_info.get("year", settings.espn_year), league_info.get("league_id")
+    )
+    resp = requests.get(
+        endpoint,
+        params={"view": views},
+        cookies={
+            "espn_s2": league_info.get("espn_s2", ""),
+            "SWID": league_info.get("swid", ""),
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def probe_espn_watermark():
+    """Record one observation of ESPN's day watermark beside its materialized totals.
+
+    Answers the one assumption the live-score watermark design rests on: that ESPN
+    advances `status.latestScoringPeriod` at or *after* the moment matchup
+    `totalPoints` absorbs the previous day. If it advances first, a snapshot taken
+    in between records a watermark that overstates what its score covers, and the
+    read path drops a day.
+
+    The measurement is Δ = t(totalPoints changes) − t(latestScoringPeriod changes),
+    taken across a night of these log lines. **Δ ≤ 0 means the assumption holds**
+    and `live_window_from_watermark` is safe to enable. See
+    docs/PENDING_PROD_CHECKS.md #4.
+
+    `latestScoringPeriod` is undefined or 0 before opening night, so this produces
+    nothing useful until 2026-10-20 — which is why it has to be deployed first.
+
+    Instrumentation only: never raises, never affects whether a pipeline runs.
+    Returns `latestScoringPeriod` so the gate can reuse this request instead of
+    making a second one.
+    """
+    try:
+        _, league_info = _first_espn_league()
+        if not league_info:
+            return None
+
+        payload = _fetch_espn_league(league_info, ["mSettings", "mMatchup"])
+        status = payload.get("status", {}) or {}
+        latest_scoring_period = status.get("latestScoringPeriod")
+        current_matchup_period = status.get("currentMatchupPeriod")
+
+        # totalPoints for the current matchup period. Both sides are logged: they
+        # move together in ESPN's batch, so either changing marks the same instant.
+        home_total = away_total = None
+        for matchup in payload.get("schedule") or []:
+            if matchup.get("matchupPeriodId") == current_matchup_period:
+                home_total = (matchup.get("home") or {}).get("totalPoints")
+                away_total = (matchup.get("away") or {}).get("totalPoints")
+                break
+
+        log.info(
+            "espn_watermark_probe",
+            latest_scoring_period=latest_scoring_period,
+            current_matchup_period=current_matchup_period,
+            home_total_points=home_total,
+            away_total_points=away_total,
+        )
+        return latest_scoring_period
+    except Exception as exc:
+        log.warning("espn_watermark_probe_failed", error=type(exc).__name__)
+        return None
+
+
+def _espn_scoring_period_advanced(known_period=None) -> bool:
     """
     Check whether ESPN's current scoring period has advanced beyond the latest
-    stored baseline. Called once per post-game poll iteration (one ESPN API call).
+    stored baseline.
 
     Returns True if the pipeline should run (flip detected, no baseline, 2:30 AM CST fallback, or ESPN API error).
     Returns False if ESPN's period matches the baseline and it's before the 2:30 AM CST fallback.
+
+    `known_period` is `latestScoringPeriod` already fetched this poll by
+    `probe_espn_watermark`; passing it avoids a second identical request.
     """
-    import json
-    import requests
     import pytz
     from datetime import datetime
-    from db.models.teams import Team
     from db.models.stats.daily_matchup_score import DailyMatchupScore
-    from services import credential_service
-    from core.settings import settings
 
     # Time fallback: if past 2:30 AM CST, run regardless of scoring period.
     # Handles cases where ESPN's batch runs late or the scoring period doesn't
@@ -182,46 +280,19 @@ def _espn_scoring_period_advanced() -> bool:
         log.info("espn_scoring_period_time_fallback", time_cst=now_cst.strftime("%H:%M"))
         return True
 
-    ESPN_ENDPOINT = (
-        "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{}/segments/0/leagues/{}"
-    )
-
-    # Find the first ESPN team to peek at the scoring period
-    teams = list(Team.select().limit(10))
-    espn_team = None
-    espn_league_info = None
-    for team in teams:
-        try:
-            league_info = credential_service.hydrate(team, json.loads(team.league_info))
-            if league_info.get("provider", "espn") == "espn":
-                espn_team = team
-                espn_league_info = league_info
-                break
-        except Exception:
-            continue
-
+    espn_team, espn_league_info = _first_espn_league()
     if not espn_team or not espn_league_info:
         # No ESPN teams registered — always run
         return True
 
-    # Peek at ESPN's current latestScoringPeriod
-    try:
-        year = espn_league_info.get("year", settings.espn_year)
-        league_id = espn_league_info.get("league_id")
-        espn_s2 = espn_league_info.get("espn_s2", "")
-        swid = espn_league_info.get("swid", "")
-        endpoint = ESPN_ENDPOINT.format(year, league_id)
-        resp = requests.get(
-            endpoint,
-            params={"view": "mSettings"},
-            cookies={"espn_s2": espn_s2, "SWID": swid},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        espn_period = resp.json().get("status", {}).get("latestScoringPeriod")
-    except Exception as e:
-        log.warning("espn_peek_failed_running_pipeline", error=str(e))
-        return True  # On error, run the pipeline anyway
+    espn_period = known_period
+    if espn_period is None:
+        try:
+            payload = _fetch_espn_league(espn_league_info, "mSettings")
+            espn_period = payload.get("status", {}).get("latestScoringPeriod")
+        except Exception as e:
+            log.warning("espn_peek_failed_running_pipeline", error=str(e))
+            return True  # On error, run the pipeline anyway
 
     if espn_period is None:
         return True
@@ -589,6 +660,9 @@ async def trigger_post_game(
 
     # A date override implies force — skip all time/readiness gating
     force = force or (date is not None)
+    # Assigned inside the `not force` block below; declared here so the gate's
+    # later use cannot become an UnboundLocalError if this flow is rearranged.
+    probed_period = None
 
     eastern = pytz.timezone("US/Eastern")
     now_et = datetime.now(eastern)
@@ -608,6 +682,12 @@ async def trigger_post_game(
                 status=ApiStatus.SUCCESS,
                 message=f"No games scheduled for NBA date {nba_date}",
             )
+
+        # One watermark observation per poll, taken before any gate can return
+        # early — the ESPN flip happens partway through this window and the whole
+        # point is to bracket it. Only on nights that have games, so it costs
+        # nothing in the offseason. See docs/PENDING_PROD_CHECKS.md #4.
+        probed_period = probe_espn_watermark()
 
         # Gate 1: Time window — only attempt within [estimated_end, estimated_end + window]
         latest_game_dt = datetime.combine(nba_date, latest_game_time)
@@ -688,7 +768,7 @@ async def trigger_post_game(
                 # _espn_scoring_period_advanced() flips to True and we re-run.
                 # After a correct run (stored period == ESPN period) it returns
                 # False, preventing further re-runs — no separate dedup needed.
-                if not _espn_scoring_period_advanced():
+                if not _espn_scoring_period_advanced(probed_period):
                     log.info("post_game_espn_gate_not_ready", pipeline=name)
                     continue
             else:
