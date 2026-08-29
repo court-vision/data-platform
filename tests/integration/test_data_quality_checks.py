@@ -89,7 +89,6 @@ def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
         pts=30, reb=5, ast=6, stl=2, blk=0, tov=3,
         min=34,
         fgm=10, fga=20, fg3m=5, fg3a=12, ftm=5, fta=6,
-        rank=5,
     )
     # Include fg_pct, fg3_pct, ft_pct — all NOT NULL
     PlayerRollingStats.create(
@@ -316,11 +315,11 @@ class TestOrphanPlayersCheck:
                 INSERT INTO nba.player_season_stats
                   (player_id, team_id, as_of_date, season, gp, fpts,
                    pts, reb, ast, stl, blk, tov, min,
-                   fgm, fga, fg3m, fg3a, ftm, fta, rank,
+                   fgm, fga, fg3m, fg3a, ftm, fta,
                    created_at, updated_at)
                 VALUES (999999, 'GSW', '2026-02-14', '2025-26', 10, 500,
                         200, 50, 60, 20, 5, 30, 340,
-                        80, 160, 30, 80, 40, 50, 99,
+                        80, 160, 30, 80, 40, 50,
                         NOW(), NOW())
                 """
             )
@@ -429,7 +428,6 @@ class TestSeasonTotalsCheck:
             pts=500, reb=25, ast=30, stl=10, blk=5, tov=15,
             min=170,
             fgm=50, fga=100, fg3m=25, fg3a=60, ftm=25, fta=30,
-            rank=1,
         )
 
         service = DataQualityService()
@@ -459,7 +457,6 @@ class TestSeasonTotalsCheck:
             pts=150, reb=25, ast=30, stl=10, blk=0, tov=15,
             min=170,
             fgm=50, fga=100, fg3m=25, fg3a=60, ftm=25, fta=30,
-            rank=1,
         )
 
         service = DataQualityService()

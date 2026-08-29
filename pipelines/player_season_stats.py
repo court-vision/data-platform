@@ -1,7 +1,8 @@
 """
 Cumulative Player Stats Pipeline
 
-Updates cumulative season stats and rankings for players who played.
+Updates cumulative season stats for players who played, then refreshes the
+materialized rankings copy the public API reads.
 """
 
 from datetime import timedelta
@@ -17,25 +18,26 @@ from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
+from pipelines.rankings_view import refresh_rankings
 from pipelines.transformers import normalize_name, calculate_fantasy_points
 
 
 class PlayerSeasonStatsPipeline(BasePipeline):
     """
-    Update cumulative season stats and rankings for players who played.
+    Update cumulative season stats for players who played.
 
     This pipeline:
     1. Fetches ESPN player data for roster percentages
     2. Fetches NBA league leaders with season totals
     3. Compares with previous records to find players who played
     4. Inserts new season stats records
-    5. Updates rankings based on total fantasy points
+    5. Refreshes the nba.rankings materialized view the API reads
     """
 
     config = PipelineConfig(
         name="player_season_stats",
         display_name="Player Season Stats",
-        description="Updates season totals and rankings for players who played yesterday",
+        description="Updates season totals for players who played yesterday",
         target_table="nba.player_season_stats",
         category=PipelineCategory.POST_GAME,
         depends_on=("player_game_stats",),
@@ -195,26 +197,14 @@ class PlayerSeasonStatsPipeline(BasePipeline):
 
             ctx.log.info("records_inserted", count=len(entries))
 
-            # Update rankings for today's records
-            self._update_rankings(game_date, season, ctx)
+    def after_execute(self, ctx: PipelineContext) -> None:
+        """Refresh the materialized rankings copy the public API reads.
 
-    def _update_rankings(
-        self, as_of_date, season: str, ctx: PipelineContext
-    ) -> None:
-        """Update rankings for all players with records on this date."""
-        # Get all records for this date ordered by fpts descending
-        records = list(
-            PlayerSeasonStats.select()
-            .where(
-                (PlayerSeasonStats.as_of_date == as_of_date)
-                & (PlayerSeasonStats.season == season)
-            )
-            .order_by(PlayerSeasonStats.fpts.desc())
-        )
-
-        for rank, record in enumerate(records, start=1):
-            PlayerSeasonStats.update(rank=rank).where(
-                PlayerSeasonStats.id == record.id
-            ).execute()
-
-        ctx.log.info("rankings_updated", player_count=len(records))
+        Runs on every successful execution, including one that found no new
+        games: that is what re-syncs the copy after an earlier refresh failed.
+        Never fails the pipeline — see pipelines/rankings_view.py.
+        """
+        try:
+            refresh_rankings(ctx.log)
+        except Exception as e:
+            ctx.log.error("rankings_refresh_failed", error=str(e))

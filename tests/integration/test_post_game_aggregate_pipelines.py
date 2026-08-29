@@ -128,7 +128,6 @@ def test_player_season_stats_filters_unchanged_gp_and_updates_rankings(integrati
     row = new_rows[0]
     assert row.player_id == 2
     assert row.gp == 10
-    assert row.rank == 1
     assert float(row.rost_pct) == pytest.approx(29.8, abs=1e-4)
 
 
