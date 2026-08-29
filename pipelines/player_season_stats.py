@@ -6,6 +6,7 @@ materialized rankings copy the public API reads.
 """
 
 from datetime import timedelta
+from typing import Optional
 
 import pytz
 from peewee import fn
@@ -48,6 +49,31 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         self.espn_extractor = ESPNExtractor()
         self.nba_extractor = NBAApiExtractor()
 
+    def _roster_percentages(self, ctx: PipelineContext) -> Optional[dict]:
+        """ESPN ownership keyed by normalized name, or None when ESPN is unreachable.
+
+        Deliberately non-fatal. This pipeline's actual product is season totals
+        from the NBA API; ESPN only supplies `rost_pct`, which nothing reads at
+        runtime (the ownership endpoints serve `nba.player_ownership`, written by
+        its own pipeline). Letting an ownership lookup abort the run means losing
+        the totals too.
+
+        That is not hypothetical: ESPN publishes one season at a time and 404s
+        the rest, so from the August rollover until it opens the new season every
+        call here fails. Before this, that took the season stats with it.
+        """
+        try:
+            data = self.espn_extractor.get_player_data()
+            ctx.log.info("espn_data_fetched", player_count=len(data))
+            return data
+        except Exception as e:
+            ctx.log.warning(
+                "espn_ownership_unavailable",
+                error=type(e).__name__,
+                detail=str(e)[:200],
+            )
+            return None
+
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the cumulative player stats pipeline."""
         central_tz = pytz.timezone("US/Central")
@@ -67,9 +93,9 @@ class PlayerSeasonStatsPipeline(BasePipeline):
 
         ctx.log.info("fetching_data", date=str(game_date), season=season)
 
-        # Fetch ESPN data for roster percentages
-        espn_data = self.espn_extractor.get_player_data()
-        ctx.log.info("espn_data_fetched", player_count=len(espn_data))
+        # Roster percentages are enrichment; season totals come from the NBA API
+        # below. None when ESPN could not be reached -- see _roster_percentages.
+        espn_data = self._roster_percentages(ctx)
 
         # Fetch NBA league leaders
         api_data = self.nba_extractor.get_league_leaders(season)
@@ -112,7 +138,11 @@ class PlayerSeasonStatsPipeline(BasePipeline):
 
             player_name = player["PLAYER"]
             normalized_name = normalize_name(player_name)
-            rost_pct = espn_data.get(normalized_name, {}).get("rost_pct", 0)
+            # 0 means ESPN says nobody owns him; None means we could not ask.
+            rost_pct = (
+                None if espn_data is None
+                else espn_data.get(normalized_name, {}).get("rost_pct", 0)
+            )
             team_abbrev = player["TEAM"]
 
             player_stats = {

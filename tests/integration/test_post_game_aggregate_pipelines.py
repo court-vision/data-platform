@@ -14,7 +14,7 @@ from schemas.common import ApiStatus
 
 
 @pytest.mark.integration
-def test_player_season_stats_filters_unchanged_gp_and_updates_rankings(integration_db) -> None:
+def test_player_season_stats_filters_unchanged_gp(integration_db) -> None:
     target_date = date(2026, 2, 20)
     prev_date = target_date - timedelta(days=1)
     season = "2025-26"
@@ -129,6 +129,43 @@ def test_player_season_stats_filters_unchanged_gp_and_updates_rankings(integrati
     assert row.player_id == 2
     assert row.gp == 10
     assert float(row.rost_pct) == pytest.approx(29.8, abs=1e-4)
+
+
+@pytest.mark.integration
+def test_season_stats_survive_espn_being_unavailable(integration_db) -> None:
+    """ESPN supplies ownership, the NBA API supplies the actual season totals.
+
+    ESPN publishes one season at a time and 404s the rest, so it is unreachable
+    for weeks around the rollover. Losing the totals for that whole window
+    because an enrichment lookup failed is the wrong trade.
+    """
+    import requests
+
+    target_date = date(2026, 2, 14)
+    Player.upsert_player(player_id=1, name="Only Player")
+
+    pipeline = PlayerSeasonStatsPipeline()
+
+    def espn_is_down():
+        raise requests.HTTPError("404 Client Error:  for url: .../seasons/2027/...")
+
+    pipeline.espn_extractor.get_player_data = espn_is_down
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        {
+            "PLAYER_ID": 1, "PLAYER": "Only Player", "TEAM": "BOS", "GP": 10,
+            "PTS": 90, "REB": 33, "AST": 23, "STL": 6, "BLK": 3, "TOV": 14,
+            "FGM": 32, "FGA": 74, "FG3M": 11, "FG3A": 28, "FTM": 12, "FTA": 14,
+            "MIN": 300,
+        },
+    ]
+
+    result = pipeline._run_sync(date_override=target_date)
+
+    assert result.status == ApiStatus.SUCCESS
+    row = PlayerSeasonStats.get(PlayerSeasonStats.as_of_date == target_date)
+    assert row.player_id == 1 and row.gp == 10 and row.pts == 90
+    # Null, not 0: 0 would claim ESPN told us nobody owns him.
+    assert row.rost_pct is None
 
 
 @pytest.mark.integration
