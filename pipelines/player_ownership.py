@@ -5,8 +5,6 @@ Fetches ESPN fantasy ownership percentages for all players and records
 daily snapshots, regardless of whether players had games that day.
 """
 
-from datetime import timedelta
-
 from db.models.nba import Player, PlayerOwnership
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -36,16 +34,7 @@ class PlayerOwnershipPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the player ownership pipeline."""
-        # Determine the snapshot date. Use an explicit override for backfills;
-        # otherwise use CST with a 6am cutoff (before 6am = previous night's games).
-        if ctx.date_override:
-            snapshot_date = ctx.date_override
-        else:
-            now_cst = ctx.started_at  # already in CST from PipelineContext
-            if now_cst.hour < 6:
-                snapshot_date = (now_cst - timedelta(days=1)).date()
-            else:
-                snapshot_date = now_cst.date()
+        snapshot_date = ctx.game_date()
 
         ctx.log.info("fetching_espn_ownership", snapshot_date=str(snapshot_date))
 

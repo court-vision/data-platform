@@ -9,7 +9,7 @@ BALLDONTLIE All-Star tier). ESPN's kona_player_info response already includes
 API call used by the PlayerOwnershipPipeline.
 """
 
-from datetime import date, timedelta
+from datetime import date
 
 from db.models.nba import Player, PlayerInjury
 from pipelines.base import BasePipeline
@@ -65,14 +65,7 @@ class ESPNInjuryStatusPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the ESPN injury status pipeline."""
-        if ctx.date_override:
-            report_date = ctx.date_override
-        else:
-            now_cst = ctx.started_at
-            if now_cst.hour < 6:
-                report_date = (now_cst - timedelta(days=1)).date()
-            else:
-                report_date = now_cst.date()
+        report_date = ctx.game_date()
 
         ctx.log.info("fetching_espn_player_data", report_date=str(report_date))
 

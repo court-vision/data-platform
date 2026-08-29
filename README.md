@@ -53,9 +53,10 @@ data-platform/
 │
 ├── pipelines/
 │   ├── __init__.py          # PIPELINE_REGISTRY + run_pipeline / run_all helpers
-│   ├── base.py              # BasePipeline — template method, async execution
+│   ├── base.py              # BasePipeline — template method, async execution, execution lock
 │   ├── config.py            # PipelineConfig dataclass, PipelineCategory enum
-│   ├── context.py           # PipelineContext — run tracking, logging, timing
+│   ├── context.py           # PipelineContext — run tracking, logging, timing, game date
+│   ├── gates.py             # Pure batch-gate decisions (windows, ESPN batch gate)
 │   ├── player_game_stats.py
 │   ├── player_season_stats.py
 │   ├── player_advanced_stats.py
@@ -83,6 +84,8 @@ data-platform/
 ├── core/
 │   ├── settings.py          # Pydantic Settings — all env vars with defaults
 │   ├── logging.py           # structlog setup, get_logger(), correlation IDs
+│   ├── locks.py             # Advisory-lock execution locks (one run per pipeline)
+│   ├── nba_calendar.py      # The NBA game date — 6 AM Eastern, one definition
 │   ├── resilience.py        # @with_retry, circuit breakers, ResilientHTTPClient
 │   ├── job_manager.py       # In-memory background job tracking
 │   ├── pipeline_auth.py     # Bearer token verification
@@ -94,6 +97,7 @@ data-platform/
 │   ├── base.py              # PooledPostgresqlDatabase, init_db(), close_db()
 │   └── models/
 │       ├── pipeline_run.py  # Audit log for every pipeline execution
+│       ├── nba/pipeline_batch.py  # Audit log for every batch *decision*
 │       ├── data_quality_run.py / data_quality_check.py
 │       ├── nba/             # Player, NBATeam, PlayerGameStats, PlayerSeasonStats,
 │       │                    # PlayerOwnership, PlayerRollingStats, PlayerAdvancedStats,
@@ -152,6 +156,7 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 | `ESPN_LEAGUE_ID` | No | `993431466` | ESPN Fantasy league ID |
 | `NBA_SEASON` | No | derived from today (`"2026-27"` from Aug 1, 2026) | nba_api season string; also selects `static/schedule{yy}-{yy}.json`; set to pin |
 | `NBA_API_PROXY_URL` | No | — | Residential proxy for stats.nba.com (cloud IPs are sometimes blocked) |
+| `ESPN_GATE_MAX_ATTEMPTS` | No | `3` | Runs per night an ESPN-gated pipeline may start before the gate stops retrying |
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
@@ -288,8 +293,16 @@ All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query par
 Every pipeline extends `BasePipeline` and implements a single `execute(ctx)` method. The base class handles everything else:
 
 1. **`pipeline.run()`** — async entry point; delegates to `asyncio.to_thread(_run_sync)` so blocking I/O never stalls the event loop
-2. **`_run_sync()`** — opens a thread-local DB connection, instantiates a `PipelineContext`, calls the lifecycle hooks, closes the connection
+2. **`_run_sync()`** — opens a thread-local DB connection, takes the execution lock, instantiates a `PipelineContext`, calls the lifecycle hooks, releases and closes
 3. **`execute(ctx)`** — the pipeline's logic: fetch from external APIs, transform, upsert to PostgreSQL
+
+### Execution Locks
+
+A pipeline runs once at a time, guaranteed by a PostgreSQL **advisory lock** keyed on its name (`core/locks.py`), held for the duration of the run.
+
+The endpoints' `PipelineRun.is_running()` check is the cheap filter — it stops the dispatcher spawning work already in flight — but it reads and then acts, so two triggers 200 ms apart both pass it. `pg_try_advisory_lock` makes the check and the acquire one operation, and it never waits: a losing trigger returns at once with `status: skipped`, writes no `pipeline_run` row and raises no alert. `allow_concurrent=True` in `PipelineConfig` opts out.
+
+The lock is session-scoped (a run takes minutes; a transaction that long would pin a snapshot), so it is released in a `finally` — and if that release itself fails, the connection is dropped rather than returned to the pool, because ending the session is what frees the lock server-side. Covered by `tests/integration/test_pipeline_locks.py`, which contends a real second session.
 
 ```python
 class MyPipeline(BasePipeline):
@@ -318,11 +331,31 @@ class MyPipeline(BasePipeline):
 
 ### Self-Gating
 
-Category endpoints self-gate — the service decides whether work is needed:
+Category endpoints self-gate — the service decides whether work is needed. The decisions are pure functions in `pipelines/gates.py`, each returning a stable reason slug that is logged, stored in `nba.pipeline_batches.reason`, and asserted on in tests.
 
 - **pre-game**: checks that current time is within the configured window before tip-off
-- **post-game**: checks that all games are final; `espn_gated=True` pipelines additionally wait for ESPN's `latestScoringPeriod` to advance (with a 2:30 AM ET fallback)
+- **post-game**: checks that all games are final, then per-pipeline dedup; once the window has *closed*, one poll sweeps the night and alerts on anything that never ran
 - **live-stats**: checks NBA game schedule; returns `all_games_complete: true` when the cron loop should exit
+
+#### The ESPN batch gate
+
+`espn_gated=True` pipelines (only `daily_matchup_scores`) wait for ESPN's nightly batch to land, which is `status.latestScoringPeriod` moving past the watermark on our newest stored snapshot. Specifically:
+
+| Situation | Decision |
+|---|---|
+| Any ESPN team's stored watermark is behind ESPN's period, or has no row in ESPN's current matchup period | run (`period_advanced`) |
+| Every team's watermark already covers ESPN's period | skip (`period_unchanged`) |
+| ESPN unreachable, before 02:30 CST | skip (`espn_unavailable_waiting`) |
+| ESPN unreachable, past 02:30 CST | run (`time_fallback_espn_unavailable`) |
+| Period never advanced, past 02:30 CST, nothing ran yet | run (`time_fallback_no_advance`) |
+| `ESPN_GATE_MAX_ATTEMPTS` runs already started tonight | skip (`attempts_exhausted`) |
+
+Four things that were wrong here before the 2026 hardening, kept as a record because each one is a class of mistake:
+
+- The 02:30 fallback was `hour > 2`, **true from 21:00**. Since the post-game window opens around 20:00 CST, the fallback was in force for most of every night and `latestScoringPeriod` was only ever consulted between 00:00 and 02:29 CST. The fallback is now a datetime anchored to the morning after the NBA date.
+- The fallback returned before the "have we already stored this period" comparison, so from 02:30 the pipeline **re-ran on every poll** until the window closed — despite a comment claiming the comparison prevented exactly that.
+- Baselines came from **one team's newest row, used as an oracle for everyone**, unscoped by matchup period. A team a partial run missed could never be retried, and a new matchup period inherited the old one's watermark instead of reading as unseeded (which is how 13 of 66 periods lost their day-0 snapshot — `docs/PENDING_PROD_CHECKS.md` #3).
+- Every ESPN error returned "run", so an outage produced a failing run every 15 minutes all night. Runs are now budgeted per night, and a gate that cannot reach ESPN does not assume the pipeline can.
 
 ### PipelineContext
 
@@ -332,18 +365,24 @@ Category endpoints self-gate — the service decides whether work is needed:
 - `ctx.increment_records(n)` — counter for records upserted
 - `ctx.increment_failed(n, reason)` — items the pipeline gave up on but kept running past; makes the run `partial` (see [Partial success](#partial-success))
 - `ctx.increment_skipped(n, reason)` — items intentionally not processed (not started, filtered out); informational
-- `ctx.date_override` — backfill date (None = use today)
+- `ctx.game_date()` — the NBA game date this run is for: `date_override`, else the batch's `nba_date`, else the 6 AM **Eastern** rule. Every pipeline goes through it
+- `ctx.date_override` — backfill date (None = not a backfill). Pipelines key data-readiness checks off this, so it must not be set for ordinary runs
+- `ctx.nba_date` — the triggering batch's game date, computed once and shared by every pipeline in the batch
 - `ctx.options` — free-form per-run options from the trigger (e.g. `{"source": "cdn"}`)
 - Auto-creates a `pipeline_run` audit record on start; marks success/failure on completion; a failure is reported to Sentry and posts a `pipeline_failed` alert
 
 ### Audit Trail
 
-Every pipeline execution writes a record to `nba.pipeline_run` with:
+Every pipeline execution writes a record to `nba.pipeline_runs` with:
 - Pipeline name, run ID (UUID), status (`running` / `success` / `failed`)
 - Start time, end time, duration, records processed
 - Error message + traceback on failure
 
 Stale `running` records (from crashed processes) are reset to `failed` on startup.
+
+Every batch **decision** writes a record to `nba.pipeline_batches` — which pipelines the trigger chose to run, which it skipped and why (the reason slugs from `pipelines/gates.py`), and how each turned out once the background job finished. `pipeline_runs` records the runs that happened; this records the ones that didn't, which is the half that was missing when `daily_matchup_scores` went five days without running and the evidence had to be reconstructed from the shape of the data it failed to write (`docs/PENDING_PROD_CHECKS.md` #3).
+
+Rows are written when a **post-game** batch reaches its per-pipeline decisions, and once per night when its window closes. Pre-game records only its dispatches, and has no completeness sweep: its window has no upper bound (so there is no "the night is over" moment), and a missed pre-game run costs a notification rather than data that cannot be recomputed. Polls that stop at an earlier gate ("no games", "before the window") are not recorded — `nba.cron_job_runs` already holds one row per trigger attempt with the response body. Every write is best-effort: an unwritable audit table degrades to no record, never to a skipped pipeline.
 
 ### Resilience
 
@@ -381,6 +420,7 @@ The `/v1/internal/pipelines/all` endpoint returns immediately with a `job_id`. P
 | `pipeline_partial:<pipeline>` | warning | A *successful* run with `records_failed > 0` where nothing succeeded (`records_processed == 0`) or more than 20 % of attempted records (processed + failed) failed | 24 h | `PipelineContext.mark_success` |
 | `cron_failure_streak:<job>` | critical | A cron-runner failure report brings the job's consecutive failures (counted over its last 10 rows) to **exactly** its threshold: `live-stats` 3, `pre-game` / `post-game` / `playoffs` 2, `schedule-sync` / `deploy` 1, unknown jobs 2 (`ALERT_CRON_STREAK_THRESHOLDS`) | 6 h | `POST /v1/internal/cron/job-runs` |
 | `cron_failure_streak:<job>:recovered` | info | A success report follows a streak ≥ threshold; also clears the streak key's dedupe | — | same |
+| `post_game_incomplete:<nba_date>` | critical | The post-game window closed with one or more pipelines having no successful run for that NBA date. Fires once per night — latched on a `window_closed` row in `nba.pipeline_batches`, so it survives the 03:00 CST deploy landing mid-window | 12 h | `api/v1/pipelines.py` `_sweep_closed_post_game_window` |
 | `deploy_dispatch_failed` | critical | Any GitHub `repository_dispatch` in `POST /v1/internal/pipelines/deploy` raised or answered non-2xx; the endpoint answers 502 so cron-runner records a failure (which in turn feeds the `deploy` streak, threshold 1) | 12 h | `api/v1/pipelines.py` |
 | `quality_critical:<check>` | critical | A `critical`-severity data-quality check failed or errored in a run (warnings never alert here; the nightly `quality-check` workflow reports those) | 24 h | `DataQualityService.run_checks` |
 | `health_degraded` | critical | `GET /health` answered 503 — per process, so a database outage can produce one embed from the private process and one from the public one | 30 min | `core/health.py` |
@@ -424,7 +464,7 @@ The four `alert-test` rows show up in the dashboard timeline; remove them with `
 
 ## Database Schema Overview
 
-All models use Peewee ORM. `init_db()` in `db/base.py` runs `create_tables(safe=True)` on startup (idempotent).
+All models use Peewee ORM. The schema itself belongs to `backend/migrations` — the backend applies the chain at startup and this service never creates or alters a table; `init_db()` refuses to start against a database with no migration state. A new table therefore ships in two steps: the backend's migration first, then the code here that writes it.
 
 Key tables written by this service:
 
@@ -441,7 +481,8 @@ Key tables written by this service:
 | `nba.live_player_stats` | LiveGameStatsPipeline |
 | `nba.player_injuries` | ESPNInjuryStatusPipeline |
 | `nba.breakout_candidates` | BreakoutDetectionPipeline |
-| `nba.pipeline_run` | All pipelines (audit) |
+| `nba.pipeline_runs` | All pipelines (audit) |
+| `nba.pipeline_batches` | Pre-game / post-game trigger endpoints (batch decisions) |
 | `stats_s2.daily_matchup_scores` | DailyMatchupScoresPipeline |
 
 ## Adding a New Pipeline

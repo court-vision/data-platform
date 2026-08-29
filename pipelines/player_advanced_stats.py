@@ -4,10 +4,6 @@ Advanced Stats Pipeline
 Fetches advanced player statistics (efficiency, usage, impact) from NBA API.
 """
 
-from datetime import timedelta
-
-import pytz
-
 from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerAdvancedStats
@@ -46,18 +42,7 @@ class PlayerAdvancedStatsPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the advanced stats pipeline."""
-        central_tz = pytz.timezone("US/Central")
-
-        # Determine the as_of_date. Use an explicit override for backfills;
-        # otherwise use CST with a 6am cutoff (before 6am = previous night's games).
-        if ctx.date_override:
-            as_of_date = ctx.date_override
-        else:
-            now_cst = ctx.started_at  # already in CST from PipelineContext
-            if now_cst.hour < 6:
-                as_of_date = (now_cst - timedelta(days=1)).date()
-            else:
-                as_of_date = now_cst.date()
+        as_of_date = ctx.game_date()
 
         season = season_for_date(as_of_date)
 

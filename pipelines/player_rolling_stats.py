@@ -46,15 +46,7 @@ class PlayerRollingStatsPipeline(BasePipeline):
     def execute(self, ctx: PipelineContext) -> None:
         """Execute rolling stats materialization for all windows."""
 
-        # Determine target date using the same CST 6am cutoff used elsewhere
-        if ctx.date_override:
-            target_date = ctx.date_override
-        else:
-            now_cst = ctx.started_at  # already in CST from PipelineContext
-            if now_cst.hour < 6:
-                target_date = (now_cst - timedelta(days=1)).date()
-            else:
-                target_date = now_cst.date()
+        target_date = ctx.game_date()
 
         ctx.log.info("computing_rolling_stats", date=str(target_date), windows=WINDOWS)
 

@@ -7,12 +7,13 @@ when to wake up and start polling for live game stats.
 No authentication required (data is non-sensitive game schedule info).
 """
 
-from datetime import datetime, timedelta, date
+from datetime import date, datetime, timedelta
 
 import pytz
 from fastapi import APIRouter
 
 from core.logging import get_logger
+from core.nba_calendar import nba_date_et
 
 router = APIRouter(prefix="/live", tags=["Live"])
 log = get_logger("live_api")
@@ -20,11 +21,7 @@ log = get_logger("live_api")
 
 def _get_nba_date() -> date:
     """Return today's NBA game date in ET (before 6am = yesterday)."""
-    eastern = pytz.timezone("US/Eastern")
-    now_et = datetime.now(eastern)
-    if now_et.hour < 6:
-        return (now_et - timedelta(days=1)).date()
-    return now_et.date()
+    return nba_date_et()
 
 
 @router.get("/schedule/today")

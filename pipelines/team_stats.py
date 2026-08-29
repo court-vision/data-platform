@@ -8,8 +8,6 @@ Makes two API calls per run (Base + Advanced measure types) and merges
 them by team abbreviation before upserting to nba.team_stats.
 """
 
-from datetime import timedelta
-
 from core.season import season_for_date
 from db.models.nba.team_stats import TeamStats
 from pipelines.base import BasePipeline
@@ -51,15 +49,7 @@ class TeamStatsPipeline(BasePipeline):
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the team stats pipeline."""
 
-        # Determine the as_of_date using the same CST 6am cutoff as all other pipelines
-        if ctx.date_override:
-            as_of_date = ctx.date_override
-        else:
-            now_cst = ctx.started_at  # already in CST from PipelineContext
-            if now_cst.hour < 6:
-                as_of_date = (now_cst - timedelta(days=1)).date()
-            else:
-                as_of_date = now_cst.date()
+        as_of_date = ctx.game_date()
 
         season = season_for_date(as_of_date)
 

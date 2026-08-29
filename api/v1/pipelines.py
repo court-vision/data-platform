@@ -12,9 +12,10 @@ The /all endpoint uses a fire-and-forget pattern:
 
 import asyncio
 from datetime import date, datetime, timedelta, timezone
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional
 
 import httpx
+import pytz
 from fastapi import APIRouter, Security, HTTPException, Query
 from fastapi.responses import JSONResponse
 
@@ -23,8 +24,15 @@ from core.job_manager import (
     PipelineJobResult as JobResultInternal,
 )
 from core.logging import get_logger
+from core.nba_calendar import nba_date_et
 from core.pipeline_auth import verify_pipeline_token
 from db.base import run_in_db_thread
+from db.models.nba.pipeline_batch import (
+    ALL_SKIPPED,
+    DISPATCHED,
+    WINDOW_CLOSED,
+    PipelineBatch,
+)
 from pipelines import (
     run_pipeline,
     run_all_pipelines,
@@ -33,9 +41,14 @@ from pipelines import (
     get_pipelines_by_category,
 )
 from pipelines.config import PipelineCategory
+from pipelines.gates import (
+    GateDecision,
+    espn_batch_gate,
+    post_game_window,
+    pre_game_window,
+)
 from schemas.pipeline import (
     PipelineResponse,
-    PipelineResult,
     AllPipelinesResponse,
     JobCreatedResponse,
     JobStatusResponse,
@@ -54,6 +67,10 @@ log = get_logger("pipeline_api")
 
 DEPLOY_DISPATCH_FAILED_CODE = "DEPLOY_DISPATCH_FAILED"
 DEPLOY_ALERT_DEDUPE = timedelta(hours=12)
+# Keyed per NBA date, so this is belt-and-braces over the durable
+# `PipelineBatch.swept` latch — long enough that a restart mid-sweep cannot
+# produce a second message for the same night.
+POST_GAME_INCOMPLETE_DEDUPE = timedelta(hours=12)
 
 
 @router.get("/")
@@ -111,7 +128,6 @@ async def trigger_cumulative_player_stats(
 async def trigger_daily_matchup_scores(
     _: str = Security(verify_pipeline_token),
     date: Optional[date] = Query(None, description="Override game date (YYYY-MM-DD). Omit for automatic date."),
-    watch: bool = Query(False, description="Loop mode: skip pipeline until ESPN scoring period advances."),
 ) -> PipelineResponse:
     """
     Trigger the daily matchup scores pipeline.
@@ -120,33 +136,12 @@ async def trigger_daily_matchup_scores(
     daily snapshots for visualization.
     Pass ?date=YYYY-MM-DD to backfill a specific date.
 
-    Pass ?watch=true to enable flip-detection mode (for cron-runner loop job).
-    In this mode the endpoint checks whether ESPN's scoring period has advanced
-    beyond the latest stored baseline. If not yet flipped, it returns immediately
-    with done=false so the cron-runner keeps polling. When the flip is detected
-    the pipeline runs once and returns done=true, signalling the loop to exit.
+    Direct trigger: the ESPN batch gate lives in the post-game endpoint, which
+    is what production calls. A `?watch=true` loop mode used to duplicate that
+    gate here for a cron-runner job that was never registered; it referenced an
+    `ApiStatus` member that does not exist, so it would have raised on its first
+    real request. Removed rather than fixed — one gate is the point.
     """
-    if watch and not date:
-        flipped = await run_in_db_thread(_espn_scoring_period_advanced)
-        if not flipped:
-            log.info("espn_scoring_period_unchanged_skipping")
-            from datetime import datetime
-            now = datetime.utcnow().isoformat()
-            return PipelineResponse(
-                status=ApiStatus.OK,
-                message="espn_scoring_period_unchanged",
-                data=PipelineResult(
-                    status=ApiStatus.OK,
-                    message="espn_scoring_period_unchanged",
-                    started_at=now,
-                    completed_at=now,
-                    duration_seconds=0,
-                    records_processed=0,
-                    done=False,
-                ),
-            )
-        log.info("espn_scoring_period_advanced_running_pipeline")
-
     result = await run_pipeline("daily_matchup_scores", date_override=date)
     return PipelineResponse(
         status=result.status,
@@ -202,7 +197,70 @@ def _fetch_espn_league(league_info, views):
     return resp.json()
 
 
-def probe_espn_watermark():
+def _espn_team_ids() -> list[int]:
+    """Team ids of every saved ESPN team.
+
+    The gate compares ESPN's day index against what we stored **for each of
+    them**: one team's newest row is not evidence about another's, and reading
+    it as if it were is why a partial run could never retry the teams it
+    missed. `league_info` is read unhydrated — the provider tag is not a secret
+    and decrypting five credential blobs to read it would be silly.
+    """
+    import json
+    from db.models.teams import Team
+
+    ids = []
+    for team in Team.select():
+        try:
+            if json.loads(team.league_info).get("provider", "espn") == "espn":
+                ids.append(team.team_id)
+        except Exception:
+            continue
+    return ids
+
+
+def _espn_baselines(team_ids: list[int], matchup_period) -> dict[int, Optional[int]]:
+    """team_id -> newest stored watermark in `matchup_period` (None if no row yet).
+
+    Scoped to ESPN's *current* matchup period, so the first day of a new period
+    reads as "not seeded" rather than inheriting the last period's watermark —
+    which is how a period's day-0 row goes missing (PENDING_PROD_CHECKS #3).
+    Falls back to the team's highest watermark overall when ESPN did not report
+    a current period; that still answers "has ESPN moved past us", just without
+    the seeding signal.
+    """
+    from peewee import fn
+    from db.models.stats.daily_matchup_score import DailyMatchupScore
+
+    baselines: dict[int, Optional[int]] = {team_id: None for team_id in team_ids}
+    if not team_ids:
+        return baselines
+
+    query = (
+        DailyMatchupScore
+        .select(
+            DailyMatchupScore.team_id,
+            fn.MAX(DailyMatchupScore.scoring_period_id).alias("watermark"),
+        )
+        .where(DailyMatchupScore.team_id.in_(team_ids))
+        .group_by(DailyMatchupScore.team_id)
+    )
+    if matchup_period is not None:
+        query = query.where(DailyMatchupScore.matchup_period == matchup_period)
+
+    for row in query.dicts():
+        baselines[row["team_id"]] = row["watermark"]
+    return baselines
+
+
+class EspnObservation(NamedTuple):
+    """One look at ESPN's league status, shared by the probe and the gate."""
+
+    latest_scoring_period: Optional[int]
+    current_matchup_period: Optional[int]
+
+
+def probe_espn_watermark() -> Optional[EspnObservation]:
     """Record one observation of ESPN's day watermark beside its materialized totals.
 
     Answers the one assumption the live-score watermark design rests on: that ESPN
@@ -220,7 +278,7 @@ def probe_espn_watermark():
     nothing useful until 2026-10-20 — which is why it has to be deployed first.
 
     Instrumentation only: never raises, never affects whether a pipeline runs.
-    Returns `latestScoringPeriod` so the gate can reuse this request instead of
+    Returns the observation so the gate can reuse this request instead of
     making a second one.
     """
     try:
@@ -249,66 +307,72 @@ def probe_espn_watermark():
             home_total_points=home_total,
             away_total_points=away_total,
         )
-        return latest_scoring_period
+        return EspnObservation(latest_scoring_period, current_matchup_period)
     except Exception as exc:
         log.warning("espn_watermark_probe_failed", error=type(exc).__name__)
         return None
 
 
-def _espn_scoring_period_advanced(known_period=None) -> bool:
+def _espn_scoring_period_advanced(
+    nba_date: date,
+    observed: Optional[EspnObservation] = None,
+    succeeded_tonight: bool = False,
+    attempts_tonight: int = 0,
+) -> GateDecision:
+    """Should an ESPN-gated pipeline run on this poll?
+
+    The I/O half of `gates.espn_batch_gate`: reads ESPN's league status (reusing
+    `probe_espn_watermark`'s response when this poll already made one) and the
+    stored watermarks, then hands both to the pure decision.
+
+    Args:
+        nba_date: the game date this batch covers — the 02:30 CST fallback is
+            anchored to the morning after it, not to a bare hour-of-day.
+        observed: `latestScoringPeriod` / `currentMatchupPeriod` already fetched
+            this poll; passing it avoids a second identical request.
+        succeeded_tonight: the pipeline already completed since the window opened.
+        attempts_tonight: runs started since the window opened (the retry budget).
     """
-    Check whether ESPN's current scoring period has advanced beyond the latest
-    stored baseline.
+    from core.settings import settings
 
-    Returns True if the pipeline should run (flip detected, no baseline, 2:30 AM CST fallback, or ESPN API error).
-    Returns False if ESPN's period matches the baseline and it's before the 2:30 AM CST fallback.
-
-    `known_period` is `latestScoringPeriod` already fetched this poll by
-    `probe_espn_watermark`; passing it avoids a second identical request.
-    """
-    import pytz
-    from datetime import datetime
-    from db.models.stats.daily_matchup_score import DailyMatchupScore
-
-    # Time fallback: if past 2:30 AM CST, run regardless of scoring period.
-    # Handles cases where ESPN's batch runs late or the scoring period doesn't
-    # advance as expected. CST (not ET) matches the rest of the pipeline's
-    # timezone convention.
-    central = pytz.timezone("US/Central")
-    now_cst = datetime.now(central)
-    if now_cst.hour > 2 or (now_cst.hour == 2 and now_cst.minute >= 30):
-        log.info("espn_scoring_period_time_fallback", time_cst=now_cst.strftime("%H:%M"))
-        return True
-
+    now_cst = datetime.now(pytz.timezone("US/Central"))
     espn_team, espn_league_info = _first_espn_league()
-    if not espn_team or not espn_league_info:
-        # No ESPN teams registered — always run
-        return True
 
-    espn_period = known_period
-    if espn_period is None:
+    if not espn_team or not espn_league_info:
+        return espn_batch_gate(
+            now_cst=now_cst,
+            nba_date=nba_date,
+            league_present=False,
+            espn_period=None,
+            baselines={},
+            succeeded_tonight=succeeded_tonight,
+            attempts_tonight=attempts_tonight,
+            max_attempts=settings.espn_gate_max_attempts,
+        )
+
+    if observed is None:
         try:
             payload = _fetch_espn_league(espn_league_info, "mSettings")
-            espn_period = payload.get("status", {}).get("latestScoringPeriod")
+            status = payload.get("status", {}) or {}
+            observed = EspnObservation(
+                status.get("latestScoringPeriod"), status.get("currentMatchupPeriod")
+            )
         except Exception as e:
-            log.warning("espn_peek_failed_running_pipeline", error=str(e))
-            return True  # On error, run the pipeline anyway
+            log.warning("espn_peek_failed", error=str(e))
+            observed = EspnObservation(None, None)
 
-    if espn_period is None:
-        return True
+    baselines = _espn_baselines(_espn_team_ids(), observed.current_matchup_period)
 
-    # Compare to the latest baseline's scoring period for this team
-    latest = (
-        DailyMatchupScore.select()
-        .where(DailyMatchupScore.team_id == espn_team.team_id)
-        .order_by(DailyMatchupScore.date.desc())
-        .first()
+    return espn_batch_gate(
+        now_cst=now_cst,
+        nba_date=nba_date,
+        league_present=True,
+        espn_period=observed.latest_scoring_period,
+        baselines=baselines,
+        succeeded_tonight=succeeded_tonight,
+        attempts_tonight=attempts_tonight,
+        max_attempts=settings.espn_gate_max_attempts,
     )
-
-    if latest is None or latest.scoring_period_id is None:
-        return True  # No baseline yet — run pipeline
-
-    return espn_period != latest.scoring_period_id
 
 
 @router.post("/player-advanced-stats", response_model=PipelineResponse)
@@ -527,9 +591,6 @@ async def trigger_pre_game(
     Pass ?force=true to skip all gates.
     Pass ?date=YYYY-MM-DD to target a specific date (implies force=true).
     """
-    import pytz
-    from datetime import datetime, timedelta
-
     from core.settings import settings
     from db.models.nba.games import Game
     from db.models.pipeline_run import PipelineRun
@@ -539,12 +600,7 @@ async def trigger_pre_game(
     eastern = pytz.timezone("US/Eastern")
     now_et = datetime.now(eastern)
     now_et_naive = now_et.replace(tzinfo=None)
-
-    # ET-based NBA date (before 6am = still yesterday's game date)
-    if now_et.hour < 6:
-        nba_date = (now_et - timedelta(days=1)).date()
-    else:
-        nba_date = now_et.date()
+    nba_date = nba_date_et(now_et)
 
     target_date = date or nba_date
 
@@ -562,6 +618,7 @@ async def trigger_pre_game(
 
     pre_game_pipelines = get_pipelines_by_category(PipelineCategory.PRE_GAME)
     pipelines_to_run = []
+    decisions: dict[str, dict] = {}
 
     for cls in pre_game_pipelines:
         name = cls.config.name
@@ -570,16 +627,18 @@ async def trigger_pre_game(
             # Window gate: skip if too early for this pipeline
             if first_game_time:
                 window_minutes = cls.config.pre_game_window_minutes or settings.pre_game_window_minutes
-                first_game_dt = datetime.combine(nba_date, first_game_time)
-                window_opens_at = first_game_dt - timedelta(minutes=window_minutes)
-                if now_et_naive < window_opens_at:
+                window = pre_game_window(
+                    now_et_naive, first_game_time, nba_date, window_minutes
+                )
+                if not window.open:
                     log.info(
                         "pre_game_window_not_open",
                         pipeline=name,
                         window_minutes=window_minutes,
-                        opens_at=str(window_opens_at),
+                        opens_at=str(window.opens_at),
                         current_time=str(now_et_naive),
                     )
+                    decisions[name] = {"decision": "skip", "reason": "window_not_open"}
                     continue
 
             # Dedup gate: skip if already ran successfully today.
@@ -588,16 +647,27 @@ async def trigger_pre_game(
             if not cls.config.skip_batch_dedup:
                 if PipelineRun.was_successful_on_date(name, nba_date):
                     log.info("pre_game_already_ran", pipeline=name, nba_date=str(nba_date))
+                    decisions[name] = {"decision": "skip", "reason": "already_ran"}
                     continue
 
             # Concurrency gate: skip if already running
             if PipelineRun.is_running(name):
                 log.info("pre_game_already_running", pipeline=name)
+                decisions[name] = {"decision": "skip", "reason": "already_running"}
                 continue
+
+            decisions[name] = {"decision": "run", "reason": "due"}
+        else:
+            decisions[name] = {"decision": "run", "reason": "forced"}
 
         pipelines_to_run.append(name)
 
     if not pipelines_to_run:
+        # Not recorded as a batch, unlike post-game's equivalent. The pre-game
+        # window has no upper bound, so it stays open from ~150 min before tip
+        # until the NBA date rolls at 06:00 ET — "not open yet" or "already ran"
+        # is the answer on nearly all of the day's 52 polls. `nba.cron_job_runs`
+        # already holds a row per trigger with the response body.
         return PipelineResponse(
             status=ApiStatus.SUCCESS,
             message=f"All pre-game pipelines skipped (window not open or already ran) for {nba_date}",
@@ -605,11 +675,22 @@ async def trigger_pre_game(
 
     job_manager = get_job_manager()
     job = await job_manager.create_job(len(pipelines_to_run))
+    batch = await _record_batch(
+        "pre_game",
+        target_date,
+        DISPATCHED,
+        "dispatched",
+        decisions,
+        job_id=job.job_id,
+        forced=force,
+    )
     asyncio.create_task(
         _run_pipelines_background(
             job.job_id,
             date_override=target_date if date else None,
             pipeline_names=pipelines_to_run,
+            nba_date=target_date,
+            batch_id=batch,
         )
     )
 
@@ -647,12 +728,15 @@ async def trigger_post_game(
     Per-pipeline dedup enables partial batch retries — if one pipeline fails, the
     next cron invocation will retry only the failed pipeline, not the whole batch.
 
+    Once the window has **closed**, one last poll sweeps the night: any pipeline
+    with no successful run for the date is recorded and alerted
+    (`post_game_incomplete`). That is the check that turns a silent skip into a
+    message — a night where every poll decided "nothing to do" otherwise leaves
+    no trace outside the logs.
+
     Pass ?force=true to skip all gates (useful for manual re-triggers or backfills).
     Pass ?date=YYYY-MM-DD to backfill a specific date (implies force=true).
     """
-    import pytz
-    from datetime import datetime, timedelta
-
     from core.settings import settings
     from db.models.nba.games import Game
     from db.models.pipeline_run import PipelineRun
@@ -660,18 +744,15 @@ async def trigger_post_game(
 
     # A date override implies force — skip all time/readiness gating
     force = force or (date is not None)
-    # Assigned inside the `not force` block below; declared here so the gate's
-    # later use cannot become an UnboundLocalError if this flow is rearranged.
-    probed_period = None
+    observed: Optional[EspnObservation] = None
 
     eastern = pytz.timezone("US/Eastern")
     now_et = datetime.now(eastern)
+    nba_date = nba_date_et(now_et)
 
-    # NBA date: before 6am ET means we're still on last night's game date
-    if now_et.hour < 6:
-        nba_date = (now_et - timedelta(days=1)).date()
-    else:
-        nba_date = now_et.date()
+    # Cutoff for "tonight": runs at or after the window opened. Assigned inside
+    # the gated path below, where the window is known.
+    window_open_utc: Optional[datetime] = None
 
     if not force:
         # Check if there are any scheduled games on the NBA date
@@ -684,32 +765,41 @@ async def trigger_post_game(
             )
 
         # One watermark observation per poll, taken before any gate can return
-        # early — the ESPN flip happens partway through this window and the whole
-        # point is to bracket it. Only on nights that have games, so it costs
-        # nothing in the offseason. See docs/PENDING_PROD_CHECKS.md #4.
-        probed_period = probe_espn_watermark()
+        # early — the ESPN flip happens partway through this window and the
+        # whole point is to bracket it across the full 20:00–07:59 CST span the
+        # cron polls, not just the post-game window. Only on nights that have
+        # games, so it costs nothing in the offseason. The gate below is handed
+        # the result rather than making a second request.
+        # See docs/PENDING_PROD_CHECKS.md #4.
+        observed = probe_espn_watermark()
 
-        # Gate 1: Time window — only attempt within [estimated_end, estimated_end + window]
-        latest_game_dt = datetime.combine(nba_date, latest_game_time)
-        estimated_end_dt = latest_game_dt + timedelta(minutes=settings.estimated_game_duration_minutes)
-        window_end_dt = estimated_end_dt + timedelta(minutes=settings.post_game_pipeline_window_minutes)
         now_et_naive = now_et.replace(tzinfo=None)
+        window = post_game_window(
+            now_et_naive,
+            latest_game_time,
+            nba_date,
+            settings.estimated_game_duration_minutes,
+            settings.post_game_pipeline_window_minutes,
+        )
+        window_open_utc = (
+            eastern.localize(window.opens_at).astimezone(pytz.utc).replace(tzinfo=None)
+        )
 
-        if not (estimated_end_dt <= now_et_naive <= window_end_dt):
+        if window.closed:
+            return await _sweep_closed_post_game_window(nba_date, window_open_utc)
+
+        if not window.open:
             log.info(
                 "post_game_outside_window",
                 nba_date=str(nba_date),
-                estimated_end=str(estimated_end_dt),
-                window_end=str(window_end_dt),
+                estimated_end=str(window.opens_at),
+                window_end=str(window.closes_at),
                 current_time=str(now_et_naive),
             )
             return PipelineResponse(
                 status=ApiStatus.SUCCESS,
                 message="Outside post-game window",
             )
-
-        # Convert estimated end to UTC for dedup cutoff (started_at is stored as UTC)
-        estimated_end_utc = eastern.localize(estimated_end_dt).astimezone(pytz.utc).replace(tzinfo=None)
 
         # Gate 2: Data readiness — verify all games are actually Final via live scoreboard
         nba_extractor = NBAApiExtractor()
@@ -736,6 +826,7 @@ async def trigger_post_game(
     post_game_pipelines = get_pipelines_by_category(PipelineCategory.POST_GAME)
     pipelines_to_run = []
     time_gated_pipelines = []
+    decisions: dict[str, dict] = {}
 
     for cls in post_game_pipelines:
         name = cls.config.name
@@ -743,6 +834,7 @@ async def trigger_post_game(
         if not force:
             if PipelineRun.is_running(name):
                 log.info("post_game_pipeline_concurrency_skip", pipeline=name)
+                decisions[name] = {"decision": "skip", "reason": "already_running"}
                 continue
 
             # Time gate: skip until the pipeline's earliest_run_time_cst is reached.
@@ -758,23 +850,53 @@ async def trigger_post_game(
                         current_cst=now_cst.strftime("%H:%M"),
                     )
                     time_gated_pipelines.append(name)
+                    decisions[name] = {"decision": "skip", "reason": "time_gated"}
                     continue
 
+            already_ran = PipelineRun.was_successful_on_date(
+                name, nba_date, after=window_open_utc
+            )
+
             if cls.config.espn_gated:
-                # For ESPN-gated pipelines the scoring-period check acts as the
-                # dedup. We intentionally skip was_successful_on_date here: the
-                # time fallback may have fired before ESPN's nightly batch ran,
-                # writing stale records. Once ESPN's latestScoringPeriod advances,
-                # _espn_scoring_period_advanced() flips to True and we re-run.
-                # After a correct run (stored period == ESPN period) it returns
-                # False, preventing further re-runs — no separate dedup needed.
-                if not _espn_scoring_period_advanced(probed_period):
-                    log.info("post_game_espn_gate_not_ready", pipeline=name)
+                # The ESPN gate subsumes dedup for these pipelines: "every team's
+                # stored watermark already covers ESPN's current period" is a
+                # stronger statement than "a run succeeded", because a run that
+                # succeeded before ESPN's batch landed wrote stale totals. It is
+                # handed the success and attempt counts so it can stop retrying
+                # rather than re-running every poll for the rest of the window.
+                gate = await run_in_db_thread(
+                    _espn_scoring_period_advanced,
+                    nba_date,
+                    observed,
+                    already_ran,
+                    PipelineRun.count_since(name, window_open_utc)
+                    if window_open_utc
+                    else 0,
+                )
+                if not gate.run:
+                    log.info(
+                        "post_game_espn_gate_not_ready",
+                        pipeline=name,
+                        reason=gate.reason,
+                        **gate.detail,
+                    )
+                    decisions[name] = {"decision": "skip", "reason": gate.reason}
                     continue
+                log.info(
+                    "post_game_espn_gate_open",
+                    pipeline=name,
+                    reason=gate.reason,
+                    **gate.detail,
+                )
+                decisions[name] = {"decision": "run", "reason": gate.reason}
             else:
-                if PipelineRun.was_successful_on_date(name, nba_date, after=estimated_end_utc):
+                if already_ran:
                     log.info("post_game_pipeline_dedup_skip", pipeline=name, nba_date=str(nba_date))
+                    decisions[name] = {"decision": "skip", "reason": "already_ran"}
                     continue
+                decisions[name] = {"decision": "run", "reason": "due"}
+        else:
+            decisions[name] = {"decision": "run", "reason": "forced"}
 
         pipelines_to_run.append(name)
 
@@ -785,11 +907,17 @@ async def trigger_post_game(
                 nba_date=str(nba_date),
                 time_gated=time_gated_pipelines,
             )
+            await _record_batch(
+                "post_game", nba_date, ALL_SKIPPED, "time_gated", decisions, forced=force
+            )
             return PipelineResponse(
                 status=ApiStatus.SUCCESS,
                 message=f"Post-game pipelines deferred for {nba_date}: {time_gated_pipelines} waiting for earliest_run_time_cst, will retry",
             )
         log.info("post_game_all_complete", nba_date=str(nba_date))
+        await _record_batch(
+            "post_game", nba_date, ALL_SKIPPED, "already_complete", decisions, forced=force
+        )
         return PipelineResponse(
             status=ApiStatus.SUCCESS,
             message=f"All post-game pipelines already completed for {nba_date}",
@@ -798,11 +926,22 @@ async def trigger_post_game(
     target_date = date or nba_date
     job_manager = get_job_manager()
     job = await job_manager.create_job(len(pipelines_to_run))
+    batch = await _record_batch(
+        "post_game",
+        target_date,
+        DISPATCHED,
+        "dispatched",
+        decisions,
+        job_id=job.job_id,
+        forced=force,
+    )
     asyncio.create_task(
         _run_pipelines_background(
             job.job_id,
             date_override=target_date if date else None,
             pipeline_names=pipelines_to_run,
+            nba_date=target_date,
+            batch_id=batch,
         )
     )
 
@@ -819,6 +958,121 @@ async def trigger_post_game(
         status=ApiStatus.SUCCESS,
         message=f"Post-game pipelines triggered for {target_date}. Job ID: {job.job_id}",
     )
+
+
+async def _sweep_closed_post_game_window(
+    nba_date: date, window_open_utc: datetime
+) -> PipelineResponse:
+    """The night's last word: did every post-game pipeline actually run?
+
+    Runs on the first poll after the window closes and never again for that
+    date — `PipelineBatch.swept` is the latch, durable so it survives the
+    redeploy that happens at 03:00 CST every night. Anything that never
+    succeeded is written into the batch row and alerted once.
+
+    This is the check that was missing when `daily_matchup_scores` went five
+    days without running (PENDING_PROD_CHECKS #3): every individual poll
+    correctly decided there was nothing to do, and nothing ever asked whether
+    the night as a whole had come up empty.
+    """
+    from db.models.pipeline_run import PipelineRun
+
+    def _survey() -> Optional[dict[str, dict]]:
+        if PipelineBatch.swept("post_game", nba_date):
+            return None
+        return {
+            cls.config.name: {
+                "status": (
+                    "success"
+                    if PipelineRun.was_successful_on_date(
+                        cls.config.name, nba_date, after=window_open_utc
+                    )
+                    else "never_ran"
+                )
+            }
+            for cls in get_pipelines_by_category(PipelineCategory.POST_GAME)
+        }
+
+    survey = await run_in_db_thread(_survey)
+    if survey is None:
+        return PipelineResponse(
+            status=ApiStatus.SUCCESS,
+            message=f"Post-game window closed for {nba_date}; already swept",
+        )
+
+    missing = sorted(name for name, row in survey.items() if row["status"] != "success")
+    if missing:
+        log.error(
+            "post_game_incomplete",
+            nba_date=str(nba_date),
+            missing=missing,
+            ran=len(survey) - len(missing),
+        )
+    else:
+        log.info("post_game_window_closed_complete", nba_date=str(nba_date))
+
+    await run_in_db_thread(
+        PipelineBatch.open,
+        "post_game",
+        nba_date,
+        WINDOW_CLOSED,
+        "incomplete" if missing else "complete",
+        survey,
+        None,
+        False,
+        bool(missing),
+    )
+
+    if missing:
+        await get_alert_service().notify_async(AlertEvent(
+            key=f"post_game_incomplete:{nba_date}",
+            severity="critical",
+            title=f"Post-game pipelines never ran for {nba_date}",
+            body=(
+                f"The post-game window has closed and {len(missing)} of {len(survey)} "
+                f"pipelines have no successful run for this NBA date: {', '.join(missing)}. "
+                "That data is not coming back on its own — a manual "
+                "`?force=true&date=` trigger is the only way to fill it."
+            ),
+            fields={
+                "nba_date": str(nba_date),
+                "missing": ", ".join(missing),
+                "ran": len(survey) - len(missing),
+            },
+            dedupe=POST_GAME_INCOMPLETE_DEDUPE,
+        ))
+
+    return PipelineResponse(
+        status=ApiStatus.SUCCESS,
+        message=(
+            f"Post-game window closed for {nba_date}; never ran: {', '.join(missing)}"
+            if missing
+            else f"Post-game window closed for {nba_date}; all pipelines ran"
+        ),
+    )
+
+
+async def _record_batch(
+    category: str,
+    nba_date: date,
+    decision: str,
+    reason: str,
+    decisions: dict[str, dict],
+    job_id: Optional[str] = None,
+    forced: bool = False,
+):
+    """Write the batch's decision row and return its id (None if unwritable)."""
+    batch = await run_in_db_thread(
+        PipelineBatch.open,
+        category,
+        nba_date,
+        decision,
+        reason,
+        decisions,
+        job_id,
+        forced,
+    )
+    return batch.id if batch is not None else None
 
 
 @router.post("/lineup-alerts", response_model=PipelineResponse)
@@ -875,12 +1129,7 @@ async def trigger_live_stats(
     start_time = time.monotonic()
     eastern = pytz.timezone("US/Eastern")
     now_et = datetime.now(eastern)
-
-    # ET-based NBA date (before 6am = still yesterday's game date)
-    if now_et.hour < 6:
-        game_date = (now_et - timedelta(days=1)).date()
-    else:
-        game_date = now_et.date()
+    game_date = nba_date_et(now_et)
 
     # Check if there are any games today (DB path, covers regular season + known playoff dates)
     games_today = Game.get_games_on_date(game_date)
@@ -964,8 +1213,13 @@ async def trigger_live_stats(
                 )
 
     # Run the pipeline
+    # The pipeline is handed the date this endpoint gated on, rather than
+    # deriving its own. It used to compute a *Central* 6 AM cutoff while every
+    # reader of nba.live_player_stats — and this endpoint's own finalize calls
+    # below — used an Eastern one, so for one hour a day the rows were written
+    # under a date nothing would ask for.
     pipeline = LiveGameStatsPipeline()
-    result = await pipeline.run()
+    result = await pipeline.run(nba_date=game_date)
 
     # Check if all games are final so the cron-runner knows when to exit
     nba_extractor = NBAApiExtractor()
@@ -1192,19 +1446,7 @@ def _check_unmet_dependencies(
 
     from db.models.pipeline_run import PipelineRun as PRModel
 
-    # Compute target date (NBA date convention)
-    if date_override:
-        target_date = date_override
-    else:
-        import pytz
-        from datetime import datetime as dt, timedelta
-
-        eastern = pytz.timezone("US/Eastern")
-        now_et = dt.now(eastern)
-        if now_et.hour < 6:
-            target_date = (now_et - timedelta(days=1)).date()
-        else:
-            target_date = now_et.date()
+    target_date = date_override or nba_date_et()
 
     unmet = []
     for dep_name in deps:
@@ -1220,14 +1462,20 @@ async def _run_pipelines_background(
     job_id: str,
     date_override: Optional[date] = None,
     pipeline_names: Optional[list[str]] = None,
+    nba_date: Optional[date] = None,
+    batch_id=None,
 ) -> None:
     """
     Run pipelines in the background and update job status.
 
     This function is spawned as a background task and runs independently.
     pipeline_names: subset of PIPELINE_REGISTRY to run; defaults to all non-SCHEDULED.
+    nba_date: the batch's game date, shared by every pipeline in it.
+    batch_id: `nba.pipeline_batches` row to fold the outcomes back into, so the
+        durable record says what happened rather than only what was intended.
     """
     job_manager = get_job_manager()
+    outcomes: dict[str, dict] = {}
 
     if pipeline_names is None:
         pipeline_names = [
@@ -1268,6 +1516,10 @@ async def _run_pipelines_background(
                     message=f"Skipped: dependencies not met ({', '.join(unmet_deps)})",
                 )
                 await job_manager.add_pipeline_result(job_id, name, job_result)
+                outcomes[name] = {
+                    "status": "skipped",
+                    "reason": f"unmet_dependencies:{','.join(unmet_deps)}",
+                }
                 continue
 
             log.info(
@@ -1280,7 +1532,9 @@ async def _run_pipelines_background(
             await job_manager.update_current_pipeline(job_id, name)
 
             try:
-                result = await run_pipeline(name, date_override=date_override)
+                result = await run_pipeline(
+                    name, date_override=date_override, nba_date=nba_date
+                )
 
                 job_result = JobResultInternal(
                     pipeline_name=name,
@@ -1294,6 +1548,11 @@ async def _run_pipelines_background(
                 )
 
                 await job_manager.add_pipeline_result(job_id, name, job_result)
+                outcomes[name] = {
+                    "status": result.status,
+                    "records": result.records_processed,
+                    "partial": result.partial,
+                }
 
                 if result.status == ApiStatus.SUCCESS:
                     succeeded_in_batch.add(name)
@@ -1320,6 +1579,7 @@ async def _run_pipelines_background(
                     error=str(e),
                 )
                 await job_manager.add_pipeline_result(job_id, name, job_result)
+                outcomes[name] = {"status": "error", "error": str(e)[:200]}
 
         # Check if all succeeded
         job = await job_manager.get_job(job_id)
@@ -1338,6 +1598,11 @@ async def _run_pipelines_background(
     except Exception as e:
         log.error("background_job_failed", job_id=job_id, error=str(e))
         await job_manager.complete_job(job_id, success=False, error=str(e))
+    finally:
+        # Outside the try so a job that died halfway still leaves a durable
+        # record of how far it got.
+        if batch_id is not None:
+            await run_in_db_thread(PipelineBatch.close, batch_id, outcomes)
 
 
 # ── Deployment ────────────────────────────────────────────────────────────────

@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     # Post-game pipeline scheduling
     estimated_game_duration_minutes: int = 150  # time added to latest game start to estimate end (~2.5hr)
     post_game_pipeline_window_minutes: int = 210  # window after estimated end to attempt trigger
+    # Retry budget per night for ESPN-gated pipelines. The gate used to return
+    # "run" on every ESPN error, so an outage meant a failing run every 15
+    # minutes for the whole window; this bounds it. See pipelines/gates.py.
+    espn_gate_max_attempts: int = 3
 
     # Development mode
     development_mode: bool = False

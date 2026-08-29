@@ -7,6 +7,7 @@ watermark design rests on. Because it runs inside the post-game poll, the thing
 that matters most is that it can never affect whether a pipeline runs.
 """
 
+from datetime import date
 from types import SimpleNamespace
 
 from freezegun import freeze_time
@@ -46,7 +47,11 @@ def logged(monkeypatch):
 class TestWatermarkProbe:
     def test_logs_the_period_beside_the_totals(self, league, logged, monkeypatch):
         monkeypatch.setattr(pipelines, "_fetch_espn_league", lambda li, views: _payload())
-        assert pipelines.probe_espn_watermark() == 135
+        observed = pipelines.probe_espn_watermark()
+        assert observed.latest_scoring_period == 135
+        # The gate needs the matchup period too — it scopes the stored
+        # watermarks it compares against to the period ESPN is currently on.
+        assert observed.current_matchup_period == 22
         event, fields = next(r for r in logged if r[0] == "espn_watermark_probe")
         assert fields["latest_scoring_period"] == 135
         assert fields["current_matchup_period"] == 22
@@ -92,17 +97,21 @@ class TestWatermarkProbe:
         assert pipelines.probe_espn_watermark() is None
 
 
+@pytest.fixture
+def stored(monkeypatch):
+    """Stand in for the two DB reads the gate makes, so it stays a unit test."""
+    def _install(baselines):
+        monkeypatch.setattr(pipelines, "_espn_team_ids", lambda: list(baselines))
+        monkeypatch.setattr(
+            pipelines, "_espn_baselines", lambda ids, period: dict(baselines)
+        )
+    return _install
+
+
 @pytest.mark.unit
 class TestGateReusesTheProbe:
-    def test_gate_does_not_refetch_when_given_a_period(self, league, monkeypatch):
-        """Instrumentation must not double the request rate against ESPN.
-
-        Frozen at 01:00 CST deliberately: past 02:30 the gate returns True before
-        it fetches anything, so a naive "no calls were made" assertion would pass
-        without ever reaching the code under test.
-        """
-        import db.models.stats.daily_matchup_score as dms
-
+    def test_gate_does_not_refetch_when_given_an_observation(self, league, stored, monkeypatch):
+        """Instrumentation must not double the request rate against ESPN."""
         reached = []
         monkeypatch.setattr(
             pipelines, "_first_espn_league",
@@ -111,50 +120,58 @@ class TestGateReusesTheProbe:
         fetches = []
         monkeypatch.setattr(pipelines, "_fetch_espn_league",
                             lambda li, views: fetches.append(views) or _payload())
-
-        class _NoBaseline:
-            # The gate builds `where(DailyMatchupScore.team_id == ...)` and
-            # `order_by(DailyMatchupScore.date.desc())`, so both must resolve.
-            team_id = SimpleNamespace(__eq__=lambda self, other: True)
-            date = SimpleNamespace(desc=lambda: None)
-
-            @classmethod
-            def select(cls):
-                return cls()
-            def where(self, *_): return self
-            def order_by(self, *_): return self
-            def first(self): return None
-        monkeypatch.setattr(dms, "DailyMatchupScore", _NoBaseline)
+        stored({1: 134})
 
         with freeze_time("2026-03-05T07:00:00Z"):  # 01:00 CST, before the fallback
-            pipelines._espn_scoring_period_advanced(known_period=135)
+            decision = pipelines._espn_scoring_period_advanced(
+                date(2026, 3, 4), pipelines.EspnObservation(135, 22)
+            )
 
         assert reached, "gate short-circuited before the fetch path — the test proves nothing"
         assert fetches == [], "gate refetched despite being handed the probe's value"
+        assert decision.run and decision.reason == "period_advanced"
 
-    def test_gate_still_fetches_when_no_period_is_supplied(self, league, monkeypatch):
+    def test_gate_still_fetches_when_no_observation_is_supplied(self, league, stored, monkeypatch):
         """The reuse path must not have removed the gate's own ability to look."""
-        import db.models.stats.daily_matchup_score as dms
-
         fetches = []
         monkeypatch.setattr(pipelines, "_fetch_espn_league",
                             lambda li, views: fetches.append(views) or _payload())
-
-        class _NoBaseline:
-            # The gate builds `where(DailyMatchupScore.team_id == ...)` and
-            # `order_by(DailyMatchupScore.date.desc())`, so both must resolve.
-            team_id = SimpleNamespace(__eq__=lambda self, other: True)
-            date = SimpleNamespace(desc=lambda: None)
-
-            @classmethod
-            def select(cls):
-                return cls()
-            def where(self, *_): return self
-            def order_by(self, *_): return self
-            def first(self): return None
-        monkeypatch.setattr(dms, "DailyMatchupScore", _NoBaseline)
+        stored({1: 134})
 
         with freeze_time("2026-03-05T07:00:00Z"):
-            pipelines._espn_scoring_period_advanced()
+            decision = pipelines._espn_scoring_period_advanced(date(2026, 3, 4))
 
         assert fetches == ["mSettings"], f"expected one mSettings fetch, got {fetches}"
+        assert decision.run
+
+    def test_espn_unreachable_waits_rather_than_running(self, league, stored, monkeypatch):
+        """An outage used to mean a failing run every 15 minutes all night.
+
+        The gate and the pipeline call the same ESPN API, so a gate that cannot
+        reach it has no reason to believe the pipeline could.
+        """
+        def boom(li, views):
+            raise RuntimeError("ESPN is down")
+        monkeypatch.setattr(pipelines, "_fetch_espn_league", boom)
+        stored({1: 134})
+
+        with freeze_time("2026-03-05T07:00:00Z"):  # 01:00 CST
+            decision = pipelines._espn_scoring_period_advanced(date(2026, 3, 4))
+
+        assert not decision.run
+        assert decision.reason == "espn_unavailable_waiting"
+
+    def test_matchup_period_scopes_the_stored_watermarks(self, league, monkeypatch):
+        """The period ESPN reports is the period the baselines are read from."""
+        monkeypatch.setattr(pipelines, "_fetch_espn_league", lambda li, views: _payload())
+        monkeypatch.setattr(pipelines, "_espn_team_ids", lambda: [1])
+        seen = {}
+        def baselines(ids, period):
+            seen["period"] = period
+            return {1: 134}
+        monkeypatch.setattr(pipelines, "_espn_baselines", baselines)
+
+        with freeze_time("2026-03-05T07:00:00Z"):
+            pipelines._espn_scoring_period_advanced(date(2026, 3, 4))
+
+        assert seen["period"] == 22

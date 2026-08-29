@@ -9,9 +9,6 @@ Does no time-window gating itself — gating is handled by the trigger
 endpoint (POST /v1/internal/pipelines/live-stats).
 """
 
-from datetime import timedelta
-
-
 from db.models.nba import Player, LivePlayerStats, LiveGameScoreSnapshot
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -47,13 +44,9 @@ class LiveGameStatsPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the live game stats pipeline."""
-        # Use CST-based date with 6am cutoff (before 6am = still on previous night's game date).
-        # ctx.started_at is already in CST from PipelineContext.
-        now_cst = ctx.started_at
-        if now_cst.hour < 6:
-            game_date = (now_cst - timedelta(days=1)).date()
-        else:
-            game_date = now_cst.date()
+        # The date the trigger endpoint gated on, so the rows this writes carry
+        # the same date the API asks for when it reads them back.
+        game_date = ctx.game_date()
 
         ctx.log.info("live_stats_start", game_date=str(game_date))
 

@@ -6,12 +6,18 @@ Abstract base class for all data pipelines.
 
 import asyncio
 from abc import ABC, abstractmethod
-from datetime import date, timedelta
+from contextlib import nullcontext
+from datetime import date, datetime, timedelta
 from typing import ClassVar, Optional
 
+import pytz
+
+from core.locks import LockNotAcquired, pipeline_lock
+from core.logging import get_logger
 from db.base import db
 from pipelines.config import PipelineConfig
 from pipelines.context import PipelineContext
+from schemas.common import ApiStatus
 from schemas.pipeline import PipelineResult
 from services.alert_service import AlertEvent, get_alert_service
 
@@ -85,6 +91,7 @@ class BasePipeline(ABC):
         self,
         date_override: Optional[date] = None,
         options: Optional[dict] = None,
+        nba_date: Optional[date] = None,
     ) -> PipelineResult:
         """
         Run the full pipeline lifecycle synchronously.
@@ -95,30 +102,69 @@ class BasePipeline(ABC):
 
         Manages its own DB connection since it runs in a separate thread
         from the request handler (Peewee uses thread-local connections).
+
+        The whole run is held under an execution lock (`core/locks.py`) unless
+        the pipeline opts out with `allow_concurrent`. Losing the lock is not a
+        failure: another run of this pipeline is already doing the work, so the
+        result is `skipped` and no run record is written.
         """
         if db.is_closed():
             db.connect()
 
+        lock = (
+            nullcontext()
+            if self.config.allow_concurrent
+            else pipeline_lock(self.config.name)
+        )
         try:
-            ctx = PipelineContext(
-                self.config.name,
-                date_override=date_override,
-                options=dict(options or {}),
-            )
-            ctx.start_tracking()
-
             try:
-                self.before_execute(ctx)
-                self.execute(ctx)
-                self.after_execute(ctx)
-                return ctx.mark_success()
-            except Exception as e:
-                result = ctx.mark_failed(e)
-                self._notify_failure(ctx, e)
-                return result
+                with lock:
+                    return self._run_locked(date_override, options, nba_date)
+            except LockNotAcquired as e:
+                return self._skipped_result(str(e))
         finally:
             if not db.is_closed():
                 db.close()
+
+    def _run_locked(
+        self,
+        date_override: Optional[date],
+        options: Optional[dict],
+        nba_date: Optional[date],
+    ) -> PipelineResult:
+        """The lifecycle proper, with the execution lock already held."""
+        ctx = PipelineContext(
+            self.config.name,
+            date_override=date_override,
+            nba_date=nba_date,
+            options=dict(options or {}),
+        )
+        ctx.start_tracking()
+
+        try:
+            self.before_execute(ctx)
+            self.execute(ctx)
+            self.after_execute(ctx)
+            return ctx.mark_success()
+        except Exception as e:
+            result = ctx.mark_failed(e)
+            self._notify_failure(ctx, e)
+            return result
+
+    def _skipped_result(self, message: str) -> PipelineResult:
+        """A run that never started because another one holds the lock."""
+        now = datetime.now(pytz.timezone("US/Central"))
+        get_logger("pipeline").warning(
+            "pipeline_lock_contended", pipeline=self.config.name
+        )
+        return PipelineResult(
+            status=ApiStatus.SKIPPED,
+            message=f"{self.config.name} skipped — {message}",
+            started_at=now.isoformat(),
+            completed_at=now.isoformat(),
+            duration_seconds=0.0,
+            records_processed=0,
+        )
 
     def _notify_failure(self, ctx: PipelineContext, error: Exception) -> None:
         """`pipeline_failed` (critical) to the ops webhook; never raises."""
@@ -142,6 +188,7 @@ class BasePipeline(ABC):
         self,
         date_override: Optional[date] = None,
         options: Optional[dict] = None,
+        nba_date: Optional[date] = None,
     ) -> PipelineResult:
         """
         Run the pipeline with full lifecycle management.
@@ -155,11 +202,16 @@ class BasePipeline(ABC):
                            computing from the current time. Useful for backfills.
             options: Free-form per-run options exposed as ctx.options
                      (e.g. {"source": "static"}). Defaults to {}.
+            nba_date: The triggering batch's NBA game date, shared by every
+                      pipeline in that batch. Unlike date_override it does not
+                      mark the run as a backfill.
 
         Returns:
             PipelineResult with status, timing, and records processed
         """
-        return await asyncio.to_thread(self._run_sync, date_override, options)
+        return await asyncio.to_thread(
+            self._run_sync, date_override, options, nba_date
+        )
 
     def before_execute(self, ctx: PipelineContext) -> None:
         """

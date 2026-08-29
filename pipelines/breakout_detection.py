@@ -129,14 +129,7 @@ class BreakoutDetectionPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the breakout detection pipeline."""
-        if ctx.date_override:
-            as_of_date = ctx.date_override
-        else:
-            now_cst = ctx.started_at
-            if now_cst.hour < 6:
-                as_of_date = (now_cst - timedelta(days=1)).date()
-            else:
-                as_of_date = now_cst.date()
+        as_of_date = ctx.game_date()
 
         # Every season-stats lookup below is scoped to this season so the first
         # weeks after rollover don't read last season's rows.

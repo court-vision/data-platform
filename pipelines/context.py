@@ -16,6 +16,7 @@ import pytz
 import sentry_sdk
 
 from core.logging import get_correlation_id, get_logger
+from core.nba_calendar import nba_date_et
 from db.models.pipeline_run import PipelineRun
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
@@ -63,6 +64,11 @@ class PipelineContext:
     failure_reasons: dict[str, int] = field(default_factory=dict)
     skip_reasons: dict[str, int] = field(default_factory=dict)
     date_override: Optional[date] = None
+    # The NBA game date of the batch that triggered this run, computed once by
+    # the trigger endpoint and shared by every pipeline in the batch. Distinct
+    # from date_override, which means "this is a backfill" and is what
+    # pipelines key their data-readiness checks off.
+    nba_date: Optional[date] = None
     # Per-run options passed through from the trigger endpoint; pipelines that
     # don't declare any simply ignore it (default {}).
     options: dict = field(default_factory=dict)
@@ -87,6 +93,22 @@ class PipelineContext:
     def log(self):
         """Get the bound logger for this context."""
         return self._log
+
+    def game_date(self) -> date:
+        """The NBA game date this run is for.
+
+        In precedence order: an explicit backfill date, then the date the
+        triggering batch computed, then the 6 AM **Eastern** rule applied to
+        this run's start. Every pipeline goes through here so that one batch
+        cannot straddle the day boundary and write half its rows under one date
+        and half under the next — and so that the date written matches the one
+        the API reads back. See `core/nba_calendar`.
+        """
+        if self.date_override:
+            return self.date_override
+        if self.nba_date:
+            return self.nba_date
+        return nba_date_et(self.started_at)
 
     def start_tracking(self) -> None:
         """

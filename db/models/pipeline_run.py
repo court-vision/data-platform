@@ -180,6 +180,19 @@ class PipelineRun(BaseModel):
         )
 
     @classmethod
+    def count_since(cls, pipeline_name: str, cutoff: datetime) -> int:
+        """How many runs of a pipeline started at or after `cutoff` (UTC naive).
+
+        Counts every run, successful or not — this is the retry budget for the
+        night, and a pipeline failing repeatedly is exactly what it bounds.
+        """
+        return (
+            cls.select()
+            .where((cls.pipeline_name == pipeline_name) & (cls.started_at >= cutoff))
+            .count()
+        )
+
+    @classmethod
     def reset_stale_runs(cls) -> int:
         """
         Mark all lingering 'running' records as failed.

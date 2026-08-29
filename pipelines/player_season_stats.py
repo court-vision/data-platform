@@ -5,10 +5,8 @@ Updates cumulative season stats for players who played, then refreshes the
 materialized rankings copy the public API reads.
 """
 
-from datetime import timedelta
 from typing import Optional
 
-import pytz
 from peewee import fn
 
 from core.season import season_for_date
@@ -76,18 +74,7 @@ class PlayerSeasonStatsPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the cumulative player stats pipeline."""
-        central_tz = pytz.timezone("US/Central")
-
-        # Determine the game date. Use an explicit override for backfills;
-        # otherwise use CST with a 6am cutoff (before 6am = previous night's games).
-        if ctx.date_override:
-            game_date = ctx.date_override
-        else:
-            now_cst = ctx.started_at  # already in CST from PipelineContext
-            if now_cst.hour < 6:
-                game_date = (now_cst - timedelta(days=1)).date()
-            else:
-                game_date = now_cst.date()
+        game_date = ctx.game_date()
 
         season = season_for_date(game_date)
 

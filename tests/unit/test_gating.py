@@ -1,177 +1,21 @@
 """
-Self-Gating Logic Tests
+Self-gating behaviour that is not (yet) a pure function.
 
-Tests the time-window, dedup, concurrency, and data-readiness gates used by
-the pre-game and post-game category endpoints. Uses freezegun to control time.
+The window and ESPN-batch gates moved into `pipelines/gates.py` and are tested
+against the real code in `test_gates.py`; the NBA date rule moved into
+`core/nba_calendar.py` and is tested in `test_nba_calendar.py`. This file used
+to hold private re-implementations of all three — `_compute_nba_date`,
+`_is_pre_game_window_open`, `_is_post_game_window_open` — which meant the
+endpoint and its copy here could agree with each other while both being wrong.
+Four of the five ESPN-gate defects in `docs/PRODUCTION_READINESS.md` item 4
+survived a passing test suite that way.
+
+What remains here is the gating that still lives inline: the live-stats
+pre-tip-off check, and the two `PipelineRun` predicates the batch endpoints use.
 """
 
 import pytest
 from datetime import date, datetime, time, timedelta
-from unittest.mock import MagicMock, patch
-
-from freezegun import freeze_time
-
-from core.settings import settings
-
-
-# ---------------------------------------------------------------------------
-# NBA date convention
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-class TestNBADateConvention:
-    """
-    NBA date rule: before 6 AM ET, we're still on yesterday's game date.
-    The trigger endpoints compute nba_date inline, so we test the logic directly.
-    """
-
-    @staticmethod
-    def _compute_nba_date(now_et: datetime) -> date:
-        """Replicate the NBA date logic from pipelines.py trigger functions."""
-        if now_et.hour < 6:
-            return (now_et - timedelta(days=1)).date()
-        return now_et.date()
-
-    def test_3am_et_is_yesterdays_nba_date(self):
-        """3 AM ET on March 5 → NBA date is March 4."""
-        now = datetime(2026, 3, 5, 3, 0, 0)
-        assert self._compute_nba_date(now) == date(2026, 3, 4)
-
-    def test_559am_et_is_yesterdays_nba_date(self):
-        """5:59 AM ET on March 5 → NBA date is March 4."""
-        now = datetime(2026, 3, 5, 5, 59, 0)
-        assert self._compute_nba_date(now) == date(2026, 3, 4)
-
-    def test_6am_et_is_todays_nba_date(self):
-        """6:00 AM ET on March 5 → NBA date is March 5."""
-        now = datetime(2026, 3, 5, 6, 0, 0)
-        assert self._compute_nba_date(now) == date(2026, 3, 5)
-
-    def test_noon_et_is_todays_nba_date(self):
-        """12:00 PM ET on March 5 → NBA date is March 5."""
-        now = datetime(2026, 3, 5, 12, 0, 0)
-        assert self._compute_nba_date(now) == date(2026, 3, 5)
-
-    def test_1159pm_et_is_todays_nba_date(self):
-        """11:59 PM ET on March 5 → NBA date is March 5."""
-        now = datetime(2026, 3, 5, 23, 59, 0)
-        assert self._compute_nba_date(now) == date(2026, 3, 5)
-
-
-# ---------------------------------------------------------------------------
-# Pre-game window gating
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-class TestPreGameWindowGating:
-    """
-    Pre-game pipelines open at (first_game_time - window_minutes).
-    Default window is 150 minutes. Some pipelines override it.
-    """
-
-    @staticmethod
-    def _is_pre_game_window_open(
-        now_et_naive: datetime,
-        first_game_time: time,
-        nba_date: date,
-        window_minutes: int = 150,
-    ) -> bool:
-        """Replicate the pre-game window check from trigger_pre_game()."""
-        first_game_dt = datetime.combine(nba_date, first_game_time)
-        window_opens_at = first_game_dt - timedelta(minutes=window_minutes)
-        return now_et_naive >= window_opens_at
-
-    def test_window_closed_too_early(self):
-        """3 hours before tip, with 150-min window → closed."""
-        nba_date = date(2026, 3, 4)
-        first_tip = time(19, 30)  # 7:30 PM
-        now = datetime(2026, 3, 4, 16, 0)  # 4:00 PM (210 min before)
-        assert not self._is_pre_game_window_open(now, first_tip, nba_date)
-
-    def test_window_open_within_default(self):
-        """2 hours before tip, with 150-min window → open."""
-        nba_date = date(2026, 3, 4)
-        first_tip = time(19, 30)  # 7:30 PM
-        now = datetime(2026, 3, 4, 17, 30)  # 5:30 PM (120 min before)
-        assert self._is_pre_game_window_open(now, first_tip, nba_date)
-
-    def test_window_open_at_exact_boundary(self):
-        """Exactly at window open time → open."""
-        nba_date = date(2026, 3, 4)
-        first_tip = time(19, 30)  # 7:30 PM
-        now = datetime(2026, 3, 4, 17, 0)  # 5:00 PM (150 min before)
-        assert self._is_pre_game_window_open(now, first_tip, nba_date)
-
-    def test_custom_window_override(self):
-        """breakout_detection uses 120-min window, tighter than default."""
-        nba_date = date(2026, 3, 4)
-        first_tip = time(19, 30)
-        # 130 min before tip — inside 150-min default but outside 120-min override
-        now = datetime(2026, 3, 4, 17, 20)
-        assert self._is_pre_game_window_open(now, first_tip, nba_date, window_minutes=150)
-        assert not self._is_pre_game_window_open(now, first_tip, nba_date, window_minutes=120)
-
-
-# ---------------------------------------------------------------------------
-# Post-game window gating
-# ---------------------------------------------------------------------------
-
-@pytest.mark.unit
-class TestPostGameWindowGating:
-    """
-    Post-game pipelines open at (latest_game_start + estimated_duration)
-    and close at (open_time + window_minutes).
-    Defaults come from settings (estimated_game_duration_minutes,
-    post_game_pipeline_window_minutes).
-    """
-
-    @staticmethod
-    def _is_post_game_window_open(
-        now_et_naive: datetime,
-        latest_game_time: time,
-        nba_date: date,
-        estimated_duration: int = settings.estimated_game_duration_minutes,
-        window_minutes: int = settings.post_game_pipeline_window_minutes,
-    ) -> bool:
-        """Replicate the post-game window check from trigger_post_game()."""
-        latest_game_dt = datetime.combine(nba_date, latest_game_time)
-        estimated_end = latest_game_dt + timedelta(minutes=estimated_duration)
-        window_end = estimated_end + timedelta(minutes=window_minutes)
-        return estimated_end <= now_et_naive <= window_end
-
-    def test_before_estimated_end(self):
-        """During games → window closed."""
-        nba_date = date(2026, 3, 4)
-        latest_start = time(22, 0)  # 10 PM
-        now = datetime(2026, 3, 4, 23, 0)  # 11 PM (only 60 min after start)
-        assert not self._is_post_game_window_open(now, latest_start, nba_date)
-
-    def test_within_window(self):
-        """After estimated end, within window → open."""
-        nba_date = date(2026, 3, 4)
-        latest_start = time(22, 0)  # 10 PM → estimated end 12:30 AM
-        # 1:00 AM next day (30 min after estimated end)
-        now = datetime(2026, 3, 5, 1, 0)
-        assert self._is_post_game_window_open(now, latest_start, nba_date)
-
-    def test_after_window_expires(self):
-        """Long after games ended → window closed."""
-        nba_date = date(2026, 3, 4)
-        latest_start = time(22, 0)  # 10 PM → estimated end 12:30 AM
-        estimated_end = datetime(2026, 3, 5, 0, 30)
-        window_end = estimated_end + timedelta(minutes=settings.post_game_pipeline_window_minutes)
-        assert self._is_post_game_window_open(window_end, latest_start, nba_date)
-        assert not self._is_post_game_window_open(window_end + timedelta(minutes=1), latest_start, nba_date)
-        now = datetime(2026, 3, 5, 9, 0)  # 9 AM (well past any window)
-        assert not self._is_post_game_window_open(now, latest_start, nba_date)
-
-    def test_at_exact_estimated_end(self):
-        """Exactly at estimated end → window open."""
-        nba_date = date(2026, 3, 4)
-        latest_start = time(22, 0)
-        # estimated end: 22:00 + 150min = 00:30 next day
-        now = datetime(2026, 3, 5, 0, 30)
-        assert self._is_post_game_window_open(now, latest_start, nba_date)
 
 
 # ---------------------------------------------------------------------------
@@ -193,9 +37,8 @@ class TestPipelineDedupGating:
         assert expected_cutoff == datetime(2026, 3, 4, 0, 0, 0)
 
     def test_after_parameter_overrides_cutoff(self):
-        """Post-game uses estimated_end_utc as the 'after' cutoff."""
-        nba_date = date(2026, 3, 4)
-        # Post-game might set after=2026-03-05T05:30:00 (estimated end in UTC)
+        """Post-game passes the window's opening time as the 'after' cutoff."""
+        # Post-game might set after=2026-03-05T05:30:00 (window open, in UTC)
         after = datetime(2026, 3, 5, 5, 30, 0)
         # A pipeline run at 3 AM UTC (before after) should NOT count
         run_started = datetime(2026, 3, 5, 3, 0, 0)
@@ -208,7 +51,13 @@ class TestPipelineDedupGating:
 
 @pytest.mark.unit
 class TestConcurrencyGating:
-    """Verify the staleness threshold for concurrency gating."""
+    """The staleness threshold for `PipelineRun.is_running`.
+
+    This is the *cheap* gate — it stops the endpoint dispatching work that is
+    already in flight. It is not the guarantee: it reads and then acts, so two
+    triggers can both pass it. The guarantee is the advisory lock in
+    `core/locks.py` (`tests/integration/test_pipeline_locks.py`).
+    """
 
     def test_stale_running_not_considered_active(self):
         """Running records older than max_age_minutes are treated as stale."""
@@ -235,7 +84,11 @@ class TestConcurrencyGating:
 
 @pytest.mark.unit
 class TestLiveStatsPreTipGate:
-    """Live stats gate: don't run until 15 min before first game."""
+    """Live stats gate: don't run until 15 min before first game.
+
+    Still inline in `trigger_live_stats`, so this is still a re-implementation.
+    It is the last one.
+    """
 
     @staticmethod
     def _is_live_gate_open(

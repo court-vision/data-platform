@@ -5,10 +5,6 @@ Fetches yesterday's game stats from NBA API and ESPN ownership data,
 then inserts into the nba schema tables.
 """
 
-from datetime import timedelta
-
-import pytz
-
 from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerGameStats
@@ -48,19 +44,9 @@ class PlayerGameStatsPipeline(BasePipeline):
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the daily player stats pipeline."""
         import pandas as pd
-        central_tz = pytz.timezone("US/Central")
-
-        # Determine the NBA game date. Use an explicit override for backfills;
-        # otherwise use CST with a 6am cutoff (before 6am = previous night's games).
-        if ctx.date_override:
-            game_date = ctx.date_override
-        else:
-            # This is a POST_GAME pipeline — always fetch the previous night's games.
-            now_cst = ctx.started_at  # already in CST from PipelineContext
-            if now_cst.hour < 6:
-                game_date = (now_cst - timedelta(days=1)).date()
-            else:
-                game_date = now_cst.date()
+        # The batch's game date: an explicit backfill date, else the date the
+        # trigger endpoint gated on, else the 6 AM ET rule. See ctx.game_date().
+        game_date = ctx.game_date()
         date_str = game_date.strftime("%m/%d/%Y")
 
         season = season_for_date(game_date)

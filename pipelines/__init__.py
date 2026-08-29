@@ -86,6 +86,7 @@ async def run_pipeline(
     name: str,
     date_override: Optional[date] = None,
     options: Optional[dict] = None,
+    nba_date: Optional[date] = None,
 ) -> PipelineResult:
     """
     Run a pipeline by name.
@@ -95,12 +96,15 @@ async def run_pipeline(
         date_override: If provided, the pipeline uses this date instead of
                        computing from the current time. Useful for backfills.
         options: Per-run options exposed to the pipeline as ctx.options.
+        nba_date: The triggering batch's NBA game date (not a backfill marker).
 
     Returns:
         PipelineResult with status and details
     """
     pipeline = get_pipeline(name)
-    return await pipeline.run(date_override=date_override, options=options)
+    return await pipeline.run(
+        date_override=date_override, options=options, nba_date=nba_date
+    )
 
 
 async def run_all_pipelines(date_override: Optional[date] = None) -> dict[str, PipelineResult]:
