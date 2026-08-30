@@ -157,7 +157,7 @@ source .venv/bin/activate
 # Install runtime dependencies
 pip install -r requirements.txt
 
-# Install the local package (db/, tasks/, utils/, core/ as importable packages)
+# Install the local package (db/, utils/, core/ as importable packages)
 pip install -e .
 
 # Install dev/test dependencies

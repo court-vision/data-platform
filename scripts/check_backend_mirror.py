@@ -123,7 +123,7 @@ def _pyfiles(root: Path) -> dict[str, Path]:
         if any(part in SKIP_DIRS or part.endswith(".egg-info") for part in p.parts):
             continue
         rel = str(p.relative_to(root))
-        if rel.startswith(("tests/", "scripts/", "tasks/", "db/models/season1", "db/models/season2")):
+        if rel.startswith(("tests/", "scripts/")):
             continue
         out[rel] = p
     return out
