@@ -4,19 +4,8 @@ from enum import Enum
 
 # ------------------------------- Base Models ------------------------------- #
 
-class ApiStatus(str, Enum):
-    """Standard API response statuses"""
-    SUCCESS = "success"
-    ERROR = "error"
-    SKIPPED = "skipped"
-    BAD_REQUEST = "bad_request"
-    VALIDATION_ERROR = "validation_error"
-    AUTHENTICATION_ERROR = "authentication_error"
-    AUTHORIZATION_ERROR = "authorization_error"
-    NOT_FOUND = "not_found"
-    CONFLICT = "conflict"
-    RATE_LIMITED = "rate_limited"
-    SERVER_ERROR = "server_error"
+# The status vocabulary is shared with the backend via cv-core.
+from cv_core.status import ApiStatus  # noqa: E402
 
 class BaseResponse(BaseModel, Generic[TypeVar('T')]):
     """

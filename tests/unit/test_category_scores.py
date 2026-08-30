@@ -18,9 +18,17 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 @pytest.mark.unit
 def test_default_weights_reproduce_calculate_fantasy_points():
-    stats = {"pts": 20, "reb": 10, "ast": 5, "stl": 2, "blk": 1, "tov": 3, "fgm": 8, "fga": 15, "fg3m": 3, "ftm": 5, "fta": 6}
-    weighted = sum(DEFAULT_POINT_WEIGHTS[k] * v for k, v in stats.items())
-    assert weighted == calculate_fantasy_points(stats) == 49
+    """Pinned against the formula written out literally.
+
+    calculate_fantasy_points now *derives from* DEFAULT_POINT_WEIGHTS
+    (cv-core), so comparing the two would be circular — this asserts both
+    against the sum the five hand-written copies used to compute.
+    """
+    s = {"pts": 20, "reb": 10, "ast": 5, "stl": 2, "blk": 1, "tov": 3, "fgm": 8, "fga": 15, "fg3m": 3, "ftm": 5, "fta": 6}
+    literal = (s["pts"] + s["reb"] + 2 * s["ast"] + 4 * (s["stl"] + s["blk"])
+               - 2 * s["tov"] + s["fg3m"] + (2 * s["fgm"] - s["fga"]) + (s["ftm"] - s["fta"]))
+    weighted = sum(DEFAULT_POINT_WEIGHTS[k] * v for k, v in s.items())
+    assert literal == weighted == calculate_fantasy_points(s) == 49
 
 
 @pytest.mark.unit

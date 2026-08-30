@@ -19,7 +19,7 @@ from core.resilience import (
     ServerError,
 )
 from pipelines.extractors.base import BaseExtractor
-from pipelines.transformers.names import normalize_name
+from pipelines.transformers import normalize_name
 from services.schedule_service import get_espn_matchup_dates
 from pipelines.transformers.category_scores import espn_category_scores, espn_scoring_format
 from utils.espn_helpers import POSITION_MAP, PRO_TEAM_MAP
