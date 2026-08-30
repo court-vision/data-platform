@@ -204,3 +204,45 @@ class TestValueComparison:
             new_categories={"you": {"pts": 320}, "opp": {"pts": 280}, "wins": 5, "losses": 4},
             new_score=5, new_opponent_score=4,
         ) == SKIP
+
+
+@pytest.mark.unit
+class TestTheIdleDaySequence:
+    """A genuinely flat day (neither roster's starters played) blocks the
+    watermark but never the number: the stored totals legitimately include the
+    idle day, so the displayed standing score stays correct while the *claim*
+    waits for evidence. The cost is liveness — one to two evenings where the
+    overlay day lags and the score doesn't tick during games — bounded by the
+    idle-out and always undercount-shaped.
+
+    Note the asymmetry that keeps this rare: movement on EITHER side unblocks,
+    so "I forgot to set my lineup" doesn't trigger it (the opponent moved),
+    and in category leagues any single stat by any started player unblocks.
+    """
+
+    def test_night_one_flat_day_skips_but_the_number_was_already_right(self):
+        assert decide(new_period=135, new_score=1200.0, new_opponent_score=1100.0) == SKIP
+
+    def test_night_two_movement_at_gap_two_withholds(self):
+        """The guard cannot distinguish 'day B was idle-zero, one movement
+        covers both days' from 'day B's batch is still pending' — so it
+        stores the fresh totals and defers the claim."""
+        assert decide(new_period=136) == WITHHOLD
+
+    def test_frozen_after_the_withhold_keeps_waiting(self):
+        assert decide(
+            stored_period=None, stored_score=1250.0, stored_opponent_score=1150.0,
+            new_period=136, new_score=1250.0, new_opponent_score=1150.0,
+        ) == SKIP
+
+    def test_next_movement_or_the_idle_out_recovers(self):
+        by_movement = decide(
+            stored_period=None, stored_score=1250.0, stored_opponent_score=1150.0,
+            new_period=137, new_score=1290.0, new_opponent_score=1180.0,
+        )
+        by_timeout = decide(
+            stored_period=None, stored_score=1250.0, stored_opponent_score=1150.0,
+            new_period=137, new_score=1250.0, new_opponent_score=1150.0,
+            days_since_stored=2,
+        )
+        assert by_movement == by_timeout == WRITE
