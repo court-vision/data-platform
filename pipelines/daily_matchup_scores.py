@@ -21,6 +21,163 @@ from pipelines.extractors import ESPNExtractor, YahooExtractor
 from services.schedule_service import get_current_matchup
 
 
+WRITE = "write"          # store the snapshot, watermark included
+WITHHOLD = "withhold"    # store the totals but no watermark; next poll confirms
+SKIP = "skip"            # store nothing this poll; the gate retries
+
+
+def _totals_differ(a, b) -> bool:
+    """Compare two per-category totals dicts by value (JSONB floats vs floats)."""
+    keys = set(a) | set(b)
+    return any(float(a.get(k, 0) or 0) != float(b.get(k, 0) or 0) for k in keys)
+
+
+def _category_totals(category_scores):
+    """(you, opp) totals dicts, or None when absent/malformed."""
+    if not category_scores:
+        return None
+    you, opp = category_scores.get("you"), category_scores.get("opp")
+    if not isinstance(you, dict) or not isinstance(opp, dict):
+        return None
+    return you, opp
+
+
+def _is_zero_seed(score, opponent_score, category_scores) -> bool:
+    """A snapshot that claims nothing: 0-0, and zero category totals if present."""
+    if float(score) != 0.0 or float(opponent_score) != 0.0:
+        return False
+    totals = _category_totals(category_scores)
+    if totals is None:
+        return True
+    you, opp = totals
+    return not _totals_differ(you, {}) and not _totals_differ(opp, {})
+
+
+def _movement(stored_score, stored_opp, stored_categories, new_score, new_opp, new_categories):
+    """Did ESPN's materialized numbers move since the stored reference?
+
+    True/False when comparable; None when the two snapshots cannot be compared
+    (e.g. the league's scoring format flipped between polls).
+
+    Category leagues are judged on their per-category totals, not on
+    current_score: the extractor stores categories WON there, a small integer
+    that routinely stays put overnight while every underlying total moved — so
+    win-counts as the movement signal would classify a fully materialized
+    batch as "not landed" and starve the night's snapshot.
+    """
+    new_totals = _category_totals(new_categories)
+    stored_totals = _category_totals(stored_categories)
+    if new_totals is not None:
+        if stored_totals is None:
+            return None
+        moved = (
+            _totals_differ(new_totals[0], stored_totals[0])
+            or _totals_differ(new_totals[1], stored_totals[1])
+        )
+        # Win counts moving without totals moving shouldn't happen, but if it
+        # does, ESPN materialized *something*.
+        return moved or (
+            float(new_score) != float(stored_score)
+            or float(new_opp) != float(stored_opp)
+        )
+    if stored_totals is not None:
+        return None
+    return float(new_score) != float(stored_score) or float(new_opp) != float(stored_opp)
+
+
+def watermark_decision(
+    stored_period,
+    stored_score,
+    stored_opponent_score,
+    stored_categories,
+    new_period,
+    new_source,
+    new_score,
+    new_opponent_score,
+    new_categories,
+    days_since_stored: int = 0,
+    stored_exists: bool = True,
+    day_of_matchup: int = 0,
+) -> str:
+    """Should this snapshot be stored, and may it carry its watermark?
+
+    The watermark design rests on one pairing: a snapshot at watermark B covers
+    scores through day B-1 (docs/PENDING_PROD_CHECKS.md #4). ESPN reports both
+    fields in one response, but if it ever advances `latestScoringPeriod`
+    before its batch materializes `totalPoints`, storing that pairing freezes
+    an overstated claim into the baseline and a day of score silently vanishes
+    from the live overlay. The write side therefore demands *evidence* before
+    advancing the watermark: totals movement from a same-period reference.
+
+    Three outcomes:
+    - WRITE: store everything. The movement (or a claim-free zero seed, or the
+      idle-matchup timeout) confirms the pairing.
+    - WITHHOLD: store the totals with **no watermark** (`scoring_period_id`
+      NULL, source "unknown"). Used when there is nothing to compare against —
+      an unseeded period with nonzero totals, or a multi-period gap where
+      movement only proves the *oldest* missing batch landed, not all of them.
+      The read path treats an unusable watermark as "prefer a slightly stale
+      score to a double-counted one" (matchup_window `legacy_date_rule`), and
+      the stored totals become the reference the next poll confirms against.
+    - SKIP: store nothing; the gate's next poll retries.
+
+    Residual, accepted: a gap of 3+ periods needs one confirming poll per
+    missing batch, and a batch landing in the exact poll interval between two
+    others can still be conflated — each WITHHOLD round shrinks the claim's
+    error by a day, and the read path under- rather than over-counts
+    throughout.
+
+    Sunset clause: every conservative branch here exists only because totals
+    movement is a *proxy* for "ESPN's batch landed." Once the watermark probe
+    confirms Δ <= 0 (the period advance is itself that proof), these branches
+    relax behind a toggle — see docs/PENDING_PROD_CHECKS.md #4, "What
+    confirmation buys."
+    """
+    if new_source != "provider" or new_period is None:
+        return WRITE  # calendar/unknown watermarks are derived, not ESPN's claim
+
+    if not stored_exists:
+        if _is_zero_seed(new_score, new_opponent_score, new_categories) and day_of_matchup <= 0:
+            return WRITE  # a 0-0 seed *on the period's first day* claims nothing
+        # 0-0 totals past day 0 are NOT a verifiable seed: on the first night
+        # of a period that didn't self-seed, the gate fires on the period
+        # advance itself, and if ESPN's batch is lagging, the period's totals
+        # are still 0-0 *because* day 1 hasn't been absorbed yet. Writing an
+        # advanced watermark over them claims a scored day is covered by
+        # nothing. Same treatment as any other unverifiable first write.
+        return WITHHOLD  # no reference to confirm against — totals yes, claim no
+
+    moved = _movement(
+        stored_score, stored_opponent_score, stored_categories,
+        new_score, new_opponent_score, new_categories,
+    )
+
+    if stored_period is None:
+        # The stored row is a previous WITHHOLD: its totals are the reference.
+        if moved is True:
+            return WRITE
+        if moved is None:
+            return WITHHOLD  # incomparable reference — refresh it
+        return WRITE if days_since_stored >= 2 else SKIP
+
+    if new_period <= stored_period:
+        return WRITE  # same-day refresh; nothing new is being claimed
+
+    if moved is None:
+        return WITHHOLD
+    if moved is False:
+        # Advanced period, frozen totals: the batch has not landed. The 2-day
+        # out is the genuinely idle matchup, whose totals legitimately never
+        # move (both rosters scoreless).
+        return WRITE if days_since_stored >= 2 else SKIP
+
+    # Totals moved. That confirms the *oldest* missing batch landed — which is
+    # everything, when only one period was missing.
+    if new_period - stored_period == 1:
+        return WRITE
+    return WITHHOLD
+
+
 class DailyMatchupScoresPipeline(BasePipeline):
     """
     Fetch current matchup scores for all saved teams and record daily snapshots.
@@ -108,6 +265,53 @@ class DailyMatchupScoresPipeline(BasePipeline):
                         if matchup_start
                         else matchup_info["day_index"]
                     )
+
+                    # Write-side pairing guard: never let the stored
+                    # watermark outrun the totals it claims to cover.
+                    stored = (
+                        DailyMatchupScore.select()
+                        .where(
+                            (DailyMatchupScore.team_id == team.team_id)
+                            & (DailyMatchupScore.matchup_period == effective_matchup_period)
+                        )
+                        .order_by(DailyMatchupScore.date.desc())
+                        .first()
+                    )
+                    decision = watermark_decision(
+                        stored.scoring_period_id if stored else None,
+                        stored.current_score if stored else 0,
+                        stored.opponent_current_score if stored else 0,
+                        stored.category_scores if stored else None,
+                        matchup_data.get("scoring_period_id"),
+                        matchup_data.get("scoring_period_source", "unknown"),
+                        matchup_data["current_score"],
+                        matchup_data["opponent_current_score"],
+                        matchup_data.get("category_scores"),
+                        days_since_stored=(today - stored.date).days if stored else 0,
+                        stored_exists=stored is not None,
+                        day_of_matchup=day_of_matchup,
+                    )
+                    if decision == SKIP:
+                        ctx.log.info(
+                            "watermark_awaiting_totals",
+                            team_id=team.team_id,
+                            stored_period=stored.scoring_period_id if stored else None,
+                            espn_period=matchup_data.get("scoring_period_id"),
+                        )
+                        ctx.increment_skipped(1, "totals_not_materialized")
+                        continue
+                    if decision == WITHHOLD:
+                        # Store the totals, claim nothing: the read path treats
+                        # a null watermark as "don't overlay", and this row is
+                        # the reference the next poll's movement check uses.
+                        ctx.log.info(
+                            "watermark_withheld",
+                            team_id=team.team_id,
+                            stored_period=stored.scoring_period_id if stored else None,
+                            espn_period=matchup_data.get("scoring_period_id"),
+                        )
+                        matchup_data["scoring_period_id"] = None
+                        matchup_data["scoring_period_source"] = "unknown"
 
                     # Upsert daily score
                     record = {
