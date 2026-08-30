@@ -21,6 +21,55 @@ from pipelines.extractors import ESPNExtractor, YahooExtractor
 from services.schedule_service import get_current_matchup
 
 
+def watermark_outruns_totals(
+    stored_period,
+    stored_score,
+    stored_opponent_score,
+    new_period,
+    new_source,
+    new_score,
+    new_opponent_score,
+    days_since_stored: int = 0,
+) -> bool:
+    """Would writing this snapshot claim coverage its totals don't have?
+
+    The whole watermark design rests on one pairing: a snapshot at watermark B
+    covers scores through day B-1 (docs/PENDING_PROD_CHECKS.md #4). ESPN's
+    `latestScoringPeriod` and `totalPoints` come from one response, so the
+    pairing is atomic *if ESPN updates them together* — but if ESPN ever
+    advances the period before its batch materializes the totals, the gate
+    fires on the early period and this pipeline would freeze that overstated
+    pairing into the baseline. The read path would then overlay the wrong day
+    and silently drop a day of score: last season's bug class.
+
+    So the write side enforces the pairing instead of assuming it: when the
+    period has advanced but *neither side's total has moved*, the batch has
+    not landed yet — skip this team this poll and let the gate retry. Totals
+    moving is the confirmation the period claims.
+
+    Two deliberate outs:
+    - No stored watermark (seeding a new matchup period) always writes — a
+      0-0 day-0 row claims nothing.
+    - `days_since_stored >= 2` writes through. Unchanged totals for two whole
+      days with an advancing period is a genuinely idle matchup (both rosters
+      scoreless — totals legitimately don't move), not batch lag measured in
+      minutes. Without this out, an idle stretch would pin the watermark and
+      cost live overlay evenings; with it, worst-case staleness is bounded.
+    """
+    if new_source != "provider" or new_period is None:
+        return False  # calendar/unknown watermarks are derived, not ESPN's claim
+    if stored_period is None:
+        return False  # seeding — nothing is claimed yet
+    if new_period <= stored_period:
+        return False  # not advancing; upsert is a same-day refresh
+    if days_since_stored >= 2:
+        return False  # idle-matchup out (see docstring)
+    return (
+        float(new_score) == float(stored_score)
+        and float(new_opponent_score) == float(stored_opponent_score)
+    )
+
+
 class DailyMatchupScoresPipeline(BasePipeline):
     """
     Fetch current matchup scores for all saved teams and record daily snapshots.
@@ -108,6 +157,36 @@ class DailyMatchupScoresPipeline(BasePipeline):
                         if matchup_start
                         else matchup_info["day_index"]
                     )
+
+                    # Write-side pairing guard: never let the stored
+                    # watermark outrun the totals it claims to cover.
+                    stored = (
+                        DailyMatchupScore.select()
+                        .where(
+                            (DailyMatchupScore.team_id == team.team_id)
+                            & (DailyMatchupScore.matchup_period == effective_matchup_period)
+                        )
+                        .order_by(DailyMatchupScore.date.desc())
+                        .first()
+                    )
+                    if stored is not None and watermark_outruns_totals(
+                        stored.scoring_period_id,
+                        stored.current_score,
+                        stored.opponent_current_score,
+                        matchup_data.get("scoring_period_id"),
+                        matchup_data.get("scoring_period_source", "unknown"),
+                        matchup_data["current_score"],
+                        matchup_data["opponent_current_score"],
+                        days_since_stored=(today - stored.date).days,
+                    ):
+                        ctx.log.info(
+                            "watermark_awaiting_totals",
+                            team_id=team.team_id,
+                            stored_period=stored.scoring_period_id,
+                            espn_period=matchup_data.get("scoring_period_id"),
+                        )
+                        ctx.increment_skipped(1, "totals_not_materialized")
+                        continue
 
                     # Upsert daily score
                     record = {

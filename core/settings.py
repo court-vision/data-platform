@@ -70,7 +70,11 @@ class Settings(BaseSettings):
     # Retry budget per night for ESPN-gated pipelines. The gate used to return
     # "run" on every ESPN error, so an outage meant a failing run every 15
     # minutes for the whole window; this bounds it. See pipelines/gates.py.
-    espn_gate_max_attempts: int = 3
+    # 6 rather than 3 since the write-side pairing guard landed: a run that
+    # skips because ESPN's period advanced ahead of its totals still counts
+    # against this budget, so the budget is also the tolerance for that lag
+    # (6 x 15 min polls = ~90 minutes of period-before-totals slack).
+    espn_gate_max_attempts: int = 6
 
     # Development mode
     development_mode: bool = False
