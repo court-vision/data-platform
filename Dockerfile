@@ -21,7 +21,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 COPY requirements.txt .
 COPY db/ ./db/
-COPY tasks/ ./tasks/
 COPY static/ ./static/
 COPY utils/ ./utils/
 COPY core/ ./core/
