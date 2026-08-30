@@ -126,6 +126,12 @@ def watermark_decision(
     others can still be conflated — each WITHHOLD round shrinks the claim's
     error by a day, and the read path under- rather than over-counts
     throughout.
+
+    Sunset clause: every conservative branch here exists only because totals
+    movement is a *proxy* for "ESPN's batch landed." Once the watermark probe
+    confirms Δ <= 0 (the period advance is itself that proof), these branches
+    relax behind a toggle — see docs/PENDING_PROD_CHECKS.md #4, "What
+    confirmation buys."
     """
     if new_source != "provider" or new_period is None:
         return WRITE  # calendar/unknown watermarks are derived, not ESPN's claim
