@@ -64,8 +64,19 @@ class TestUnseededTeams:
     overstated pairing. Only a claim-free zero seed writes; anything else
     stores totals with the watermark withheld."""
 
-    def test_zero_seed_writes(self):
-        assert decide(stored_exists=False, new_score=0.0, new_opponent_score=0.0) == WRITE
+    def test_zero_seed_on_day_zero_writes(self):
+        assert decide(
+            stored_exists=False, new_score=0.0, new_opponent_score=0.0, day_of_matchup=0
+        ) == WRITE
+
+    def test_zero_totals_past_day_zero_withhold(self):
+        """0-0 on day 1+ is not a verifiable seed: on the first night of a
+        non-self-seeded period, the gate fires on the period advance and the
+        totals are 0-0 precisely *because* day 1's batch hasn't landed —
+        writing the advanced watermark would claim a scored day is covered."""
+        assert decide(
+            stored_exists=False, new_score=0.0, new_opponent_score=0.0, day_of_matchup=1
+        ) == WITHHOLD
 
     def test_nonzero_first_write_withholds_the_watermark(self):
         assert decide(stored_exists=False) == WITHHOLD

@@ -97,6 +97,7 @@ def watermark_decision(
     new_categories,
     days_since_stored: int = 0,
     stored_exists: bool = True,
+    day_of_matchup: int = 0,
 ) -> str:
     """Should this snapshot be stored, and may it carry its watermark?
 
@@ -130,8 +131,14 @@ def watermark_decision(
         return WRITE  # calendar/unknown watermarks are derived, not ESPN's claim
 
     if not stored_exists:
-        if _is_zero_seed(new_score, new_opponent_score, new_categories):
-            return WRITE  # a 0-0 day-0 seed claims nothing
+        if _is_zero_seed(new_score, new_opponent_score, new_categories) and day_of_matchup <= 0:
+            return WRITE  # a 0-0 seed *on the period's first day* claims nothing
+        # 0-0 totals past day 0 are NOT a verifiable seed: on the first night
+        # of a period that didn't self-seed, the gate fires on the period
+        # advance itself, and if ESPN's batch is lagging, the period's totals
+        # are still 0-0 *because* day 1 hasn't been absorbed yet. Writing an
+        # advanced watermark over them claims a scored day is covered by
+        # nothing. Same treatment as any other unverifiable first write.
         return WITHHOLD  # no reference to confirm against — totals yes, claim no
 
     moved = _movement(
@@ -276,6 +283,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
                         matchup_data.get("category_scores"),
                         days_since_stored=(today - stored.date).days if stored else 0,
                         stored_exists=stored is not None,
+                        day_of_matchup=day_of_matchup,
                     )
                     if decision == SKIP:
                         ctx.log.info(
