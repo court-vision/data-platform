@@ -125,6 +125,26 @@ data-platform/
 └── scripts/                 # One-off utility scripts
 ```
 
+## Shared code: cv-core and the mirror guard
+
+The modules this repo used to hand-copy from the backend (calendar, season,
+crypto, resilience, logging, scoring vocabulary, the fantasy-points formula)
+now come from the [cv-core](https://github.com/court-vision/cv-core) package,
+pinned by release tag in `requirements.txt`. The local `core/*.py`,
+`utils/stat_vocab.py` and `pipelines/transformers/` files are one-line shims
+so import paths didn't change; edit cv-core and bump the pin, never the shims.
+
+What still *is* hand-duplicated (Peewee models, extractor bases, glue — see
+the lists in `scripts/check_backend_mirror.py`) is watched by:
+
+```bash
+python scripts/check_backend_mirror.py          # expects ../backend checkout
+```
+
+Run it before touching any mirrored file; a mirrored file changes in both
+repos in the same sitting or it fails CI-of-the-mind. Exit 2 means no backend
+checkout was found (skip, not failure).
+
 ## Setup & Installation
 
 ```bash
