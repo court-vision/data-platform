@@ -69,18 +69,30 @@ def poll(year: int, league_id: int) -> dict:
     status = payload.get("status", {}) or {}
     period = status.get("latestScoringPeriod")
     matchup_period = status.get("currentMatchupPeriod")
-    home_total = away_total = None
+    # Current matchup's totals, and the *previous* matchup's. The previous pair
+    # is what keeps a week-rollover night measurable: the instant
+    # currentMatchupPeriod advances, the current-matchup columns switch to the
+    # new (0-0) matchup and stop saying anything about whether the finished
+    # week's totals absorbed its last day — which the 2026-08-31 run
+    # demonstrated by flipping to 0.0/0.0 mid-log. The prev columns keep
+    # watching the completed matchup across the boundary.
+    home_total = away_total = prev_home = prev_away = None
     for matchup in payload.get("schedule") or []:
-        if matchup.get("matchupPeriodId") == matchup_period:
+        mp = matchup.get("matchupPeriodId")
+        if mp == matchup_period:
             home_total = (matchup.get("home") or {}).get("totalPoints")
             away_total = (matchup.get("away") or {}).get("totalPoints")
-            break
+        elif matchup_period is not None and mp == matchup_period - 1:
+            prev_home = (matchup.get("home") or {}).get("totalPoints")
+            prev_away = (matchup.get("away") or {}).get("totalPoints")
     return {
         "ts_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "latest_scoring_period": period,
         "current_matchup_period": matchup_period,
         "home_total_points": home_total,
         "away_total_points": away_total,
+        "prev_home_total_points": prev_home,
+        "prev_away_total_points": prev_away,
     }
 
 
@@ -108,8 +120,17 @@ def main() -> int:
         return minute >= burst_start or minute < burst_end  # window wraps midnight
 
     out = Path(args.out)
-    fields = ["ts_utc", "latest_scoring_period", "current_matchup_period", "home_total_points", "away_total_points"]
+    fields = [
+        "ts_utc", "latest_scoring_period", "current_matchup_period",
+        "home_total_points", "away_total_points",
+        "prev_home_total_points", "prev_away_total_points",
+    ]
     new_file = not out.exists()
+    if not new_file:
+        header = out.open().readline().strip().split(",")
+        if header != fields:
+            print(f"note: {out} has the old column set — appended rows carry two extra "
+                  "values; start a fresh --out for a clean file")
 
     print(
         f"polling flb league {args.league_id} every {args.interval}s -> {out}; "
