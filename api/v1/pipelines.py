@@ -1768,3 +1768,28 @@ async def trigger_playoffs(
         message=result.message,
         data=result,
     )
+
+
+@router.post("/preseason-market", response_model=PipelineResponse)
+async def trigger_preseason_market(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override snapshot date (YYYY-MM-DD). Omit for automatic date."),
+    league_id: Optional[int] = Query(None, description="Override the ESPN league to pull from (must be rolled to the target season)."),
+) -> PipelineResponse:
+    """
+    Trigger the preseason-market pipeline.
+
+    Snapshots ESPN draft ranks, auction values, and real-draft crowd averages
+    (ADP, average auction price) into nba.draft_market — plus projected stat
+    lines into nba.player_projections once ESPN publishes them. Self-gating:
+    no-ops outside the Aug 15 – Oct 31 window and when the league has not
+    rolled to the target season. Called daily by the 'preseason-market' cron
+    job in cron-runner during draft season.
+    """
+    options = {"league_id": league_id} if league_id is not None else None
+    result = await run_pipeline("preseason_market", date_override=date, options=options)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
