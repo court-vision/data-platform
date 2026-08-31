@@ -22,6 +22,22 @@ totalPoints for the current matchup. Reading the result:
       pipelines/daily_matchup_scores.py is what protects us, and its
       espn_gate_max_attempts budget should comfortably exceed Δ / poll cadence.
 
+Resolution matters: a poll every N seconds can only bound |Δ| < N when both
+fields flip inside one interval — it cannot establish the sign. The first
+overnight run (15-min cadence, 2026-08-30) bracketed the flip to 06:49–07:04
+UTC (~2 AM CDT, matching last season's hypothesis), which is why the burst
+window below defaults to that neighborhood. The decision-relevant claim is
+not "Δ <= 0" (unmeasurable by polling) but "no advanced-period/stale-totals
+state was ever observed at resolution R": at R = 30s any bad window is
+shorter than 30s, which a 15-minute production gate has ~3% odds per night
+of even sampling — and the write guard catches that case regardless. That
+claim is what the sunset clause in docs/PENDING_PROD_CHECKS.md #4 cites.
+
+Burst mode: --burst-start/--burst-end (HH:MM, UTC) switch the cadence to
+--burst-interval inside the window and back to --interval outside it, so an
+overnight run stays ~50 polite requests plus ~150 during the hour that
+matters.
+
 Caveat, honestly: this is *evidence*, not proof — a different sport product on
 the same platform. The dormant basketball probe stays deployed and confirms on
 opening night either way. Ctrl-C to stop; the CSV survives.
@@ -73,14 +89,33 @@ def main() -> int:
     parser.add_argument("--league-id", type=int, required=True, help="A PUBLIC ESPN fantasy baseball league id")
     parser.add_argument("--year", type=int, default=2026)
     parser.add_argument("--interval", type=int, default=900, help="Seconds between polls (default 15 min)")
+    parser.add_argument("--burst-start", default="06:30", help="UTC HH:MM when the high-frequency window opens (default 06:30 = 1:30 AM CDT)")
+    parser.add_argument("--burst-end", default="07:45", help="UTC HH:MM when it closes (default 07:45 = 2:45 AM CDT)")
+    parser.add_argument("--burst-interval", type=int, default=30, help="Seconds between polls inside the window (default 30)")
     parser.add_argument("--out", default="flb_probe.csv")
     args = parser.parse_args()
+
+    def parse_hhmm(value: str) -> int:
+        hours, minutes = value.split(":")
+        return int(hours) * 60 + int(minutes)
+
+    burst_start, burst_end = parse_hhmm(args.burst_start), parse_hhmm(args.burst_end)
+
+    def in_burst(now) -> bool:
+        minute = now.hour * 60 + now.minute
+        if burst_start <= burst_end:
+            return burst_start <= minute < burst_end
+        return minute >= burst_start or minute < burst_end  # window wraps midnight
 
     out = Path(args.out)
     fields = ["ts_utc", "latest_scoring_period", "current_matchup_period", "home_total_points", "away_total_points"]
     new_file = not out.exists()
 
-    print(f"polling flb league {args.league_id} every {args.interval}s -> {out} (Ctrl-C to stop)")
+    print(
+        f"polling flb league {args.league_id} every {args.interval}s -> {out}; "
+        f"burst {args.burst_interval}s inside {args.burst_start}-{args.burst_end} UTC (Ctrl-C to stop)"
+    )
+    was_burst = None
     while True:
         try:
             row = poll(args.year, args.league_id)
@@ -96,8 +131,13 @@ def main() -> int:
             return 0
         except Exception as exc:  # keep polling through transient failures
             print(f"poll failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        burst = in_burst(datetime.now(timezone.utc))
+        if burst != was_burst:
+            print(f"cadence: every {args.burst_interval if burst else args.interval}s"
+                  f" ({'burst window' if burst else 'baseline'})")
+            was_burst = burst
         try:
-            time.sleep(args.interval)
+            time.sleep(args.burst_interval if burst else args.interval)
         except KeyboardInterrupt:
             return 0
 
