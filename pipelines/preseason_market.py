@@ -4,7 +4,9 @@ Preseason Market Pipeline
 Daily draft-prep snapshot: ESPN editorial draft ranks and auction values plus
 the crowd averages from real ESPN drafts (ADP, average auction price) into
 nba.draft_market, and — once ESPN publishes them — projected per-game stat
-lines into nba.player_projections.
+lines into nba.player_projections. The market row also carries the position
+fields the draft room needs (primary position, eligibility, injury), which
+nba_api's coarse "G"/"F-C" positions cannot supply.
 
 Gated to the preseason window (Aug 15 – Oct 31). Tolerant of the two known
 late-arrival states: the public league not yet rolled to the target season
@@ -23,6 +25,10 @@ from pipelines.extractors import ESPNExtractor
 from pipelines.gates import preseason_market_window
 from utils.stat_vocab import ESPN_ID_TO_KEY
 
+# Presence of any of these is what makes a row worth a market snapshot. The
+# position fields ride along on that row rather than gating it: a player ESPN
+# has no draft opinion about is not draft-market data just because he has a
+# primary position.
 _MARKET_FIELDS = ("overall_rank", "auction_value", "adp", "auction_value_avg")
 
 
@@ -125,6 +131,9 @@ class PreseasonMarketPipeline(BasePipeline):
                         auction_value=row["auction_value"],
                         adp=row["adp"],
                         auction_value_avg=row["auction_value_avg"],
+                        default_position_id=row["default_position_id"],
+                        eligible_slot_ids=row["eligible_slot_ids"],
+                        injury_status=row["injury_status"],
                         pipeline_run_id=ctx.run_id,
                     )
                 if line:

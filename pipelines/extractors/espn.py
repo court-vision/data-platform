@@ -30,14 +30,37 @@ ESPN_FANTASY_ENDPOINT = (
 )
 
 
+def _int_or_none(value) -> int | None:
+    """An ESPN id as an int, or None when it is absent or not a number."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _slot_ids(slots) -> list[int] | None:
+    """`eligibleSlots` as a list of ints; None when absent or unusable."""
+    if not isinstance(slots, (list, tuple)):
+        return None
+    ids = [i for i in (_int_or_none(s) for s in slots) if i is not None]
+    return ids or None
+
+
 def parse_draft_market_players(players: list[dict], projected_split_id: str) -> list[dict]:
     """Pure parse of kona_player_info entries into draft-market rows.
 
     Keeps the fields the preseason-market pipeline writes: editorial rank and
     auction value (draftRanksByRankType.STANDARD), the crowd averages from real
-    ESPN drafts (ownership.averageDraftPosition / auctionValueAverage), and the
-    projected stat split for `projected_split_id` (e.g. "102027") when ESPN has
-    published it. Entries without an id and name are dropped.
+    ESPN drafts (ownership.averageDraftPosition / auctionValueAverage), the
+    position fields the draft room counts caps and eligibility from
+    (defaultPositionId / eligibleSlots / injuryStatus), and the projected stat
+    split for `projected_split_id` (e.g. "102027") when ESPN has published it.
+    Entries without an id and name are dropped.
+
+    The two position id spaces are kept in their native form and never mixed:
+    `defaultPositionId` is 1-based (1=PG ... 5=C, the space
+    rosterSettings.positionLimits is keyed by) while `eligibleSlots` are 0-based
+    lineup-slot ids (0=PG ... 4=C, 5=G, 6=F, 11=UT).
     """
     rows: list[dict] = []
     for player in players:
@@ -56,6 +79,9 @@ def parse_draft_market_players(players: list[dict], projected_split_id: str) -> 
             "auction_value": standard.get("auctionValue"),
             "adp": ownership.get("averageDraftPosition"),
             "auction_value_avg": ownership.get("auctionValueAverage"),
+            "default_position_id": _int_or_none(player.get("defaultPositionId")),
+            "eligible_slot_ids": _slot_ids(player.get("eligibleSlots")),
+            "injury_status": player.get("injuryStatus"),
             "projected_total": projected.get("appliedTotal") if projected else None,
             "projected_avg": projected.get("appliedAverage") if projected else None,
             "projected_stats": (projected.get("averageStats") or None) if projected else None,
