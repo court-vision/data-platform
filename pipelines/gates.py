@@ -236,3 +236,20 @@ def espn_batch_gate(
     if past_fallback:
         return decide(False, "attempts_exhausted")
     return decide(False, "period_unchanged")
+
+
+# The preseason-market pull is only meaningful while draft prep is live:
+# ESPN publishes draft ranks/ADP from late summer, and they stop mattering
+# once the season is underway.
+PRESEASON_MARKET_OPENS = (8, 15)    # Aug 15
+PRESEASON_MARKET_CLOSES = (10, 31)  # Oct 31
+
+
+def preseason_market_window(today: date) -> GateDecision:
+    """Whether the preseason-market pipeline should pull today (Aug 15 – Oct 31)."""
+    opens = date(today.year, *PRESEASON_MARKET_OPENS)
+    closes = date(today.year, *PRESEASON_MARKET_CLOSES)
+    detail = {"opens": str(opens), "closes": str(closes)}
+    if opens <= today <= closes:
+        return GateDecision(True, "preseason_window_open", detail)
+    return GateDecision(False, "outside_preseason_window", detail)

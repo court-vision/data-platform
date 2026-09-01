@@ -30,6 +30,39 @@ ESPN_FANTASY_ENDPOINT = (
 )
 
 
+def parse_draft_market_players(players: list[dict], projected_split_id: str) -> list[dict]:
+    """Pure parse of kona_player_info entries into draft-market rows.
+
+    Keeps the fields the preseason-market pipeline writes: editorial rank and
+    auction value (draftRanksByRankType.STANDARD), the crowd averages from real
+    ESPN drafts (ownership.averageDraftPosition / auctionValueAverage), and the
+    projected stat split for `projected_split_id` (e.g. "102027") when ESPN has
+    published it. Entries without an id and name are dropped.
+    """
+    rows: list[dict] = []
+    for player in players:
+        if not player or player.get("id") is None or not player.get("fullName"):
+            continue
+        standard = (player.get("draftRanksByRankType") or {}).get("STANDARD") or {}
+        ownership = player.get("ownership") or {}
+        projected = next(
+            (s for s in player.get("stats", []) if s.get("id") == projected_split_id), None
+        )
+        rows.append({
+            "espn_id": player["id"],
+            "name": player["fullName"],
+            "normalized_name": normalize_name(player["fullName"]),
+            "overall_rank": standard.get("rank"),
+            "auction_value": standard.get("auctionValue"),
+            "adp": ownership.get("averageDraftPosition"),
+            "auction_value_avg": ownership.get("auctionValueAverage"),
+            "projected_total": projected.get("appliedTotal") if projected else None,
+            "projected_avg": projected.get("appliedAverage") if projected else None,
+            "projected_stats": (projected.get("averageStats") or None) if projected else None,
+        })
+    return rows
+
+
 class ESPNExtractor(BaseExtractor):
     """
     Extractor for ESPN Fantasy Basketball API.
@@ -130,6 +163,88 @@ class ESPNExtractor(BaseExtractor):
 
         self.log.info("request_complete", player_count=len(cleaned_data))
         return cleaned_data
+
+    @with_retry(
+        max_attempts=settings.retry_max_attempts,
+        base_delay=settings.retry_base_delay,
+        max_delay=settings.retry_max_delay,
+    )
+    @espn_api_circuit
+    def get_draft_market_data(
+        self,
+        year: Optional[int] = None,
+        league_id: Optional[int] = None,
+    ) -> Optional[list[dict]]:
+        """
+        Fetch the draft-market view of the player pool: editorial draft ranks
+        and auction values, real-draft crowd averages (ADP, average auction
+        price), and projected stat splits once ESPN publishes them.
+
+        Unauthenticated public-league read, sorted by draft rank, no ownership
+        band filter (top-of-draft players are the point).
+
+        Args:
+            year: ESPN season year (defaults to settings.espn_year)
+            league_id: ESPN league ID (defaults to settings.espn_league_id)
+
+        Returns:
+            List of row dicts (see parse_draft_market_players), or None when
+            ESPN returns 404 — the league has not rolled to `year` yet.
+        """
+        year = year or settings.espn_year
+        league_id = league_id or settings.espn_league_id
+
+        params = {"view": "kona_player_info", "scoringPeriodId": 0}
+        endpoint = ESPN_FANTASY_ENDPOINT.format(year, league_id)
+        filters = {
+            "players": {
+                "filterSlotIds": {"value": []},
+                "limit": 1500,
+                "sortDraftRanks": {
+                    "sortPriority": 1,
+                    "sortAsc": True,
+                    "value": "STANDARD",
+                },
+                "sortPercOwned": {"sortPriority": 2, "sortAsc": False},
+            }
+        }
+        headers = {"x-fantasy-filter": json.dumps(filters)}
+
+        self.log.debug("request_start", endpoint=endpoint)
+
+        try:
+            response = requests.get(
+                endpoint,
+                params=params,
+                headers=headers,
+                timeout=settings.http_timeout,
+            )
+
+            if response.status_code == 404:
+                # League not rolled to `year` yet — a state, not an error.
+                self.log.warning("espn_league_not_found", year=year, league_id=league_id)
+                return None
+
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 60))
+                raise RateLimitError("ESPN rate limited", retry_after=retry_after)
+
+            if response.status_code >= 500:
+                raise ServerError("ESPN server error", status_code=response.status_code)
+
+            response.raise_for_status()
+            data = response.json()
+
+        except requests.exceptions.Timeout:
+            raise NetworkError("ESPN request timed out")
+        except requests.exceptions.ConnectionError:
+            raise NetworkError("ESPN connection failed")
+
+        players = [x.get("player", x) for x in data.get("players", [])]
+        rows = parse_draft_market_players(players, projected_split_id=f"10{year}")
+
+        self.log.info("request_complete", player_count=len(rows))
+        return rows
 
     def get_matchup_data(
         self,
