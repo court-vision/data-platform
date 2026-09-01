@@ -14,6 +14,7 @@ draft-eligible rookies routinely reach ESPN before nba.players has them.
 """
 
 from core.settings import settings
+from db.base import db
 from db.models.nba import DraftMarket, Player, PlayerProjection
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -97,46 +98,51 @@ class PreseasonMarketPipeline(BasePipeline):
             for p in Player.select().where(Player.espn_id.in_(espn_ids))
         } if espn_ids else {}
 
+        # Publish the day's snapshot atomically: readers resolve "the" snapshot
+        # as max(as_of_date), so the first committed row would make a still-
+        # partial day the latest. All-or-nothing keeps a mid-run failure from
+        # superseding yesterday's complete snapshot.
         projections_written = 0
-        for row in rows:
-            player = by_espn_id.get(row["espn_id"]) or Player.find_by_name(row["normalized_name"])
-            if player is None:
-                ctx.increment_skipped(1, "unresolved_player")
-                continue
+        with db.atomic():
+            for row in rows:
+                player = by_espn_id.get(row["espn_id"]) or Player.find_by_name(row["normalized_name"])
+                if player is None:
+                    ctx.increment_skipped(1, "unresolved_player")
+                    continue
 
-            has_market = any(row[field] is not None for field in _MARKET_FIELDS)
-            line = projection_line(row["projected_stats"]) if row["projected_stats"] else {}
-            if not has_market and not line:
-                ctx.increment_skipped(1, "no_market_data")
-                continue
+                has_market = any(row[field] is not None for field in _MARKET_FIELDS)
+                line = projection_line(row["projected_stats"]) if row["projected_stats"] else {}
+                if not has_market and not line:
+                    ctx.increment_skipped(1, "no_market_data")
+                    continue
 
-            if has_market:
-                DraftMarket.record_market(
-                    player_id=player.id,
-                    season=season,
-                    as_of_date=as_of_date,
-                    overall_rank=row["overall_rank"],
-                    auction_value=row["auction_value"],
-                    adp=row["adp"],
-                    auction_value_avg=row["auction_value_avg"],
-                    pipeline_run_id=ctx.run_id,
-                )
-            if line:
-                PlayerProjection.record_projection(
-                    player_id=player.id,
-                    season=season,
-                    as_of_date=as_of_date,
-                    line=line,
-                    projected_gp=projected_gp(row["projected_total"], row["projected_avg"]),
-                    raw={
-                        "applied_total": row["projected_total"],
-                        "applied_avg": row["projected_avg"],
-                    },
-                    pipeline_run_id=ctx.run_id,
-                )
-                projections_written += 1
+                if has_market:
+                    DraftMarket.record_market(
+                        player_id=player.id,
+                        season=season,
+                        as_of_date=as_of_date,
+                        overall_rank=row["overall_rank"],
+                        auction_value=row["auction_value"],
+                        adp=row["adp"],
+                        auction_value_avg=row["auction_value_avg"],
+                        pipeline_run_id=ctx.run_id,
+                    )
+                if line:
+                    PlayerProjection.record_projection(
+                        player_id=player.id,
+                        season=season,
+                        as_of_date=as_of_date,
+                        line=line,
+                        projected_gp=projected_gp(row["projected_total"], row["projected_avg"]),
+                        raw={
+                            "applied_total": row["projected_total"],
+                            "applied_avg": row["projected_avg"],
+                        },
+                        pipeline_run_id=ctx.run_id,
+                    )
+                    projections_written += 1
 
-            ctx.increment_records()
+                ctx.increment_records()
 
         ctx.log.info(
             "preseason_market_complete",
