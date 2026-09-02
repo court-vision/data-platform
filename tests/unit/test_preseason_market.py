@@ -34,6 +34,8 @@ def _espn_player(**overrides):
         "id": 3112335,
         "fullName": "Nikola Jokic",
         "defaultPositionId": 5,
+        "eligibleSlots": [4, 9, 10, 11, 12, 13],
+        "injuryStatus": "ACTIVE",
         "draftRanksByRankType": {
             "STANDARD": {"rank": 1, "auctionValue": 65, "rankType": "STANDARD"},
             "ROTO": {"rank": 2, "auctionValue": 65},
@@ -77,6 +79,8 @@ def test_parse_handles_missing_blocks_and_drops_anonymous_entries():
     row = rows[0]
     assert row["espn_id"] == 99
     assert row["overall_rank"] is None and row["adp"] is None and row["projected_stats"] is None
+    assert row["default_position_id"] is None and row["eligible_slot_ids"] is None
+    assert row["injury_status"] is None
 
 
 def test_parse_unwraps_nothing_but_accepts_empty_average_stats():
@@ -85,6 +89,45 @@ def test_parse_unwraps_nothing_but_accepts_empty_average_stats():
     row = parse_draft_market_players([player], projected_split_id="102027")[0]
     assert row["projected_stats"] is None            # empty dict normalized to None
     assert row["projected_total"] == 100.0
+
+
+def test_parse_captures_position_eligibility_and_injury():
+    """The three fields the draft room counts caps and eligibility from."""
+    row = parse_draft_market_players([_espn_player()], projected_split_id="102027")[0]
+    # Native id spaces, never mixed: defaultPositionId is 1-based (5 = C),
+    # eligibleSlots are 0-based lineup slots (4 = C, 9 = PF/C, 11 = UT).
+    assert row["default_position_id"] == 5
+    assert row["eligible_slot_ids"] == [4, 9, 10, 11, 12, 13]
+    assert row["injury_status"] == "ACTIVE"
+    # ESPN eligibility is authoritative and not inferred: a pure centre is not
+    # F-eligible, so slot 6 is absent even though slot 9 (PF/C) is present.
+    assert 6 not in row["eligible_slot_ids"]
+
+
+def test_parse_injury_status_rides_through_verbatim():
+    row = parse_draft_market_players([_espn_player(injuryStatus="DAY_TO_DAY")],
+                                     projected_split_id="102027")[0]
+    assert row["injury_status"] == "DAY_TO_DAY"
+
+
+@pytest.mark.parametrize("slots,expected", [
+    ([], None),                                  # empty list is no eligibility
+    (None, None),                                # absent
+    ("0,5", None),                               # not a list
+    ([0, "5", 11], [0, 5, 11]),                  # string ids coerced
+    ([0, "junk", 5], [0, 5]),                    # unusable entries dropped
+])
+def test_parse_normalizes_eligible_slots(slots, expected):
+    row = parse_draft_market_players([_espn_player(eligibleSlots=slots)],
+                                     projected_split_id="102027")[0]
+    assert row["eligible_slot_ids"] == expected
+
+
+@pytest.mark.parametrize("raw,expected", [("3", 3), (3.0, 3), (None, None), ("PG", None)])
+def test_parse_normalizes_default_position_id(raw, expected):
+    row = parse_draft_market_players([_espn_player(defaultPositionId=raw)],
+                                     projected_split_id="102027")[0]
+    assert row["default_position_id"] == expected
 
 
 # ---- projection_line / projected_gp ----------------------------------------
