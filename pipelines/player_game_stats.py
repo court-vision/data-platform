@@ -113,6 +113,7 @@ class PlayerGameStatsPipeline(BasePipeline):
             player_name = row["PLAYER_NAME"]
             normalized_name = normalize_name(player_name)
             team_abbrev = row["TEAM_ABBREVIATION"]
+            game_id = row["GAME_ID"] if "GAME_ID" in stats.columns else None
 
             # Get ESPN data if available
             espn_info = espn_data.get(normalized_name)
@@ -153,6 +154,11 @@ class PlayerGameStatsPipeline(BasePipeline):
                 },
                 team_id=team_abbrev,
                 pipeline_run_id=ctx.run_id,
+                # The payload has carried this all along; storing it is what
+                # lets readers stop inferring the fixture from (date, team).
+                # An id nba.games has not caught up with is reconciled away by
+                # the upsert rather than failing the row.
+                game_id=game_id,
             )
 
             ctx.increment_records()
