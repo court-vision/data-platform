@@ -100,7 +100,7 @@ KNOWN_DIVERGED = {
     "db/models/nba/player_rolling_stats.py": "backend adds the freshness gate",
     "db/models/nba/playoff_series.py": "writer vs reader helpers",
     "db/models/pipeline_run.py": "dp adds run-tracking used by gates",
-    "db/models/stats/rankings.py": "docstring drift only",
+    "db/models/stats/rankings.py": "backend compatibility shim to canonical nba/rankings models",
     "db/models/teams.py": "backend adds the League FK",
     "main.py": "different applications",
     "pipelines/__init__.py": "dp has the registry; backend a stub package",
