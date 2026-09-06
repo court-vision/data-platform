@@ -94,3 +94,33 @@ def test_player_game_stats_pipeline_upserts_idempotently(integration_db) -> None
     assert row.team_id == "GSW"
     assert row.game_date == game_date
     assert row.fpts == 53
+    # The payload's GAME_ID is stored, so readers identify the fixture by the
+    # game rather than inferring it from (game_date, team).
+    assert row.game_id == "0022500001"
+
+
+@pytest.mark.integration
+def test_a_game_the_schedule_has_not_caught_up_with_still_lands(integration_db) -> None:
+    """The stats pipeline can outrun the schedule pipeline.
+
+    `game_id` is a foreign key, so storing an id `nba.games` has never heard of
+    would fail the whole row. The line is worth more than the label: it lands
+    keyed by date, and a later run promotes it once the game exists.
+    """
+    game_date = date(2026, 2, 14)
+    _seed_expected_game(game_date, "0022500001")
+
+    pipeline = PlayerGameStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {
+        "stephen curry": {"espn_id": 3975, "rost_pct": 99.1}
+    }
+    # The box score names a game the schedule does not have yet.
+    pipeline.nba_extractor.get_game_logs = lambda *_: _stats_df(game_id="0022500001")
+    Game.delete().execute()
+
+    result = pipeline._run_sync(date_override=game_date)
+
+    assert result.status == ApiStatus.SUCCESS
+    row = PlayerGameStats.select().first()
+    assert row is not None and row.game_id is None
+    assert row.game_date == game_date, "the box score survived without its game"
