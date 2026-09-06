@@ -14,7 +14,7 @@ from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
-from pipelines.transformers import normalize_name, calculate_fantasy_points, minutes_to_int
+from pipelines.transformers import calculate_fantasy_points, minutes_to_int
 
 
 class LiveGameStatsPipeline(BasePipeline):
