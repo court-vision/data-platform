@@ -6,6 +6,7 @@ with validation and type coercion.
 """
 
 from typing import Optional
+from urllib.parse import urlsplit
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -60,6 +61,19 @@ class Settings(BaseSettings):
     resend_api_key: Optional[SecretStr] = None
     notification_from_email: str = "alerts@courtvision.dev"
     lineup_alert_window_minutes: int = 150  # broad outer gate; must be >= max user-configurable value (150)
+
+    # Backend internal API. The lineup-alerts pipeline asks the backend for each
+    # opted-in team's fill plan (POST /v1/internal/jobs/lineup/evaluate; the
+    # backend owns the ESPN roster read, eligibility, locks and the planner, and
+    # applies the plan for auto-lineup users). Authenticated with the same
+    # PIPELINE_API_TOKEN both services share. Unset -> the pipeline logs
+    # `backend_not_configured` and does nothing for any team.
+    # Railway private networking only (validator below):
+    #   production: http://api.railway.internal:8080
+    #   staging:    http://api-staging.railway.internal:8080
+    backend_internal_url: Optional[str] = None
+    # Read timeout per evaluate call: > backend roster read + 30 s writer call + re-read.
+    backend_timeout_seconds: float = 45.0
 
     # Pre-game pipeline scheduling
     pre_game_window_minutes: int = 150  # how many minutes before first tip-off pre-game pipelines become eligible
@@ -155,6 +169,24 @@ class Settings(BaseSettings):
         if lower_v not in {"discord", "slack"}:
             raise ValueError("alert_webhook_format must be 'discord' or 'slack'")
         return lower_v
+
+    @model_validator(mode="after")
+    def require_private_backend_on_railway(self) -> "Settings":
+        """A deployed data-platform must reach the backend over Railway private networking only.
+
+        Mirrors the backend's `require_private_sqlmate_on_railway`: the pipeline
+        token travels in this call, so it never leaves the private network.
+        """
+        if not self.railway_environment_name or not self.backend_internal_url:
+            return self
+
+        parsed = urlsplit(self.backend_internal_url)
+        hostname = parsed.hostname or ""
+        if parsed.scheme != "http" or not hostname.endswith(".railway.internal"):
+            raise ValueError(
+                "BACKEND_INTERNAL_URL must use an http://*.railway.internal private domain on Railway"
+            )
+        return self
 
     @model_validator(mode="after")
     def derive_season(self) -> "Settings":
