@@ -1,25 +1,33 @@
 """
 Lineup Alerts Pipeline
 
-Checks all eligible users' lineups and sends notifications if issues are found.
+Asks the backend for each opted-in team's fill plan for today and either emails
+it to the user or — for users who turned on auto-lineup — lets the backend
+apply it to ESPN and emails what changed. The backend
+(`POST /v1/internal/jobs/lineup/evaluate`) owns the ESPN roster read, slot
+eligibility, game locks and the planner; this pipeline keeps the schedule
+gating, opt-in, per-team overrides, daily dedup, emails and logging.
+
 Self-gates in two stages:
   1. Broad gate: only enters the user loop when within the configured outer window
      (LINEUP_ALERT_WINDOW_MINUTES env var, default 150 min) before first tip-off.
-  2. Per-user gate: each team is only alerted when within that team's configured
+  2. Per-user gate: each team is only evaluated when within that team's configured
      alert_minutes_before window.
 
-Safe to call frequently (every 15 min); deduplication prevents repeat notifications.
+Safe to call frequently (every 15 min): one `usr.notification_log` row per
+(user, team, type, day) dedups the sent and skipped outcomes, while a `failed`
+row (backend unreachable, email bounced) is retried by the next poll and
+updated in place. Three or more `unavailable` answers in one run raise the
+`lineup_alerts_backend_unavailable` ops alert.
 """
 
 import json
-
-from services import credential_service
 import time as time_mod
 from datetime import datetime, timedelta, time
 
 import pytz
 
-from core.logging import get_logger
+from core.logging import get_correlation_id
 from core.settings import settings
 from db.models.users import User
 from db.models.teams import Team
@@ -28,27 +36,43 @@ from db.models.notifications import NotificationPreference, NotificationLog, Not
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
-from pipelines.extractors import ESPNExtractor
-from services.lineup_check_service import LineupCheckService
+from services.alert_service import AlertEvent, get_alert_service
+from services.backend_client import OUTCOME_UNAVAILABLE, LineupEvaluation, backend_client_from_settings
 from services.notification_service import NotificationService
+
+# Runs with this many `unavailable` backend answers post the ops alert.
+BACKEND_UNAVAILABLE_ALERT_THRESHOLD = 3
+BACKEND_UNAVAILABLE_ALERT_DEDUPE = timedelta(hours=6)
+
+# The two notification types that share the one-row-per-team-day dedup.
+NOTIFICATION_TYPES = ("lineup_alert", "auto_lineup")
+# Log statuses that mean "done for today" — anything else is retried next poll.
+SETTLED_STATUSES = ("sent", "skipped")
+
+# A rejected/failed reason that mentions one of these gets the reconnect hint.
+_AUTH_REASON_MARKERS = ("auth", "expired", "provider_auth")
 
 
 class LineupAlertsPipeline(BasePipeline):
     """
-    Check user lineups and send alerts before games start.
+    Evaluate opted-in users' lineups before games start.
 
     This pipeline:
     1. Checks if we're within the notification window (before first game)
-    2. Fetches all eligible users with ESPN teams
-    3. For each team, checks for lineup issues
-    4. Sends notifications for teams with issues
-    5. Logs all results for dedup and auditing
+    2. Fetches all opted-in users with ESPN teams
+    3. For each team, asks the backend for today's fill plan (applying it when
+       the user opted into auto-lineup)
+    4. Emails the plan (or the applied-moves summary)
+    5. Logs one row per team-day for dedup and auditing
     """
 
     config = PipelineConfig(
         name="lineup_alerts",
         display_name="Lineup Alerts",
-        description="Checks user lineups and sends alerts before games start",
+        description=(
+            "Asks the backend for each opted-in team's fill plan; emails it, "
+            "or applies it for auto-lineup users"
+        ),
         target_table="usr.notification_log",
         category=PipelineCategory.PRE_GAME,
         skip_batch_dedup=True,
@@ -56,12 +80,13 @@ class LineupAlertsPipeline(BasePipeline):
 
     def __init__(self):
         super().__init__()
-        self.espn_extractor = ESPNExtractor()
-        self.lineup_checker = LineupCheckService()
+        self.backend_client = backend_client_from_settings()
         self.notification_service = NotificationService()
+        self._unavailable_count = 0
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the lineup alerts pipeline."""
+        self._unavailable_count = 0
         eastern = pytz.timezone("US/Eastern")
         now_et = datetime.now(eastern)
         today = now_et.date()
@@ -94,18 +119,26 @@ class LineupAlertsPipeline(BasePipeline):
             ctx.log.info("no_teams_playing", date=str(today))
             return
 
-        # Step 4: Get all eligible users
+        # Step 4: Without a backend URL there is nothing this pipeline can do
+        if not self.backend_client.enabled:
+            ctx.log.warning(
+                "backend_not_configured",
+                detail="BACKEND_INTERNAL_URL is unset; no lineups evaluated",
+            )
+            return
+
+        # Step 5: Get all eligible users
         users_with_prefs = self._get_eligible_users()
         ctx.log.info("eligible_users", count=len(users_with_prefs))
 
-        # Step 5: Process each user's teams
+        # Step 6: Process each user's teams
         for user, prefs in users_with_prefs:
             teams = list(Team.select().where(Team.user_id == user.user_id))
 
             for team in teams:
                 try:
                     self._process_team(ctx, user, team, prefs, teams_playing, today, now_et_time, earliest_game_time)
-                    # Rate limit ESPN API calls
+                    # Pace the backend (each call may hit ESPN and the writer)
                     time_mod.sleep(1)
                 except Exception as e:
                     ctx.log.warning(
@@ -116,6 +149,8 @@ class LineupAlertsPipeline(BasePipeline):
                     )
                     ctx.increment_failed(1, type(e).__name__)
                     continue
+
+        self._alert_if_backend_unavailable(ctx)
 
     def _process_team(
         self,
@@ -128,9 +163,14 @@ class LineupAlertsPipeline(BasePipeline):
         now_et_time: time,
         earliest_game_time,
     ) -> None:
-        """Process a single team for lineup alerts."""
-        # Parse league info
-        league_info = credential_service.hydrate(team, json.loads(team.league_info))
+        """Evaluate one team: gate, dedup, ask the backend, email, log.
+
+        Order: provider check -> effective prefs -> team alerts disabled ->
+        per-team window -> dedup -> backend evaluate -> outcome branch.
+        """
+        # Provider comes from the stored JSON only; the backend does the ESPN
+        # read, so no credentials are decrypted here.
+        league_info = json.loads(team.league_info)
         provider = league_info.get("provider", "espn")
 
         # ESPN only for now
@@ -167,18 +207,9 @@ class LineupAlertsPipeline(BasePipeline):
             )
             return
 
-        # Check dedup - already notified today?
-        already_sent = (
-            NotificationLog.select()
-            .where(
-                (NotificationLog.user == user.user_id)
-                & (NotificationLog.team_id == team.team_id)
-                & (NotificationLog.notification_type == "lineup_alert")
-                & (NotificationLog.notification_date == today)
-            )
-            .exists()
-        )
-        if already_sent:
+        # Dedup: a sent or skipped row of either type settles the team for today.
+        # A `failed` row does not — the next poll retries and updates it in place.
+        if self._already_settled_today(user, team, today):
             ctx.log.debug(
                 "already_notified",
                 user_id=user.user_id,
@@ -186,79 +217,183 @@ class LineupAlertsPipeline(BasePipeline):
             )
             return
 
-        # Fetch roster from ESPN
-        roster = self.espn_extractor.get_roster_with_slots(
-            league_id=league_info["league_id"],
-            team_name=league_info.get("team_name", ""),
-            espn_s2=league_info.get("espn_s2", ""),
-            swid=league_info.get("swid", ""),
-            year=league_info.get("year", settings.espn_year),
+        apply = bool(getattr(effective_prefs, "auto_lineup_enabled", False))
+        evaluation = self.backend_client.evaluate_lineup(
+            team_id=team.team_id,
+            user_id=user.user_id,
+            nba_date=today,
+            apply=apply,
+            correlation_id=get_correlation_id() or None,
         )
 
-        if not roster:
-            ctx.log.debug(
-                "roster_fetch_failed",
-                user_id=user.user_id,
-                team_id=team.team_id,
+        self._handle_evaluation(ctx, user, team, today, earliest_game_time, effective_prefs, evaluation)
+
+    def _handle_evaluation(
+        self,
+        ctx: PipelineContext,
+        user: User,
+        team: Team,
+        today,
+        earliest_game_time,
+        effective_prefs,
+        evaluation: LineupEvaluation,
+    ) -> None:
+        """Branch on the backend's outcome: email, log, count."""
+        outcome = evaluation.outcome
+        moves, unfilled = evaluation.moves, evaluation.unfilled
+        log_fields = dict(user_id=user.user_id, team_id=team.team_id, outcome=outcome, reason=evaluation.reason)
+
+        if outcome == "planned":
+            result = self.notification_service.send_lineup_alert(
+                user=user,
+                team=team,
+                moves=moves,
+                unfilled=unfilled,
+                first_game_time=earliest_game_time,
+                prefs=effective_prefs,
+            )
+            self._record_email(ctx, user, team, today, "lineup_alert", result, evaluation)
+            ctx.log.info("alert_sent", move_count=len(moves), success=result.success, **log_fields)
+            return
+
+        if outcome == "applied":
+            result = self.notification_service.send_auto_lineup_summary(
+                user=user,
+                team=team,
+                moves=moves,
+                unfilled=unfilled,
+                first_game_time=earliest_game_time,
+                prefs=effective_prefs,
+                verified=evaluation.verified,
+            )
+            self._upsert_log(
+                user, team, today,
+                notification_type="auto_lineup",
+                status="sent" if result.success else "failed",
+                alert_data=self._alert_data(evaluation),
+                resend_message_id=result.message_id,
+                error_message=result.error,
+            )
+            # The lineup was set whether or not the summary email went out.
+            ctx.increment_records()
+            if not result.success:
+                ctx.log.warning("auto_lineup_summary_email_failed", error=result.error, **log_fields)
+            ctx.log.info(
+                "auto_lineup_applied",
+                move_count=len(moves),
+                verified=evaluation.verified,
+                email_success=result.success,
+                **log_fields,
             )
             return
 
-        # Check for lineup issues
-        issues = self.lineup_checker.check_lineup(
-            roster=roster,
-            teams_playing_today=teams_playing,
-            prefs=effective_prefs,
-        )
-
-        if not issues:
-            # No issues - log as skipped so we don't recheck
-            self._create_log(user, team, today, status="skipped")
-            ctx.log.debug(
-                "no_issues",
-                user_id=user.user_id,
-                team_id=team.team_id,
+        if outcome == "noop":
+            self._upsert_log(
+                user, team, today,
+                notification_type="lineup_alert",
+                status="skipped",
+                alert_data=json.dumps({"reason": "nothing_actionable"}),
             )
+            ctx.increment_skipped(1, "nothing_actionable")
+            ctx.log.debug("nothing_actionable", **log_fields)
             return
 
-        # Send notification
-        result = self.notification_service.send_lineup_alert(
-            user=user,
-            team=team,
-            issues=issues,
-            first_game_time=earliest_game_time,
-            prefs=effective_prefs,
+        if outcome in ("rejected", "failed"):
+            reason = evaluation.reason or evaluation.error or outcome
+            extra_lines = [f"Auto-lineup could not apply these moves: {reason}"]
+            if any(marker in reason.lower() for marker in _AUTH_REASON_MARKERS):
+                extra_lines.append("Your ESPN connection may have expired — reconnect it in Settings.")
+            result = self.notification_service.send_lineup_alert(
+                user=user,
+                team=team,
+                moves=moves,
+                unfilled=unfilled,
+                first_game_time=earliest_game_time,
+                prefs=effective_prefs,
+                extra_lines=extra_lines,
+            )
+            self._record_email(ctx, user, team, today, "lineup_alert", result, evaluation)
+            ctx.log.warning("auto_lineup_not_applied", move_count=len(moves), email_success=result.success, **log_fields)
+            return
+
+        # skipped: the backend answered and cannot act today (no credentials,
+        # not the owner, already applied, ...) — a settled answer, so log it as
+        # `skipped` and stop asking. unavailable / anything new: the backend could
+        # not be asked — a `failed` row so the next poll retries.
+        error_message = evaluation.reason or evaluation.error or f"unknown_outcome:{outcome}"
+        self._upsert_log(
+            user, team, today,
+            notification_type="lineup_alert",
+            status="skipped" if outcome == "skipped" else "failed",
+            alert_data=self._alert_data(evaluation),
+            error_message=error_message,
         )
+        if outcome == OUTCOME_UNAVAILABLE:
+            self._unavailable_count += 1
+            ctx.increment_failed(1, "backend_unavailable")
+            ctx.log.warning("backend_unavailable", error=evaluation.error, **log_fields)
+        elif outcome == "skipped":
+            ctx.increment_skipped(1, f"backend_skipped:{evaluation.reason or 'unknown'}")
+            ctx.log.info("backend_skipped", **log_fields)
+        else:
+            ctx.increment_failed(1, "unknown_outcome")
+            ctx.log.warning("unknown_backend_outcome", **log_fields)
 
-        # Log the notification
-        alert_data = json.dumps([
-            {
-                "issue_type": issue.issue_type.value,
-                "player_name": issue.player_name,
-                "player_team": issue.player_team,
-                "current_slot": issue.current_slot,
-                "suggested_action": issue.suggested_action,
-            }
-            for issue in issues
-        ])
-
-        self._create_log(
-            user=user,
-            team=team,
-            today=today,
+    def _record_email(
+        self,
+        ctx: PipelineContext,
+        user: User,
+        team: Team,
+        today,
+        notification_type: str,
+        result,
+        evaluation: LineupEvaluation,
+    ) -> None:
+        """Log an alert email's outcome and count it (a bounced email is a failed record)."""
+        self._upsert_log(
+            user, team, today,
+            notification_type=notification_type,
             status="sent" if result.success else "failed",
-            alert_data=alert_data,
+            alert_data=self._alert_data(evaluation),
             resend_message_id=result.message_id,
             error_message=result.error,
         )
+        if result.success:
+            ctx.increment_records()
+        else:
+            ctx.increment_failed(1, "email_failed")
 
-        ctx.increment_records()
-        ctx.log.info(
-            "alert_sent",
-            user_id=user.user_id,
-            team_id=team.team_id,
-            issue_count=len(issues),
-            success=result.success,
-        )
+    @staticmethod
+    def _alert_data(evaluation: LineupEvaluation) -> str:
+        data = {"moves": evaluation.moves, "unfilled": evaluation.unfilled}
+        if evaluation.outcome not in ("planned", "applied"):
+            data["outcome"] = evaluation.outcome
+        if evaluation.reason:
+            data["reason"] = evaluation.reason
+        if evaluation.verified is not None:
+            data["verified"] = evaluation.verified
+        return json.dumps(data)
+
+    def _alert_if_backend_unavailable(self, ctx: PipelineContext) -> None:
+        """Ops alert when the backend was unreachable for three or more teams this run."""
+        if self._unavailable_count < BACKEND_UNAVAILABLE_ALERT_THRESHOLD:
+            return
+        get_alert_service().notify(AlertEvent(
+            key="lineup_alerts_backend_unavailable",
+            severity="warning",
+            title="Lineup alerts: backend unavailable",
+            body=(
+                f"{self._unavailable_count} team evaluation(s) got no usable answer from the backend "
+                f"this run; those teams were logged as failed and will be retried next poll."
+            ),
+            fields={
+                "pipeline": self.config.name,
+                "run_id": str(ctx.run_id),
+                "unavailable": self._unavailable_count,
+                "backend_url": self.backend_client.base_url,
+            },
+            dedupe=BACKEND_UNAVAILABLE_ALERT_DEDUPE,
+        ))
 
     def _get_effective_prefs(self, global_prefs, team_pref):
         """Merge team override on top of global prefs. Team wins where not None."""
@@ -272,7 +407,7 @@ class LineupAlertsPipeline(BasePipeline):
         for field in [
             "lineup_alerts_enabled", "alert_benched_starters",
             "alert_active_non_playing", "alert_injured_active",
-            "alert_minutes_before", "email",
+            "alert_minutes_before", "auto_lineup_enabled", "email",
         ]:
             team_val = getattr(team_pref, field, None)
             setattr(ep, field, team_val if team_val is not None else getattr(global_prefs, field))
@@ -306,6 +441,7 @@ class LineupAlertsPipeline(BasePipeline):
         Opt-in model: only processes users who have an explicit
         NotificationPreference row with lineup_alerts_enabled=True.
         Users without a row are not processed until they opt in via the UI.
+        Auto-lineup is a sub-feature of alerts, so the same list covers it.
 
         Returns list of (User, NotificationPreference) tuples.
         """
@@ -322,25 +458,63 @@ class LineupAlertsPipeline(BasePipeline):
 
         return result
 
-    def _create_log(
+    # ---- notification_log ---------------------------------------------------------
+
+    @staticmethod
+    def _already_settled_today(user: User, team: Team, today) -> bool:
+        """True when a sent/skipped row of either notification type exists for today."""
+        return (
+            NotificationLog.select()
+            .where(
+                (NotificationLog.user == user.user_id)
+                & (NotificationLog.team_id == team.team_id)
+                & (NotificationLog.notification_type.in_(list(NOTIFICATION_TYPES)))
+                & (NotificationLog.notification_date == today)
+                & (NotificationLog.status.in_(list(SETTLED_STATUSES)))
+            )
+            .exists()
+        )
+
+    def _upsert_log(
         self,
         user: User,
         team: Team,
         today,
-        status: str,
+        notification_type: str = "lineup_alert",
+        status: str = "pending",
         alert_data: str | None = None,
         resend_message_id: str | None = None,
         error_message: str | None = None,
-    ) -> None:
-        """Create a NotificationLog entry."""
-        NotificationLog.create(
+    ) -> NotificationLog:
+        """Write today's row for (user, team, type): update the existing one or create it.
+
+        The unique index on (user, team_id, notification_type, notification_date)
+        means a retry after a `failed` row must update, never insert.
+        """
+        sent_at = datetime.utcnow() if status == "sent" else None
+        existing = NotificationLog.get_or_none(
+            (NotificationLog.user == user.user_id)
+            & (NotificationLog.team_id == team.team_id)
+            & (NotificationLog.notification_type == notification_type)
+            & (NotificationLog.notification_date == today)
+        )
+        if existing is not None:
+            existing.status = status
+            existing.alert_data = alert_data
+            existing.resend_message_id = resend_message_id
+            existing.error_message = error_message
+            existing.sent_at = sent_at
+            existing.save()
+            return existing
+
+        return NotificationLog.create(
             user=user.user_id,
             team_id=team.team_id,
-            notification_type="lineup_alert",
+            notification_type=notification_type,
             notification_date=today,
             alert_data=alert_data,
             status=status,
             resend_message_id=resend_message_id,
             error_message=error_message,
-            sent_at=datetime.utcnow() if status == "sent" else None,
+            sent_at=sent_at,
         )

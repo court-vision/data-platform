@@ -180,6 +180,8 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
+| `BACKEND_INTERNAL_URL` | No | — | Backend base URL for the lineup-alerts pipeline's `POST /v1/internal/jobs/lineup/evaluate` (authenticated with `PIPELINE_API_TOKEN`). Unset → the pipeline logs `backend_not_configured` and evaluates nothing. Must be `http://*.railway.internal` on Railway: prod `http://api.railway.internal:8080`, staging `http://api-staging.railway.internal:8080` |
+| `BACKEND_TIMEOUT_SECONDS` | No | `45` | Read timeout per evaluate call (connect timeout is fixed at 5 s; no retry) |
 | `ALERT_WEBHOOK_URL` | No | — | Discord (or Slack) incoming webhook for ops alerts (`#cv-alerts`). Unset → alerts are a no-op; set on **production only**. See [Alerting](#alerting) |
 | `ALERT_WEBHOOK_FORMAT` | No | `discord` | `discord` (embeds) or `slack` (`{"text": ...}`) |
 | `ALERTS_ENABLED` | No | `true` | `false` silences a configured webhook |
@@ -443,6 +445,7 @@ The `/v1/internal/pipelines/all` endpoint returns immediately with a `job_id`. P
 | `post_game_incomplete:<nba_date>` | critical | The post-game window closed with one or more pipelines having no successful run for that NBA date. Fires once per night — latched on a `window_closed` row in `nba.pipeline_batches`, so it survives the 03:00 CST deploy landing mid-window | 12 h | `api/v1/pipelines.py` `_sweep_closed_post_game_window` |
 | `deploy_dispatch_failed` | critical | Any GitHub `repository_dispatch` in `POST /v1/internal/pipelines/deploy` raised or answered non-2xx; the endpoint answers 502 so cron-runner records a failure (which in turn feeds the `deploy` streak, threshold 1) | 12 h | `api/v1/pipelines.py` |
 | `quality_critical:<check>` | critical | A `critical`-severity data-quality check failed or errored in a run (warnings never alert here; the nightly `quality-check` workflow reports those) | 24 h | `DataQualityService.run_checks` |
+| `lineup_alerts_backend_unavailable` | warning | Three or more team evaluations in one `lineup_alerts` run got no usable answer from the backend (`services/backend_client.py`: connection error, timeout, non-200, malformed body). Those teams are logged `failed` and retried next poll | 6 h | `LineupAlertsPipeline.execute` |
 | `health_degraded` | critical | `GET /health` answered 503 — per process, so a database outage can produce one embed from the private process and one from the public one | 30 min | `core/health.py` |
 
 ### Partial success
@@ -452,7 +455,7 @@ The `/v1/internal/pipelines/all` endpoint returns immediately with a `job_id`. P
 | Pipeline | `increment_failed` | `increment_skipped` |
 |---|---|---|
 | `daily_matchup_scores` | a team's ESPN/Yahoo fetch or upsert raised | team returned no matchup data |
-| `lineup_alerts` | a team's alert processing raised | — |
+| `lineup_alerts` | a team's alert processing raised; the backend evaluate call was `unavailable`; an alert email bounced | the backend answered `noop` (nothing actionable) or `skipped` (e.g. `can_write:no_credentials`, `date_mismatch`) |
 | `playoff_bracket` | a series upsert raised | — |
 | `game_start_times` | a game with an unparseable `gameDateTimeEst`; the CDN → static-file fallback counts as one failed fetch | preseason / placeholder / non-NBA games |
 | `live_game_stats` | a tipped-off game with no live box score | games not started yet |
