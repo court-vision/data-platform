@@ -46,6 +46,7 @@ MIRRORED = [
     "core/errors.py",                  # shim over cv_core
     "core/logging.py",                 # shim over cv_core
     "core/nba_calendar.py",            # shim over cv_core
+    "core/pipeline_auth.py",           # bearer guard for the pipeline-token routes on both sides
     "core/resilience.py",              # shim over cv_core
     "core/season.py",                  # shim over cv_core
     "db/models/api_keys.py",
@@ -75,6 +76,7 @@ MIRRORED = [
     "schemas/__init__.py",
     "services/__init__.py",
     "services/lineup_check_service.py",
+    "services/notification_service.py",  # lineup alert + auto-lineup summary emails
     "utils/__init__.py",
     "utils/constants.py",
 ]
@@ -110,7 +112,6 @@ KNOWN_DIVERGED = {
     "schemas/common.py": "each repo keeps its own envelope extras",
     "schemas/pipeline.py": "dp adds partial-success fields",
     "services/credential_service.py": "backend is a superset (OAuth read path)",
-    "services/notification_service.py": "two-line drift",
     "services/schedule_service.py": "backend adds the 2 AM fantasy-day rule",
     "utils/espn_helpers.py": "backend adds normalize_nba_abbrev",
     "utils/patches.py": "dp adds proxy support",

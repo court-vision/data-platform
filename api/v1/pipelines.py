@@ -1082,9 +1082,10 @@ async def trigger_lineup_alerts(
     """
     Trigger the lineup alerts pipeline.
 
-    Checks all eligible users' lineups and sends notifications if issues
-    are found. Self-gates based on game start times - if no games are
-    within the notification window, returns immediately.
+    Asks the backend for each opted-in team's fill plan and emails it (or,
+    for auto-lineup users, emails what the backend applied to ESPN).
+    Self-gates based on game start times - if no games are within the
+    notification window, returns immediately.
 
     Safe to call frequently (every 15 min); deduplication prevents
     repeat notifications.
