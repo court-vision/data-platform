@@ -212,7 +212,7 @@ def test_applied_sends_summary_logs_auto_lineup_and_counts_a_record(pipeline):
 
 
 @pytest.mark.unit
-def test_applied_counts_the_record_even_when_the_summary_email_fails(pipeline):
+def test_applied_settles_the_day_even_when_the_summary_email_fails(pipeline):
     user, pref = make_user(auto_lineup_enabled=True)
     team = make_team(user)
     pipeline.backend_client = FakeBackendClient(evaluation("applied", verified=False))
@@ -221,9 +221,29 @@ def test_applied_counts_the_record_even_when_the_summary_email_fails(pipeline):
     ctx = process(pipeline, user, team, pref)
 
     (row,) = logs(team)
-    assert (row.notification_type, row.status, row.error_message) == ("auto_lineup", "failed", "resend down")
+    # `skipped`, not `failed`: the lineup is already on ESPN, so a bounced summary must not
+    # leave the day open for another apply=True poll. sent_at stays null, the error is kept.
+    assert (row.notification_type, row.status, row.error_message) == ("auto_lineup", "skipped", "resend down")
+    assert row.sent_at is None
+    assert pipeline._already_settled_today(user, team, TODAY) is True
     assert ctx.records_processed == 1  # the lineup was set regardless of the email
     assert pipeline.notification_service.summaries[0]["verified"] is False
+
+
+@pytest.mark.unit
+def test_a_bounced_summary_does_not_re_apply_on_the_next_poll(pipeline):
+    """The regression: a second poll must not ask the backend to apply the moves again."""
+    user, pref = make_user(auto_lineup_enabled=True)
+    team = make_team(user)
+    pipeline.backend_client = FakeBackendClient(evaluation("applied", verified=False))
+    pipeline.notification_service = FakeNotificationService(succeed=False)
+
+    process(pipeline, user, team, pref)
+    calls_after_first = len(pipeline.backend_client.calls)
+    process(pipeline, user, team, pref)
+
+    assert len(pipeline.backend_client.calls) == calls_after_first
+    assert len(logs(team)) == 1
 
 
 @pytest.mark.unit

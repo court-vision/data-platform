@@ -266,15 +266,18 @@ class LineupAlertsPipeline(BasePipeline):
                 prefs=effective_prefs,
                 verified=evaluation.verified,
             )
+            # The lineup was set whether or not the summary email went out, so today settles
+            # either way: a `failed` row would fall outside SETTLED_STATUSES and the next poll
+            # would evaluate with apply=True again. `skipped` leaves sent_at null and keeps the
+            # email error on the row.
             self._upsert_log(
                 user, team, today,
                 notification_type="auto_lineup",
-                status="sent" if result.success else "failed",
+                status="sent" if result.success else "skipped",
                 alert_data=self._alert_data(evaluation),
                 resend_message_id=result.message_id,
                 error_message=result.error,
             )
-            # The lineup was set whether or not the summary email went out.
             ctx.increment_records()
             if not result.success:
                 ctx.log.warning("auto_lineup_summary_email_failed", error=result.error, **log_fields)
