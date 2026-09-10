@@ -57,6 +57,9 @@ def test_parse_reads_rank_adp_and_projected_split():
     row = rows[0]
     assert row["espn_id"] == 3112335 and row["normalized_name"] == "nikola jokic"
     assert row["overall_rank"] == 1 and row["auction_value"] == 65
+    # ESPN's two boards disagree even at the very top: Jokic is the points #1
+    # and the category #2 (Wembanyama is the category #1).
+    assert row["roto_rank"] == 2 and row["roto_auction_value"] == 65
     assert row["adp"] == 1.79 and row["auction_value_avg"] == 68.59
     assert row["projected_total"] == 5067.0 and row["projected_stats"] == {"0": 28.1, "6": 12.6, "3": 10.1}
 
@@ -69,6 +72,15 @@ def test_parse_without_projected_split_is_market_only():
     assert row["projected_total"] is None and row["projected_stats"] is None
 
 
+def test_parse_reads_each_rank_type_independently():
+    """A player ESPN ranks on only one board keeps the other side null rather
+    than borrowing the rank it does have — the two are separate opinions."""
+    roto_only = _espn_player(draftRanksByRankType={"ROTO": {"rank": 43, "auctionValue": 14}})
+    row = parse_draft_market_players([roto_only], projected_split_id="102027")[0]
+    assert row["overall_rank"] is None and row["auction_value"] is None
+    assert row["roto_rank"] == 43 and row["roto_auction_value"] == 14
+
+
 def test_parse_handles_missing_blocks_and_drops_anonymous_entries():
     bare = {"id": 99, "fullName": "Deep Bencher", "stats": []}
     rows = parse_draft_market_players(
@@ -78,6 +90,7 @@ def test_parse_handles_missing_blocks_and_drops_anonymous_entries():
     assert len(rows) == 1
     row = rows[0]
     assert row["espn_id"] == 99
+    assert row["roto_rank"] is None and row["roto_auction_value"] is None
     assert row["overall_rank"] is None and row["adp"] is None and row["projected_stats"] is None
     assert row["default_position_id"] is None and row["eligible_slot_ids"] is None
     assert row["injury_status"] is None
