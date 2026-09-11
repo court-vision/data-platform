@@ -78,7 +78,7 @@ MIRRORED = [
     "services/lineup_check_service.py",
     "services/notification_service.py",  # lineup alert + auto-lineup summary emails
     "utils/__init__.py",
-    "utils/constants.py",
+    # utils/constants.py: backend-only since 2026-09-11 — nothing here imported it.
 ]
 
 # (backend path, data-platform path): byte-identical across different paths.
