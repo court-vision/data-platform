@@ -292,17 +292,39 @@ def test_rejected_emails_the_plan_with_the_reason_line(pipeline):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("message", [
+    "ESPN rejected this league's credentials — check espn_s2, SWID and the season in Manage Teams",
+    "This ESPN league is private and no credentials were sent — add espn_s2 and SWID in Manage Teams",
+])
+def test_a_provider_auth_rejection_shows_the_backends_message_and_no_hint(pipeline, message):
+    """The backend's message names the fault; a hint of our own would contradict it."""
+    user, pref = make_user(auto_lineup_enabled=True)
+    team = make_team(user)
+    reason = f"PROVIDER_AUTH_EXPIRED: {message}"
+    pipeline.backend_client = FakeBackendClient(evaluation("rejected", reason=reason))
+
+    process(pipeline, user, team, pref)
+
+    assert pipeline.notification_service.alerts[0]["extra_lines"] == [
+        f"Auto-lineup could not apply these moves: {message}"
+    ]
+    (row,) = logs(team)
+    assert json.loads(row.alert_data)["reason"] == reason  # the log row keeps the code
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("reason", ["PROVIDER_AUTH_EXPIRED", "espn cookies expired", "Auth rejected by ESPN"])
-def test_auth_failures_add_the_reconnect_hint(pipeline, reason):
+def test_other_auth_sounding_reasons_add_the_credentials_hint(pipeline, reason):
     user, pref = make_user(auto_lineup_enabled=True)
     team = make_team(user)
     pipeline.backend_client = FakeBackendClient(evaluation("failed", reason=reason))
 
     process(pipeline, user, team, pref)
 
-    extra = pipeline.notification_service.alerts[0]["extra_lines"]
-    assert extra[0] == f"Auto-lineup could not apply these moves: {reason}"
-    assert extra[1] == "Your ESPN connection may have expired — reconnect it in Settings."
+    assert pipeline.notification_service.alerts[0]["extra_lines"] == [
+        f"Auto-lineup could not apply these moves: {reason}",
+        "ESPN may no longer accept this league's credentials — check espn_s2, SWID and the season in Manage Teams.",
+    ]
 
 
 @pytest.mark.unit

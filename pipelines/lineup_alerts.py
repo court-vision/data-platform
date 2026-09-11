@@ -49,8 +49,13 @@ NOTIFICATION_TYPES = ("lineup_alert", "auto_lineup")
 # Log statuses that mean "done for today" — anything else is retried next poll.
 SETTLED_STATUSES = ("sent", "skipped")
 
-# A rejected/failed reason that mentions one of these gets the reconnect hint.
-_AUTH_REASON_MARKERS = ("auth", "expired", "provider_auth")
+# The backend reports credentials ESPN refused as this code plus a message that
+# already says what to check (espn_s2, SWID, the season) and where. The email
+# shows that message without the code and adds no hint of its own.
+_PROVIDER_AUTH_PREFIX = "PROVIDER_AUTH_EXPIRED: "
+# Any other rejected/failed reason that mentions one of these gets the hint.
+_AUTH_REASON_MARKERS = ("auth", "expired")
+_AUTH_HINT = "ESPN may no longer accept this league's credentials — check espn_s2, SWID and the season in Manage Teams."
 
 
 class LineupAlertsPipeline(BasePipeline):
@@ -303,9 +308,11 @@ class LineupAlertsPipeline(BasePipeline):
 
         if outcome in ("rejected", "failed"):
             reason = evaluation.reason or evaluation.error or outcome
-            extra_lines = [f"Auto-lineup could not apply these moves: {reason}"]
-            if any(marker in reason.lower() for marker in _AUTH_REASON_MARKERS):
-                extra_lines.append("Your ESPN connection may have expired — reconnect it in Settings.")
+            typed_auth = reason.startswith(_PROVIDER_AUTH_PREFIX)
+            shown = reason.removeprefix(_PROVIDER_AUTH_PREFIX)
+            extra_lines = [f"Auto-lineup could not apply these moves: {shown}"]
+            if not typed_auth and any(marker in reason.lower() for marker in _AUTH_REASON_MARKERS):
+                extra_lines.append(_AUTH_HINT)
             result = self.notification_service.send_lineup_alert(
                 user=user,
                 team=team,
