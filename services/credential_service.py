@@ -25,6 +25,7 @@ needed (provider calls), never on the path that builds an API response.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Optional
 
 from core import crypto
@@ -42,6 +43,8 @@ SECRET_FIELDS: dict[str, tuple[str, ...]] = {
 
 ALL_SECRET_FIELDS: frozenset[str] = frozenset(f for fields in SECRET_FIELDS.values() for f in fields)
 
+_SWID_NOISE = re.compile(r"[\s{}]")
+
 
 def _provider_of(payload: dict) -> str:
     provider = payload.get("provider", "espn")
@@ -56,6 +59,17 @@ def split_secrets(payload: dict) -> tuple[dict, dict]:
     return public, secrets
 
 
+def normalize_swid(value: Optional[str]) -> str:
+    """ESPN's SWID in its canonical form: an upper-case GUID in braces.
+
+    The backend's credential_service.normalize_swid and migration 0024 apply the
+    same rule. The connection row is keyed by it, so every spelling of one
+    account must be one string. Empty stays empty.
+    """
+    guid = _SWID_NOISE.sub("", value or "").upper()
+    return "{" + guid + "}" if guid else ""
+
+
 def _external_account_id(provider: str, secrets: dict) -> str:
     """The provider-side account a credential belongs to.
 
@@ -64,8 +78,16 @@ def _external_account_id(provider: str, secrets: dict) -> str:
     user's Yahoo credentials share one row.
     """
     if provider == "espn":
-        return (secrets.get("swid") or "")[:128]
+        return normalize_swid(secrets.get("swid"))[:128]
     return ""
+
+
+def _holds(connection, secrets: dict) -> bool:
+    """Whether `connection` already stores exactly `secrets`."""
+    try:
+        return json.loads(crypto.decrypt(connection.secret_ciphertext, connection.key_version)) == secrets
+    except crypto.CredentialDecryptionError:
+        return False
 
 
 def persist(user_id: int, team, payload: dict) -> Optional[int]:
@@ -74,6 +96,9 @@ def persist(user_id: int, team, payload: dict) -> Optional[int]:
     Returns the connection id, or None when the store is disabled. `team` is
     updated in place and saved: `league_info` loses its secrets and
     `provider_connection_id` gains the link.
+
+    Saving the secrets a row already holds changes nothing. New ones clear its
+    verdicts (`verified_at` / `auth_failed_at`), which were about the old ones.
     """
     if not crypto.is_enabled():
         return None
@@ -85,25 +110,32 @@ def persist(user_id: int, team, payload: dict) -> Optional[int]:
     from db.models.provider_connections import ProviderConnection
 
     provider = _provider_of(payload)
+    if provider == "espn" and secrets.get("swid"):
+        secrets = {**secrets, "swid": normalize_swid(secrets["swid"])}
     account = _external_account_id(provider, secrets)
-    ciphertext, key_version = crypto.encrypt(json.dumps(secrets))
-    expires_at = secrets.get("yahoo_token_expiry") or None
 
     connection = ProviderConnection.get_or_none(
         (ProviderConnection.user == user_id)
         & (ProviderConnection.provider == provider)
         & (ProviderConnection.external_account_id == account)
     )
-    if connection is None:
-        connection = ProviderConnection.create(
-            user=user_id, provider=provider, external_account_id=account,
-            secret_ciphertext=ciphertext, key_version=key_version, expires_at=expires_at,
-        )
-    else:
-        connection.secret_ciphertext = ciphertext
-        connection.key_version = key_version
-        connection.expires_at = expires_at
-        connection.save()
+    if connection is None or not _holds(connection, secrets):
+        ciphertext, key_version = crypto.encrypt(json.dumps(secrets))
+        fields = {
+            "secret_ciphertext": ciphertext,
+            "key_version": key_version,
+            "expires_at": secrets.get("yahoo_token_expiry") or None,
+            "verified_at": None,
+            "auth_failed_at": None,
+        }
+        if connection is None:
+            connection = ProviderConnection.create(
+                user=user_id, provider=provider, external_account_id=account, **fields
+            )
+        else:
+            for name, value in fields.items():
+                setattr(connection, name, value)
+            connection.save()
 
     team.provider_connection_id = connection.id
     team.league_info = json.dumps(public)
