@@ -49,9 +49,12 @@ def _slot_ids(slots) -> list[int] | None:
 def parse_draft_market_players(players: list[dict], projected_split_id: str) -> list[dict]:
     """Pure parse of kona_player_info entries into draft-market rows.
 
-    Keeps the fields the preseason-market pipeline writes: editorial rank and
-    auction value (draftRanksByRankType.STANDARD), the crowd averages from real
-    ESPN drafts (ownership.averageDraftPosition / auctionValueAverage), the
+    Keeps the fields the preseason-market pipeline writes: both editorial ranks
+    and auction values (draftRanksByRankType.STANDARD, the points-league board,
+    and .ROTO, the category-league one — genuinely different opinions, not a
+    rescaling: mean |delta| of 28 places over ESPN's own top 150), the crowd
+    averages from real ESPN drafts (ownership.averageDraftPosition /
+    auctionValueAverage), the
     position fields the draft room counts caps and eligibility from
     (defaultPositionId / eligibleSlots / injuryStatus), and the projected stat
     split for `projected_split_id` (e.g. "102027") when ESPN has published it.
@@ -66,7 +69,9 @@ def parse_draft_market_players(players: list[dict], projected_split_id: str) -> 
     for player in players:
         if not player or player.get("id") is None or not player.get("fullName"):
             continue
-        standard = (player.get("draftRanksByRankType") or {}).get("STANDARD") or {}
+        ranks = player.get("draftRanksByRankType") or {}
+        standard = ranks.get("STANDARD") or {}
+        roto = ranks.get("ROTO") or {}
         ownership = player.get("ownership") or {}
         projected = next(
             (s for s in player.get("stats", []) if s.get("id") == projected_split_id), None
@@ -77,6 +82,8 @@ def parse_draft_market_players(players: list[dict], projected_split_id: str) -> 
             "normalized_name": normalize_name(player["fullName"]),
             "overall_rank": standard.get("rank"),
             "auction_value": standard.get("auctionValue"),
+            "roto_rank": roto.get("rank"),
+            "roto_auction_value": roto.get("auctionValue"),
             "adp": ownership.get("averageDraftPosition"),
             "auction_value_avg": ownership.get("auctionValueAverage"),
             "default_position_id": _int_or_none(player.get("defaultPositionId")),

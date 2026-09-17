@@ -1,7 +1,8 @@
 """
 Preseason Market Pipeline
 
-Daily draft-prep snapshot: ESPN editorial draft ranks and auction values plus
+Daily draft-prep snapshot: ESPN's two editorial draft rankings — STANDARD for
+points leagues, ROTO for category leagues — with their auction values, plus
 the crowd averages from real ESPN drafts (ADP, average auction price) into
 nba.draft_market, and — once ESPN publishes them — projected per-game stat
 lines into nba.player_projections. The market row also carries the position
@@ -29,7 +30,8 @@ from utils.stat_vocab import ESPN_ID_TO_KEY
 # position fields ride along on that row rather than gating it: a player ESPN
 # has no draft opinion about is not draft-market data just because he has a
 # primary position.
-_MARKET_FIELDS = ("overall_rank", "auction_value", "adp", "auction_value_avg")
+_MARKET_FIELDS = ("overall_rank", "auction_value", "roto_rank", "roto_auction_value",
+                  "adp", "auction_value_avg")
 
 
 def projection_line(average_stats: dict) -> dict:
@@ -129,6 +131,8 @@ class PreseasonMarketPipeline(BasePipeline):
                         as_of_date=as_of_date,
                         overall_rank=row["overall_rank"],
                         auction_value=row["auction_value"],
+                        roto_rank=row["roto_rank"],
+                        roto_auction_value=row["roto_auction_value"],
                         adp=row["adp"],
                         auction_value_avg=row["auction_value_avg"],
                         default_position_id=row["default_position_id"],
