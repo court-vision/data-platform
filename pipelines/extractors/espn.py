@@ -96,6 +96,28 @@ def parse_draft_market_players(players: list[dict], projected_split_id: str) -> 
     return rows
 
 
+def rank_type_provenance(players: list[dict]) -> dict[str, int]:
+    """Count every distinct (rank_type, published, rankSourceId) triple in the payload.
+
+    Provenance only: we treat STANDARD as ESPN's published points board and
+    ROTO as the category board, on the strength of the sub-fields ESPN attaches
+    to each rank entry (`published`, `rankSourceId`) — which nothing else reads.
+    No captured real payload exists, so if either sub-field ever changes shape
+    (or a new rank type appears) we want to see it in the run log.
+    """
+    counts: dict[str, int] = {}
+    for player in players:
+        ranks = (player or {}).get("draftRanksByRankType") or {}
+        for rank_type, entry in ranks.items():
+            entry = entry or {}
+            key = (
+                f"{rank_type} published={entry.get('published')} "
+                f"source={entry.get('rankSourceId')}"
+            )
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 class ESPNExtractor(BaseExtractor):
     """
     Extractor for ESPN Fantasy Basketball API.
@@ -274,6 +296,9 @@ class ESPNExtractor(BaseExtractor):
             raise NetworkError("ESPN connection failed")
 
         players = [x.get("player", x) for x in data.get("players", [])]
+        self.log.info(
+            "draft_rank_types_seen", counts=rank_type_provenance(players), players=len(players)
+        )
         rows = parse_draft_market_players(players, projected_split_id=f"10{year}")
 
         self.log.info("request_complete", player_count=len(rows))
