@@ -65,9 +65,12 @@ app = FastAPI(
     description="Pipeline monitoring dashboard",
     version="1.0.0",
     lifespan=lifespan,
-    # No API docs on the public interface
+    # No API docs on the public interface. openapi_url too: /openapi.json alone
+    # lists every trigger route. app.openapi() still builds the schema offline
+    # (scripts/export_openapi.py).
     docs_url=None,
     redoc_url=None,
+    openapi_url=None,
 )
 
 # Middlewares (order matters — first added = outermost)

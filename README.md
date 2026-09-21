@@ -219,7 +219,7 @@ source .venv/bin/activate
 
 This starts two Uvicorn processes:
 - **Private** (`::8001`) — full app with all routes (pipeline triggers, live schedule, dashboard, quality)
-- **Public** (`0.0.0.0:8080`) — dashboard and pipeline triggers only, no live route, no API docs
+- **Public** (`0.0.0.0:8080`) — dashboard and pipeline triggers only, no live route, no API docs and no `/openapi.json`. Its schema comes from `python scripts/export_openapi.py` (offline, no database), which is what the dashboard's types are generated from
 
 ### Running Tests
 
