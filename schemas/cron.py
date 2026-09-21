@@ -9,6 +9,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from schemas.common import ApiModel
+
 
 class CronJobRunCreate(BaseModel):
     """Payload sent by the cron-runner after each job execution."""
@@ -24,7 +26,7 @@ class CronJobRunCreate(BaseModel):
     response_snippet: Optional[str] = None
 
 
-class CronJobRunEntry(BaseModel):
+class CronJobRunEntry(ApiModel):
     """A single cron job run record returned by the API."""
 
     id: str

@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from enum import Enum
 
-from .common import ApiStatus
+from .common import ApiModel, ApiStatus
 
 
 class PipelineResult(BaseModel):
@@ -55,7 +55,7 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
-class PipelineJobInfo(BaseModel):
+class PipelineJobInfo(ApiModel):
     """Summary info for a pipeline job."""
 
     job_id: str
