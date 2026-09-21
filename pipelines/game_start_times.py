@@ -54,6 +54,8 @@ class GameStartTimesPipeline(BasePipeline):
         description="Populates game start times from the NBA schedule feed (cdn.nba.com, static fallback)",
         target_table="nba.games",
         category=PipelineCategory.SCHEDULED,
+        trigger_slug="game-start-times",
+        cron_job="schedule-sync",
     )
 
     def execute(self, ctx: PipelineContext) -> None:

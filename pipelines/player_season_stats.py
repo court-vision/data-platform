@@ -39,6 +39,7 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         description="Updates season totals for players who played yesterday",
         target_table="nba.player_season_stats",
         category=PipelineCategory.POST_GAME,
+        trigger_slug="cumulative-player-stats",
         depends_on=("player_game_stats",),
     )
 

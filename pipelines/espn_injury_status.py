@@ -56,6 +56,7 @@ class ESPNInjuryStatusPipeline(BasePipeline):
         description="Syncs player injury/availability status from ESPN Fantasy API",
         target_table="nba.player_injuries",
         category=PipelineCategory.PRE_GAME,
+        trigger_slug="espn-injury-status",
         pre_game_window_minutes=120,
     )
 

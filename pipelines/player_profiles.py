@@ -37,6 +37,7 @@ class PlayerProfilesPipeline(BasePipeline):
         description="Fetches player biographical data (height, position, draft info)",
         target_table="nba.player_profiles",
         category=PipelineCategory.SCHEDULED,
+        trigger_slug="player-profiles",
         timeout_seconds=120,
     )
 

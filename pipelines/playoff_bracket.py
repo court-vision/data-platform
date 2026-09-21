@@ -32,6 +32,8 @@ class PlayoffBracketPipeline(BasePipeline):
         description="Fetches NBA playoff series standings from NBA Stats API",
         target_table="nba.playoff_series",
         category=PipelineCategory.SCHEDULED,
+        trigger_slug="playoffs",
+        cron_job="playoffs",
     )
 
     def __init__(self):

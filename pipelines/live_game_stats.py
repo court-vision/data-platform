@@ -36,6 +36,7 @@ class LiveGameStatsPipeline(BasePipeline):
         description="Fetches in-progress game box scores from NBA API live endpoints",
         target_table="nba.live_player_stats",
         category=PipelineCategory.LIVE,
+        trigger_slug="live-stats",
     )
 
     def __init__(self):

@@ -73,6 +73,8 @@ class PreseasonMarketPipeline(BasePipeline):
         description="Snapshots ESPN draft ranks/ADP and preseason stat projections",
         target_table="nba.draft_market",
         category=PipelineCategory.SCHEDULED,
+        trigger_slug="preseason-market",
+        cron_job="preseason-market",
     )
 
     def __init__(self):

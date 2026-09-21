@@ -40,6 +40,7 @@ class PlayerRollingStatsPipeline(BasePipeline):
         description="Materializes L7/L14/L30 rolling per-game averages from player_game_stats",
         target_table="nba.player_rolling_stats",
         category=PipelineCategory.POST_GAME,
+        trigger_slug="player-rolling-stats",
         depends_on=("player_game_stats",),
     )
 

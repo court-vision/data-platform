@@ -34,6 +34,7 @@ class PlayerAdvancedStatsPipeline(BasePipeline):
         description="Fetches advanced player stats (efficiency, usage, impact)",
         target_table="nba.player_advanced_stats",
         category=PipelineCategory.POST_GAME,
+        trigger_slug="player-advanced-stats",
     )
 
     def __init__(self):

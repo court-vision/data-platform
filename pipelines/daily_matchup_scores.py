@@ -199,6 +199,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
         # espn_gated=True tells the post-game endpoint to hold this pipeline until
         # latestScoringPeriod has advanced, with a 2:30 AM ET time fallback.
         category=PipelineCategory.POST_GAME,
+        trigger_slug="daily-matchup-scores",
         espn_gated=True,
         # ESPN publishes updated matchup scores (totalPoints, lineup slots) at
         # ~2 AM CST nightly. Gate execution until then to avoid writing stale

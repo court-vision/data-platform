@@ -26,6 +26,7 @@ class PlayerOwnershipPipeline(BasePipeline):
         description="Fetches ESPN fantasy ownership percentages for all players",
         target_table="nba.player_ownership",
         category=PipelineCategory.POST_GAME,
+        trigger_slug="player-ownership",
     )
 
     def __init__(self):

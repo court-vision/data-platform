@@ -80,6 +80,7 @@ class LineupAlertsPipeline(BasePipeline):
         ),
         target_table="usr.notification_log",
         category=PipelineCategory.PRE_GAME,
+        trigger_slug="lineup-alerts",
         skip_batch_dedup=True,
     )
 
