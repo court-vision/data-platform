@@ -1,0 +1,2948 @@
+{
+  "components": {
+    "schemas": {
+      "AllPipelinesResponse": {
+        "description": "Response for triggering all pipelines",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/PipelineResult"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message"
+        ],
+        "title": "AllPipelinesResponse",
+        "type": "object"
+      },
+      "ApiStatus": {
+        "description": "Standard API response statuses",
+        "enum": [
+          "success",
+          "error",
+          "skipped",
+          "bad_request",
+          "validation_error",
+          "authentication_error",
+          "authorization_error",
+          "not_found",
+          "conflict",
+          "rate_limited",
+          "server_error"
+        ],
+        "title": "ApiStatus",
+        "type": "string"
+      },
+      "CronJobRunEntry": {
+        "description": "A single cron job run record returned by the API.",
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "duration_seconds": {
+            "title": "Duration Seconds",
+            "type": "number"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "job_name": {
+            "title": "Job Name",
+            "type": "string"
+          },
+          "response_snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Snippet"
+          },
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "triggered_at": {
+            "format": "date-time",
+            "title": "Triggered At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "job_name",
+          "triggered_at",
+          "completed_at",
+          "duration_ms",
+          "duration_seconds",
+          "result",
+          "http_status",
+          "attempts",
+          "error_message",
+          "response_snippet"
+        ],
+        "title": "CronJobRunEntry",
+        "type": "object"
+      },
+      "DashboardStatusData": {
+        "description": "Data payload for the dashboard status endpoint.",
+        "properties": {
+          "cron_job_runs": {
+            "items": {
+              "$ref": "#/components/schemas/CronJobRunEntry"
+            },
+            "title": "Cron Job Runs",
+            "type": "array"
+          },
+          "pipelines": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineHealthEntry"
+            },
+            "title": "Pipelines",
+            "type": "array"
+          },
+          "quality_failed_checks": {
+            "items": {
+              "$ref": "#/components/schemas/QualityCheckEntry"
+            },
+            "title": "Quality Failed Checks",
+            "type": "array"
+          },
+          "quality_latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualityRunEntry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recent_jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineJobInfo"
+            },
+            "title": "Recent Jobs",
+            "type": "array"
+          },
+          "recent_quality_runs": {
+            "items": {
+              "$ref": "#/components/schemas/QualityRunEntry"
+            },
+            "title": "Recent Quality Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pipelines",
+          "recent_jobs",
+          "quality_latest",
+          "recent_quality_runs",
+          "quality_failed_checks",
+          "cron_job_runs"
+        ],
+        "title": "DashboardStatusData",
+        "type": "object"
+      },
+      "DashboardStatusResponse": {
+        "description": "Response for GET /v1/dashboard/status.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DashboardStatusData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "DashboardStatusResponse",
+        "type": "object"
+      },
+      "DataQualityCheckResult": {
+        "properties": {
+          "check_name": {
+            "title": "Check Name",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "failures": {
+            "default": 0,
+            "title": "Failures",
+            "type": "integer"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_name",
+          "status",
+          "severity"
+        ],
+        "title": "DataQualityCheckResult",
+        "type": "object"
+      },
+      "DataQualityRunDetail": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/DataQualityCheckResult"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "failed_checks": {
+            "default": 0,
+            "title": "Failed Checks",
+            "type": "integer"
+          },
+          "passed_checks": {
+            "default": 0,
+            "title": "Passed Checks",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_checks": {
+            "default": 0,
+            "title": "Total Checks",
+            "type": "integer"
+          },
+          "triggered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggered By"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "started_at"
+        ],
+        "title": "DataQualityRunDetail",
+        "type": "object"
+      },
+      "DataQualityRunInfo": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "failed_checks": {
+            "default": 0,
+            "title": "Failed Checks",
+            "type": "integer"
+          },
+          "passed_checks": {
+            "default": 0,
+            "title": "Passed Checks",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_checks": {
+            "default": 0,
+            "title": "Total Checks",
+            "type": "integer"
+          },
+          "triggered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggered By"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "started_at"
+        ],
+        "title": "DataQualityRunInfo",
+        "type": "object"
+      },
+      "DataQualityRunListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DataQualityRunInfo"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "DataQualityRunListResponse",
+        "type": "object"
+      },
+      "DataQualityRunResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DataQualityRunDetail"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "DataQualityRunResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JobCreatedResponse": {
+        "description": "Response when a job is created (fire-and-forget).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PipelineJobInfo"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "JobCreatedResponse",
+        "type": "object"
+      },
+      "JobListResponse": {
+        "description": "Response for listing jobs.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineJobInfo"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "JobListResponse",
+        "type": "object"
+      },
+      "JobStatus": {
+        "description": "Status of a pipeline job.",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed"
+        ],
+        "title": "JobStatus",
+        "type": "string"
+      },
+      "JobStatusResponse": {
+        "description": "Response for job status queries.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PipelineJobDetail"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "JobStatusResponse",
+        "type": "object"
+      },
+      "LiveStatsData": {
+        "description": "Data payload for the live stats trigger endpoint.",
+        "properties": {
+          "all_games_complete": {
+            "default": false,
+            "title": "All Games Complete",
+            "type": "boolean"
+          },
+          "done": {
+            "default": false,
+            "title": "Done",
+            "type": "boolean"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "games_total": {
+            "default": 0,
+            "title": "Games Total",
+            "type": "integer"
+          },
+          "pipeline_name": {
+            "title": "Pipeline Name",
+            "type": "string"
+          },
+          "records_processed": {
+            "default": 0,
+            "title": "Records Processed",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pipeline_name",
+          "status"
+        ],
+        "title": "LiveStatsData",
+        "type": "object"
+      },
+      "LiveStatsResponse": {
+        "description": "Response for the live stats trigger endpoint.\n\nThe done field signals the cron-runner loop mode to exit.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LiveStatsData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "LiveStatsResponse",
+        "type": "object"
+      },
+      "PipelineHealthEntry": {
+        "description": "Health status for a single registered pipeline.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "error_streak": {
+            "default": 0,
+            "title": "Error Streak",
+            "type": "integer"
+          },
+          "is_running": {
+            "default": false,
+            "title": "Is Running",
+            "type": "boolean"
+          },
+          "last_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Duration Seconds"
+          },
+          "last_records_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Records Processed"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "trigger_endpoint": {
+            "title": "Trigger Endpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name",
+          "category",
+          "trigger_endpoint",
+          "last_run_at",
+          "last_status",
+          "last_duration_seconds",
+          "last_records_processed",
+          "last_success_at",
+          "is_running",
+          "error_streak"
+        ],
+        "title": "PipelineHealthEntry",
+        "type": "object"
+      },
+      "PipelineJobDetail": {
+        "description": "Full details of a pipeline job including results.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_pipeline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Pipeline"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "pipelines_completed": {
+            "default": 0,
+            "title": "Pipelines Completed",
+            "type": "integer"
+          },
+          "pipelines_failed": {
+            "default": 0,
+            "title": "Pipelines Failed",
+            "type": "integer"
+          },
+          "pipelines_total": {
+            "default": 0,
+            "title": "Pipelines Total",
+            "type": "integer"
+          },
+          "results": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PipelineJobResult"
+            },
+            "default": {},
+            "title": "Results",
+            "type": "object"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "pipelines_total",
+          "pipelines_completed",
+          "pipelines_failed",
+          "current_pipeline",
+          "results",
+          "error"
+        ],
+        "title": "PipelineJobDetail",
+        "type": "object"
+      },
+      "PipelineJobInfo": {
+        "description": "Summary info for a pipeline job.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_pipeline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Pipeline"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "pipelines_completed": {
+            "default": 0,
+            "title": "Pipelines Completed",
+            "type": "integer"
+          },
+          "pipelines_failed": {
+            "default": 0,
+            "title": "Pipelines Failed",
+            "type": "integer"
+          },
+          "pipelines_total": {
+            "default": 0,
+            "title": "Pipelines Total",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "pipelines_total",
+          "pipelines_completed",
+          "pipelines_failed",
+          "current_pipeline"
+        ],
+        "title": "PipelineJobInfo",
+        "type": "object"
+      },
+      "PipelineJobResult": {
+        "description": "Result of a single pipeline within a job.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pipeline_name": {
+            "title": "Pipeline Name",
+            "type": "string"
+          },
+          "records_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Records Processed"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pipeline_name",
+          "status",
+          "message"
+        ],
+        "title": "PipelineJobResult",
+        "type": "object"
+      },
+      "PipelineResponse": {
+        "description": "Response for a single pipeline trigger",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message"
+        ],
+        "title": "PipelineResponse",
+        "type": "object"
+      },
+      "PipelineResult": {
+        "description": "Result of a single pipeline execution",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "done": {
+            "default": true,
+            "title": "Done",
+            "type": "boolean"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "records_failed": {
+            "default": 0,
+            "title": "Records Failed",
+            "type": "integer"
+          },
+          "records_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Records Processed"
+          },
+          "records_skipped": {
+            "default": 0,
+            "title": "Records Skipped",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApiStatus"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "started_at"
+        ],
+        "title": "PipelineResult",
+        "type": "object"
+      },
+      "QualityCheckEntry": {
+        "description": "Single failed/errored quality check entry.",
+        "properties": {
+          "check_name": {
+            "title": "Check Name",
+            "type": "string"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "failures": {
+            "default": 0,
+            "title": "Failures",
+            "type": "integer"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_name",
+          "status",
+          "severity",
+          "failures",
+          "message",
+          "duration_ms"
+        ],
+        "title": "QualityCheckEntry",
+        "type": "object"
+      },
+      "QualityRunEntry": {
+        "description": "Summary of a data quality run.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "failed_checks": {
+            "default": 0,
+            "title": "Failed Checks",
+            "type": "integer"
+          },
+          "passed_checks": {
+            "default": 0,
+            "title": "Passed Checks",
+            "type": "integer"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_checks": {
+            "default": 0,
+            "title": "Total Checks",
+            "type": "integer"
+          },
+          "triggered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggered By"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "total_checks",
+          "passed_checks",
+          "failed_checks",
+          "triggered_by",
+          "error_message"
+        ],
+        "title": "QualityRunEntry",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Pipeline monitoring dashboard",
+    "title": "Court Vision Data Platform",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/ping": {
+      "get": {
+        "operationId": "ping_ping_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ping"
+      }
+    },
+    "/v1/dashboard": {
+      "get": {
+        "description": "Serve the pipeline monitoring dashboard.",
+        "operationId": "get_dashboard_v1_dashboard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Dashboard",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/status": {
+      "get": {
+        "description": "Return pipeline health summary and recent job history.\n\nFor each registered pipeline: last run time, status, duration,\nrecords processed, last success, current running state, and\nconsecutive error streak.\n\nAlso returns the last 10 background jobs from the in-memory job manager.",
+        "operationId": "get_dashboard_status_v1_dashboard_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Dashboard Status",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/": {
+      "get": {
+        "description": "List all available pipelines.\n\nReturns pipeline names, descriptions, and target tables.",
+        "operationId": "get_available_pipelines_v1_internal_pipelines__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Available Pipelines V1 Internal Pipelines  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Available Pipelines",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/all": {
+      "post": {
+        "description": "Trigger all non-SCHEDULED pipelines in the background (fire-and-forget).\n\nReturns immediately with a job ID. Use GET /jobs/{job_id} to check status.\nIntended for backfills and manual use \u2014 production runs use the category\nendpoints (/pre-game, /post-game, /live-stats) instead.\n\nPass ?date=YYYY-MM-DD to backfill all pipelines for a specific date.",
+        "operationId": "trigger_all_pipelines_v1_internal_pipelines_all_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD) for all pipelines. Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD) for all pipelines. Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreatedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger All Pipelines",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/all/sync": {
+      "post": {
+        "description": "Trigger all non-SCHEDULED pipelines synchronously (blocks until complete).\n\nWARNING: This can take several minutes. Use POST /all for fire-and-forget.\nOnly use this endpoint if you need the results immediately and can wait.\n\nPass ?date=YYYY-MM-DD to backfill all pipelines for a specific date.",
+        "operationId": "trigger_all_pipelines_sync_v1_internal_pipelines_all_sync_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD) for all pipelines. Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD) for all pipelines. Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllPipelinesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger All Pipelines Sync",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/breakout-detection": {
+      "post": {
+        "description": "Trigger the breakout streamer detection pipeline.\n\nAnalyzes current injuries to prominent starters and identifies teammates\nmost likely to absorb their minutes. Results written to nba.breakout_candidates.\n\nDepends on espn_injury_status and player_season_stats being fresh.\nPass ?date=YYYY-MM-DD to run detection as of a specific date.",
+        "operationId": "trigger_breakout_detection_v1_internal_pipelines_breakout_detection_post",
+        "parameters": [
+          {
+            "description": "Override detection date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override detection date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Breakout Detection",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/cumulative-player-stats": {
+      "post": {
+        "description": "Trigger the cumulative player stats pipeline.\n\nUpdates season totals and rankings for players who played on the given date.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_cumulative_player_stats_v1_internal_pipelines_cumulative_player_stats_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Cumulative Player Stats",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/daily-matchup-scores": {
+      "post": {
+        "description": "Trigger the daily matchup scores pipeline.\n\nFetches current matchup scores for all saved teams and records\ndaily snapshots for visualization.\nPass ?date=YYYY-MM-DD to backfill a specific date.\n\nDirect trigger: the ESPN batch gate lives in the post-game endpoint, which\nis what production calls. A `?watch=true` loop mode used to duplicate that\ngate here for a cron-runner job that was never registered; it referenced an\n`ApiStatus` member that does not exist, so it would have raised on its first\nreal request. Removed rather than fixed \u2014 one gate is the point.",
+        "operationId": "trigger_daily_matchup_scores_v1_internal_pipelines_daily_matchup_scores_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Daily Matchup Scores",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/daily-player-stats": {
+      "post": {
+        "description": "Trigger the daily player stats pipeline.\n\nFetches game stats from NBA API and ESPN ownership data,\nthen inserts into nba.player_game_stats table.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_daily_player_stats_v1_internal_pipelines_daily_player_stats_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Daily Player Stats",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/deploy": {
+      "post": {
+        "description": "Trigger nightly production deploys via GitHub repository_dispatch.\n\nSends a `nightly-deploy` event to both the backend and data-platform GitHub repos,\nwhich fires their deploy workflows (railway up + smoke tests). Called by cron-runner\ndaily at 2AM CST and available for manual dashboard triggers.\n\nWhen source=manual the endpoint self-records to cron_job_runs so the result\nappears in the scheduler timeline and deployments section immediately. Cron-runner\ntriggered runs are recorded by the cron-runner reporter instead.\n\nAny dispatch failing answers **502** `{status: \"error\", data: outcomes}` (so the\ncron-runner records a failure and its streak alert can fire) and posts a\n`deploy_dispatch_failed` alert to the ops webhook.\n\nRequires:\n    GITHUB_DEPLOY_TOKEN  \u2014 GitHub PAT with repo + workflow scopes\n    BACKEND_GITHUB_REPO  \u2014 e.g. \"username/backend\"\n    DATA_PLATFORM_GITHUB_REPO \u2014 e.g. \"username/data-platform\"",
+        "operationId": "trigger_deploy_v1_internal_pipelines_deploy_post",
+        "parameters": [
+          {
+            "description": "'manual' when triggered from dashboard",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'manual' when triggered from dashboard",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "'backend' or 'data_platform'; omit to deploy both",
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "'backend' or 'data_platform'; omit to deploy both",
+              "title": "Service"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Trigger Deploy V1 Internal Pipelines Deploy Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Deploy",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/espn-injury-status": {
+      "post": {
+        "description": "Trigger the ESPN injury status pipeline.\n\nFetches player injury/availability status from ESPN Fantasy API and upserts\nto nba.player_injuries. Free alternative to the BALLDONTLIE injury endpoint.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_espn_injury_status_v1_internal_pipelines_espn_injury_status_post",
+        "parameters": [
+          {
+            "description": "Override report date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override report date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Espn Injury Status",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/game-schedule": {
+      "post": {
+        "description": "Trigger the game schedule pipeline.\n\nFetches NBA game schedule and results and upserts to nba.games.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_game_schedule_v1_internal_pipelines_game_schedule_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Game Schedule",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/game-start-times": {
+      "post": {
+        "description": "Trigger the game start times pipeline.\n\nLoads the NBA schedule feed for settings.nba_season and upserts every\nregular-season game's tip-off time to nba.games. Used by the pre-game,\npost-game and live gates. Fired weekly by the cron-runner \"schedule-sync\"\njob with ?source=cdn.",
+        "operationId": "trigger_game_start_times_v1_internal_pipelines_game_start_times_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          },
+          {
+            "description": "Schedule feed source: 'cdn' fetches cdn.nba.com (falls back to the static file), 'static' reads static/schedule_raw{YYYY}-{YYYY+1}.json.",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "cdn",
+              "description": "Schedule feed source: 'cdn' fetches cdn.nba.com (falls back to the static file), 'static' reads static/schedule_raw{YYYY}-{YYYY+1}.json.",
+              "enum": [
+                "cdn",
+                "static"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Also upsert preseason games. Only honoured with DEVELOPMENT_MODE=true.",
+            "in": "query",
+            "name": "include_preseason",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also upsert preseason games. Only honoured with DEVELOPMENT_MODE=true.",
+              "title": "Include Preseason",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Game Start Times",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/jobs": {
+      "get": {
+        "description": "List recent pipeline jobs.\n\nReturns most recent jobs first.",
+        "operationId": "list_jobs_v1_internal_pipelines_jobs_get",
+        "parameters": [
+          {
+            "description": "Max jobs to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Max jobs to return",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Jobs",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/jobs/{job_id}": {
+      "get": {
+        "description": "Get the status of a pipeline job.\n\nReturns current status, progress, and results for completed pipelines.",
+        "operationId": "get_job_status_v1_internal_pipelines_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Job Status",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/lineup-alerts": {
+      "post": {
+        "description": "Trigger the lineup alerts pipeline.\n\nAsks the backend for each opted-in team's fill plan and emails it (or,\nfor auto-lineup users, emails what the backend applied to ESPN).\nSelf-gates based on game start times - if no games are within the\nnotification window, returns immediately.\n\nSafe to call frequently (every 15 min); deduplication prevents\nrepeat notifications.",
+        "operationId": "trigger_lineup_alerts_v1_internal_pipelines_lineup_alerts_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Lineup Alerts",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/live-stats": {
+      "post": {
+        "description": "Trigger the live game stats pipeline.\n\nCalled every ~60 seconds by the cron-runner's live loop. Self-gates\nagainst the game schedule \u2014 returns immediately (no-op) if no games\nare scheduled today or if we're more than 15 minutes before tip-off.\n\nThe all_games_complete field in the response signals the cron-runner\nloop to exit once all games for the day are final.\n\nSafe to call frequently \u2014 runs in milliseconds when outside game window.",
+        "operationId": "trigger_live_stats_v1_internal_pipelines_live_stats_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiveStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Live Stats",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/player-advanced-stats": {
+      "post": {
+        "description": "Trigger the player advanced stats pipeline.\n\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_player_advanced_stats_v1_internal_pipelines_player_advanced_stats_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Player Advanced Stats",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/player-ownership": {
+      "post": {
+        "description": "Trigger the player ownership pipeline.\n\nFetches ESPN ownership percentages for all players and updates\nthe nba.player_ownership table.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_player_ownership_v1_internal_pipelines_player_ownership_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Player Ownership",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/player-profiles": {
+      "post": {
+        "description": "Trigger the player profiles pipeline.\n\nFetches biographical and position data for all active players and\nupserts to nba.players. Intended to run weekly (slow \u2014 fetches all\nactive players from NBA API).\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_player_profiles_v1_internal_pipelines_player_profiles_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Player Profiles",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/player-rolling-stats": {
+      "post": {
+        "description": "Trigger the player rolling stats pipeline.\n\nMaterializes L7, L14, and L30 rolling per-game averages from\nplayer_game_stats into nba.player_rolling_stats.\nDepends on player_game_stats having fresh data for the target date.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_player_rolling_stats_v1_internal_pipelines_player_rolling_stats_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Player Rolling Stats",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/playoffs": {
+      "post": {
+        "description": "Trigger the playoff bracket pipeline.\n\nFetches current NBA playoff series standings from NBA Stats API (SeriesStandings)\nand upserts to nba.playoff_series. Called once nightly at ~1 AM ET by the\n'playoffs' cron job in cron-runner.",
+        "operationId": "trigger_playoffs_v1_internal_pipelines_playoffs_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Playoffs",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/post-game": {
+      "post": {
+        "description": "Post-game pipeline trigger with per-pipeline self-gating.\n\nCalled every 15 minutes by the cron-runner. Applies two batch-level gates\n(time window and data readiness) then per-pipeline dedup:\n1. Time window: only attempt within [estimated_last_game_end, estimated_last_game_end + window]\n2. Data readiness: all games on the NBA date are Final (live scoreboard check)\n3. Per-pipeline dedup: skip if the pipeline already ran successfully today\n4. Per-pipeline concurrency: skip if the pipeline is already running\n\nPer-pipeline dedup enables partial batch retries \u2014 if one pipeline fails, the\nnext cron invocation will retry only the failed pipeline, not the whole batch.\n\nOnce the window has **closed**, one last poll sweeps the night: any pipeline\nwith no successful run for the date is recorded and alerted\n(`post_game_incomplete`). That is the check that turns a silent skip into a\nmessage \u2014 a night where every poll decided \"nothing to do\" otherwise leaves\nno trace outside the logs.\n\nPass ?force=true to skip all gates (useful for manual re-triggers or backfills).\nPass ?date=YYYY-MM-DD to backfill a specific date (implies force=true).",
+        "operationId": "trigger_post_game_v1_internal_pipelines_post_game_post",
+        "parameters": [
+          {
+            "description": "Bypass all gates and dedup check. Use for backfills.",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Bypass all gates and dedup check. Use for backfills.",
+              "title": "Force",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Override game date (YYYY-MM-DD). Implies force=true.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Implies force=true.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Post Game",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/pre-game": {
+      "post": {
+        "description": "Pre-game pipeline trigger with per-pipeline self-gating.\n\nCalled every 15 minutes by the cron-runner. For each PRE_GAME pipeline:\n1. Window gate: skips if current time is before (first_game - window_minutes)\n2. Dedup gate: skips if the pipeline already ran successfully today\n3. Concurrency gate: skips if the pipeline is already running\n\nEach pipeline has its own window override (pre_game_window_minutes); otherwise\nthe global settings.pre_game_window_minutes default applies.\n\nSafe to call frequently \u2014 gates return immediately with no-ops.\nPass ?force=true to skip all gates.\nPass ?date=YYYY-MM-DD to target a specific date (implies force=true).",
+        "operationId": "trigger_pre_game_v1_internal_pipelines_pre_game_post",
+        "parameters": [
+          {
+            "description": "Bypass window and dedup gates. Use for manual triggers or backfills.",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Bypass window and dedup gates. Use for manual triggers or backfills.",
+              "title": "Force",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Override game date (YYYY-MM-DD). Implies force=true.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Implies force=true.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Pre Game",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/preseason-market": {
+      "post": {
+        "description": "Trigger the preseason-market pipeline.\n\nSnapshots ESPN draft ranks, auction values, and real-draft crowd averages\n(ADP, average auction price) into nba.draft_market \u2014 plus projected stat\nlines into nba.player_projections once ESPN publishes them. Self-gating:\nno-ops outside the Aug 15 \u2013 Oct 31 window and when the league has not\nrolled to the target season. Called daily by the 'preseason-market' cron\njob in cron-runner during draft season.",
+        "operationId": "trigger_preseason_market_v1_internal_pipelines_preseason_market_post",
+        "parameters": [
+          {
+            "description": "Override snapshot date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override snapshot date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          },
+          {
+            "description": "Override the ESPN league to pull from (must be rolled to the target season).",
+            "in": "query",
+            "name": "league_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override the ESPN league to pull from (must be rolled to the target season).",
+              "title": "League Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Preseason Market",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/team-stats": {
+      "post": {
+        "description": "Trigger the team stats pipeline.\n\nFetches season-to-date stats for all 30 NBA teams from NBA API\n(base counting stats + advanced efficiency metrics) and upserts\nto nba.team_stats.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "operationId": "trigger_team_stats_v1_internal_pipelines_team_stats_post",
+        "parameters": [
+          {
+            "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override game date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Team Stats",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/quality/run": {
+      "post": {
+        "operationId": "run_quality_checks_v1_internal_quality_run_post",
+        "parameters": [
+          {
+            "description": "Optional comma-separated check names",
+            "in": "query",
+            "name": "checks",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional comma-separated check names",
+              "title": "Checks"
+            }
+          },
+          {
+            "description": "Who triggered this run (manual|schedule|ci)",
+            "in": "query",
+            "name": "triggered_by",
+            "required": false,
+            "schema": {
+              "default": "manual",
+              "description": "Who triggered this run (manual|schedule|ci)",
+              "title": "Triggered By",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataQualityRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Quality Checks",
+        "tags": [
+          "quality"
+        ]
+      }
+    },
+    "/v1/internal/quality/runs": {
+      "get": {
+        "operationId": "list_quality_runs_v1_internal_quality_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataQualityRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Quality Runs",
+        "tags": [
+          "quality"
+        ]
+      }
+    },
+    "/v1/internal/quality/runs/{run_id}": {
+      "get": {
+        "operationId": "get_quality_run_v1_internal_quality_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataQualityRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Quality Run",
+        "tags": [
+          "quality"
+        ]
+      }
+    }
+  }
+}

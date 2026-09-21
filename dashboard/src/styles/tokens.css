@@ -1,0 +1,72 @@
+/* Copied from frontend/src/app/globals.css by
+   `python scripts/check_frontend_theme.py --write`. Do not edit here: change
+   the frontend's tokens, then re-sync. */
+:root {
+  color-scheme: dark;
+
+  /* Core backgrounds - layered depth */
+  --background: 24 10% 12%;
+  --foreground: 32 24% 93%;
+
+  /* Surface hierarchy */
+  --card: 24 9% 15%;
+  --card-foreground: 32 24% 93%;
+  --popover: 24 9% 18%;
+  --popover-foreground: 32 24% 93%;
+
+  /* Primary - warm amber-orange (basketball / ESPN energy) */
+  --primary: 28 92% 52%;
+  --primary-foreground: 24 10% 12%;
+
+  /* Secondary */
+  --secondary: 24 8% 19%;
+  --secondary-foreground: 32 24% 93%;
+
+  /* Tertiary - operational green (softened to sit on a warm base) */
+  --tertiary: 152 55% 45%;
+  --tertiary-foreground: 24 10% 12%;
+
+  /* Muted */
+  --muted: 24 8% 21%;
+  --muted-foreground: 26 8% 60%;
+
+  /* Accent */
+  --accent: 24 8% 19%;
+  --accent-foreground: 32 24% 93%;
+
+  /* Destructive - coral rather than pure red */
+  --destructive: 8 72% 60%;
+  --destructive-foreground: 24 10% 12%;
+
+  /* Borders - visible structure */
+  --border: 24 8% 26%;
+  --input: 24 8% 26%;
+  --ring: 28 92% 52%;
+
+  --radius: 0.625rem;
+
+  /* Chart colors */
+  --chart-1: 28 92% 52%;
+  --chart-2: 152 55% 45%;
+  --chart-3: 42 92% 58%;
+  --chart-4: 200 60% 55%;
+  --chart-5: 280 50% 60%;
+
+  /* Status colors */
+  --status-win: 152 55% 45%;
+  --status-loss: 8 72% 60%;
+  --status-projected: 42 92% 58%;
+  --status-neutral: 26 8% 50%;
+
+  /* Signal colors */
+  --signal-hot: 15 88% 58%;
+  --signal-cold: 210 60% 58%;
+  --signal-live: 152 55% 45%;
+  --signal-stale: 26 8% 36%;
+
+  /* Grid system */
+  --grid-line: 24 8% 16%;
+
+  /* Shell chrome height: header (48) + status bar (28). See Base.tsx. */
+  --chrome-h: 4.75rem;
+}
