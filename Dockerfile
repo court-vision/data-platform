@@ -1,3 +1,14 @@
+# The React dashboard (dashboard/) compiles to static files, which the public
+# app serves (core/spa.py). bun exists only in this stage: nothing of it, and no
+# node_modules, reaches the runtime image.
+FROM oven/bun:1.3 AS dashboard
+WORKDIR /dashboard
+COPY dashboard/package.json dashboard/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY dashboard/ ./
+RUN bun run build
+
+
 FROM python:3.12-slim-bookworm
 
 # 1. Set environment variables
@@ -39,6 +50,10 @@ COPY main.py .
 COPY main_public.py .
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
+
+# The built dashboard. Last of the app's layers: a UI-only change leaves the pip
+# install above cached.
+COPY --from=dashboard /dashboard/dist ./dashboard/dist
 
 # 5. Create a non-root user for security
 # Running as root is a security risk. We create a user 'appuser' and switch to it.

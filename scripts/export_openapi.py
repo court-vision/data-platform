@@ -16,6 +16,7 @@ values are never used.
 Output is sorted and indented so diffs are stable.
 """
 
+import contextlib
 import json
 import os
 import sys
@@ -26,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost:5432/x")
 os.environ.setdefault("PIPELINE_API_TOKEN", "export-only")
 
-from main_public import app  # noqa: E402
+# stdout is the JSON and nothing else: anything an import prints goes to stderr.
+with contextlib.redirect_stdout(sys.stderr):
+    from main_public import app  # noqa: E402
 
 json.dump(app.openapi(), sys.stdout, indent=2, sort_keys=True)
 sys.stdout.write("\n")
