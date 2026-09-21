@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from pipelines.extractors.espn import parse_draft_market_players
+from pipelines.extractors.espn import parse_draft_market_players, rank_type_provenance
 from pipelines.gates import preseason_market_window
 from pipelines.preseason_market import projected_gp, projection_line
 
@@ -141,6 +141,36 @@ def test_parse_normalizes_default_position_id(raw, expected):
     row = parse_draft_market_players([_espn_player(defaultPositionId=raw)],
                                      projected_split_id="102027")[0]
     assert row["default_position_id"] == expected
+
+
+# ---- rank_type_provenance --------------------------------------------------
+
+
+def test_rank_type_provenance_counts_each_triple():
+    """Two players carrying ESPN's usual sub-fields on both boards: one key per
+    (rank_type, published, rankSourceId) triple, counted across players."""
+    ranks = {
+        "STANDARD": {"rank": 1, "auctionValue": 65, "published": False, "rankSourceId": 0},
+        "ROTO": {"rank": 2, "auctionValue": 65, "published": False, "rankSourceId": 0},
+    }
+    players = [
+        _espn_player(draftRanksByRankType=ranks),
+        _espn_player(id=3945274, fullName="Luka Doncic", draftRanksByRankType=ranks),
+    ]
+    assert rank_type_provenance(players) == {
+        "STANDARD published=False source=0": 2,
+        "ROTO published=False source=0": 2,
+    }
+
+
+def test_rank_type_provenance_tolerates_missing_blocks_and_sub_fields():
+    """No draftRanksByRankType at all, and an entry without the sub-fields, are
+    counted with None rather than raising — the point is to notice the shape."""
+    players = [
+        _espn_player(draftRanksByRankType=None),
+        _espn_player(draftRanksByRankType={"STANDARD": {"rank": 7, "auctionValue": 30}}),
+    ]
+    assert rank_type_provenance(players) == {"STANDARD published=None source=None": 1}
 
 
 # ---- projection_line / projected_gp ----------------------------------------
