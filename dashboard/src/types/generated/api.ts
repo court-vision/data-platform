@@ -38,26 +38,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/dashboard": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Dashboard
-         * @description Serve the pipeline monitoring dashboard.
-         */
-        get: operations["get_dashboard_v1_dashboard_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/dashboard/services": {
         parameters: {
             query?: never;
@@ -1407,26 +1387,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-        };
-    };
-    get_dashboard_v1_dashboard_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/html": string;
                 };
             };
         };

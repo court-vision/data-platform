@@ -33,6 +33,13 @@ def _make_app() -> FastAPI:
 
 
 @pytest.mark.api
+def test_dashboard_root_redirects_to_the_app() -> None:
+    res = TestClient(_make_app()).get("/v1/dashboard", follow_redirects=False)
+    assert res.status_code == 307
+    assert res.headers["location"] == "/"
+
+
+@pytest.mark.api
 def test_dashboard_status_requires_bearer_token() -> None:
     client = TestClient(_make_app())
     res = client.get("/v1/dashboard/status")

@@ -1,12 +1,11 @@
 """
 Pipeline Monitoring Dashboard
 
-Serves the internal dashboard UI and provides the JSON status endpoint
-that powers it. The HTML page is public; the status API requires the
-standard pipeline bearer token.
+The JSON behind the React dashboard (dashboard/, served from / by
+main_public). Everything here but the redirect takes the pipeline bearer token.
 
 Routes:
-    GET  /v1/dashboard           — renders dashboard.html (no auth)
+    GET  /v1/dashboard           — redirect to /, where the app lives (no auth)
     GET  /v1/dashboard/status    — pipeline health, cron runs, quality, jobs (token auth)
     GET  /v1/dashboard/services  — running version of each deployed service (token auth)
 """
@@ -16,9 +15,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Request, Security
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from fastapi import APIRouter, Security
+from fastapi.responses import RedirectResponse
 
 from api.v1.pipelines import router as pipelines_router
 from core.health import service_info
@@ -54,15 +52,6 @@ def _naive(dt: datetime | None) -> datetime | None:
         return None
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
-# Lazy-initialized templates (set by main.py after app creation)
-_templates: Optional[Jinja2Templates] = None
-
-
-def set_templates(templates: Jinja2Templates) -> None:
-    global _templates
-    _templates = templates
-
-
 # Where main.py / main_public.py mount api.v1.pipelines.router. A pipeline's own
 # trigger route is this plus its config.trigger_slug; the dashboard posts to it.
 PIPELINE_ROUTE_PREFIX = "/v1/internal/pipelines"
@@ -90,12 +79,10 @@ def trigger_accepts_date(config: PipelineConfig) -> bool:
     return False
 
 
-@router.get("", response_class=HTMLResponse)
-async def get_dashboard(request: Request) -> HTMLResponse:
-    """Serve the pipeline monitoring dashboard."""
-    if _templates is None:
-        return HTMLResponse("<h1>Templates not configured</h1>", status_code=500)
-    return _templates.TemplateResponse("dashboard.html", {"request": request})
+@router.get("", include_in_schema=False)
+async def get_dashboard() -> RedirectResponse:
+    """Where the Jinja dashboard was until 2026-09. Bookmarks land on the app."""
+    return RedirectResponse(url="/", status_code=307)
 
 
 @router.get("/status", response_model=DashboardStatusResponse)

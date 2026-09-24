@@ -15,10 +15,8 @@ Usage:
 import utils.patches  # noqa: F401 - imported for side effect (patches nba_api)
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.templating import Jinja2Templates
 
 from core.middleware import setup_middleware
 from core.db_middleware import DatabaseMiddleware
@@ -83,10 +81,6 @@ app = FastAPI(
 app.add_middleware(RequestContextMiddleware)  # correlation id + one http_request log line
 app.add_middleware(DatabaseMiddleware)        # per-request connection on the loop thread
 setup_middleware(app)                         # exception handlers + CORS
-
-# Templates
-_templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
-dashboard.set_templates(_templates)
 
 # Routes
 app.include_router(pipelines.router, prefix="/v1/internal")
