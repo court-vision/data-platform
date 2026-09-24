@@ -6,21 +6,26 @@ that powers it. The HTML page is public; the status API requires the
 standard pipeline bearer token.
 
 Routes:
-    GET  /v1/dashboard          — renders dashboard.html (no auth)
-    GET  /v1/dashboard/status   — pipeline health + recent jobs (token auth)
+    GET  /v1/dashboard           — renders dashboard.html (no auth)
+    GET  /v1/dashboard/status    — pipeline health, cron runs, quality, jobs (token auth)
+    GET  /v1/dashboard/services  — running version of each deployed service (token auth)
 """
 
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Request, Security
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from api.v1.pipelines import router as pipelines_router
+from core.health import service_info
 from core.job_manager import get_job_manager
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
+from core.settings import settings
 from db.base import run_in_db_thread
 from db.models.pipeline_run import PipelineRun
 from db.models.nba.cron_job_run import CronJobRun
@@ -32,6 +37,9 @@ from schemas.dashboard import (
     PipelineHealthEntry,
     QualityRunEntry,
     QualityCheckEntry,
+    ServiceInfo,
+    ServicesData,
+    ServicesResponse,
 )
 from schemas.pipeline import PipelineJobInfo
 from services.data_quality_service import DataQualityService
@@ -65,6 +73,21 @@ def trigger_endpoint(config: PipelineConfig) -> str:
     if not config.trigger_slug:
         return ""
     return f"{PIPELINE_ROUTE_PREFIX}/{config.trigger_slug}"
+
+
+def trigger_accepts_date(config: PipelineConfig) -> bool:
+    """Whether the pipeline's trigger route takes ?date= — read off the route
+    itself, so the dashboard's date box appears exactly where a backfill can go."""
+    if not config.trigger_slug:
+        return False
+    path = f"/pipelines/{config.trigger_slug}"  # the router's own prefix
+    for route in pipelines_router.routes:
+        if getattr(route, "path", None) != path:
+            continue
+        if "POST" not in (getattr(route, "methods", None) or ()):
+            continue
+        return any(param.name == "date" for param in route.dependant.query_params)
+    return False
 
 
 @router.get("", response_class=HTMLResponse)
@@ -126,43 +149,83 @@ async def get_dashboard_status(
     )
 
 
+BACKEND_HEALTH_TIMEOUT_S = 3.0
+
+
+@router.get("/services", response_model=ServicesResponse)
+async def get_services(
+    _: str = Security(verify_pipeline_token),
+) -> ServicesResponse:
+    """
+    The running version of each deployed service, for the dashboard's service
+    cards: this process from its own settings, the backend from its /health
+    over Railway's private network. Replaces the Deployments section, which
+    read a nightly `deploy` cron job that no longer exists.
+    """
+    own = service_info()
+    services = [
+        ServiceInfo(
+            key="data_platform",
+            name="Data Platform",
+            ok=True,
+            version=own["version"],
+            environment=own["environment"],
+            uptime_s=own["uptime_s"],
+        ),
+        await asyncio.to_thread(_probe_backend),
+    ]
+    return ServicesResponse(
+        status="success",
+        message=f"{len(services)} services",
+        data=ServicesData(services=services, fetched_at=datetime.now(timezone.utc)),
+    )
+
+
+def _probe_backend() -> ServiceInfo:
+    """GET /health on the backend. A 503 (degraded) still carries the body."""
+    base = (settings.backend_internal_url or "").rstrip("/")
+    if not base:
+        return ServiceInfo(
+            key="backend", name="Backend", configured=False,
+            error="BACKEND_INTERNAL_URL is not set",
+        )
+    try:
+        response = httpx.get(f"{base}/health", timeout=BACKEND_HEALTH_TIMEOUT_S)
+        body = response.json()
+    except Exception as exc:
+        return ServiceInfo(key="backend", name="Backend", error=type(exc).__name__)
+
+    failing = [
+        name for name, check in (body.get("checks") or {}).items()
+        if isinstance(check, dict) and not check.get("ok")
+    ]
+    ok = body.get("status") == "ok"
+    return ServiceInfo(
+        key="backend",
+        name="Backend",
+        ok=ok,
+        version=body.get("version"),
+        environment=body.get("environment"),
+        uptime_s=body.get("uptime_s"),
+        error=None if ok else f"degraded: {', '.join(failing) or f'HTTP {response.status_code}'}",
+    )
+
+
 def _build_cron_runs() -> list[CronJobRunEntry]:
     """
-    Query cron job runs for the dashboard timeline and deployment cards.
-
-    Uses a 6-hour time window for high-frequency jobs (live-stats, pre-game,
-    post-game) so they don't crowd out other runs.  Deploy runs are fetched
-    separately with a 48-hour window so the Deployments section always shows
-    cards — the deploy job only fires once per day at 2 AM CST and would
-    otherwise fall outside the 6h window for most of the day.
+    Cron job runs for the dashboard's scheduler timeline: the last 6 hours,
+    newest first. (A 48-hour side query for the nightly `deploy` job used to
+    live here; that job went with the 2026-09-06 move to deploy-on-merge.)
 
     Runs synchronously — caller must wrap in asyncio.to_thread.
     """
     try:
-        now = datetime.now(timezone.utc)
-        window_start = now - timedelta(hours=6)
-        deploy_window_start = now - timedelta(hours=48)
-
-        windowed_rows = list(
+        window_start = datetime.now(timezone.utc) - timedelta(hours=6)
+        rows = list(
             CronJobRun.select()
             .where(CronJobRun.triggered_at >= window_start)
             .order_by(CronJobRun.triggered_at.desc())
         )
-
-        # Always include recent deploy runs so the Deployments cards render
-        # even when the last deploy happened more than 6 hours ago.
-        deploy_rows = list(
-            CronJobRun.select()
-            .where(
-                (CronJobRun.job_name == "deploy")
-                & (CronJobRun.triggered_at >= deploy_window_start)
-                & (CronJobRun.triggered_at < window_start)
-            )
-            .order_by(CronJobRun.triggered_at.desc())
-            .limit(10)
-        )
-
-        rows = windowed_rows + deploy_rows
         return [
             CronJobRunEntry(
                 id=str(r.id),
@@ -311,6 +374,7 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
             last_success_at=last_success_at,
             is_running=is_running,
             error_streak=error_streak,
+            accepts_date=trigger_accepts_date(config),
         )
         entries.append(entry)
 

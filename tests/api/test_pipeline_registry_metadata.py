@@ -11,7 +11,7 @@ import pytest
 
 import main
 import main_public
-from api.v1.dashboard import PIPELINE_ROUTE_PREFIX, trigger_endpoint
+from api.v1.dashboard import PIPELINE_ROUTE_PREFIX, trigger_accepts_date, trigger_endpoint
 from pipelines import PIPELINE_REGISTRY, PipelineCategory, PipelineConfig
 from pipelines.config import CATEGORY_CRON_JOBS
 
@@ -107,3 +107,31 @@ class TestCronJobs:
         config = PIPELINE_REGISTRY["preseason_market"].config
         assert config.cron_job_name == "preseason-market"
         assert trigger_endpoint(config) == "/v1/internal/pipelines/preseason-market"
+
+
+@pytest.mark.api
+class TestDateOverride:
+    """`accepts_date` tells the dashboard where a backfill date box belongs."""
+
+    @pytest.fixture(scope="class")
+    def public_paths(self):
+        return main_public.app.openapi()["paths"]
+
+    @pytest.mark.parametrize("name,cls", REGISTERED)
+    def test_matches_the_route_schema(self, name, cls, public_paths):
+        # FastAPI's own schema for the route is the independent source.
+        params = public_paths[trigger_endpoint(cls.config)]["post"].get("parameters", [])
+        in_schema = any(p["name"] == "date" and p["in"] == "query" for p in params)
+        assert trigger_accepts_date(cls.config) is in_schema, name
+
+    def test_the_three_now_only_routes(self):
+        assert trigger_accepts_date(PIPELINE_REGISTRY["player_game_stats"].config) is True
+        for name in ("live_game_stats", "lineup_alerts", "playoff_bracket"):
+            assert trigger_accepts_date(PIPELINE_REGISTRY[name].config) is False, name
+
+    def test_a_pipeline_without_a_route_takes_no_date(self):
+        config = PipelineConfig(
+            name="x", display_name="X", description="", target_table="nba.x",
+            category=PipelineCategory.SCHEDULED,
+        )
+        assert trigger_accepts_date(config) is False
