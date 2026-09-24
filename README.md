@@ -219,7 +219,7 @@ source .venv/bin/activate
 
 This starts two Uvicorn processes:
 - **Private** (`::8001`) — full app with all routes (pipeline triggers, live schedule, dashboard, quality)
-- **Public** (`0.0.0.0:8080`) — dashboard and pipeline triggers only, no live route, no API docs
+- **Public** (`0.0.0.0:8080`) — dashboard and pipeline triggers only, no live route, no API docs and no `/openapi.json`. Its schema comes from `python scripts/export_openapi.py` (offline, no database), which is what the dashboard's types are generated from
 
 ### Running Tests
 
@@ -512,7 +512,7 @@ Key tables written by this service:
 1. Create `pipelines/my_pipeline.py` extending `BasePipeline` with a `config` class attribute
 2. Implement `execute(self, ctx: PipelineContext) -> None`
 3. Register it in `pipelines/__init__.py` — add an import and an entry in `PIPELINE_REGISTRY`
-4. Add a trigger endpoint in `api/v1/pipelines.py` (or use the category-based endpoint if it fits)
+4. Add a trigger endpoint in `api/v1/pipelines.py` and name its last path segment in the config as `trigger_slug` — the dashboard's Run button posts there. A `SCHEDULED` pipeline with its own cron-runner job names it as `cron_job`; the other categories inherit their batch job (`CATEGORY_CRON_JOBS`). `tests/api/test_pipeline_registry_metadata.py` fails a registered pipeline that skips this
 5. Add the DB model to `db/models/nba/` and register it in `db/base.py:init_db()`
 
 ## Production Deployment

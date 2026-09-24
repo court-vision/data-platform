@@ -123,6 +123,7 @@ class BreakoutDetectionPipeline(BasePipeline):
         description="Identifies players likely to benefit from a prominent teammate's injury",
         target_table="nba.breakout_candidates",
         category=PipelineCategory.PRE_GAME,
+        trigger_slug="breakout-detection",
         pre_game_window_minutes=120,
         depends_on=("espn_injury_status", "player_season_stats", "player_game_stats"),
     )

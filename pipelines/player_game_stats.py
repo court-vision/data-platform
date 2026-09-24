@@ -34,6 +34,7 @@ class PlayerGameStatsPipeline(BasePipeline):
         description="Fetches yesterday's game stats from NBA API and ESPN ownership data",
         target_table="nba.player_game_stats",
         category=PipelineCategory.POST_GAME,
+        trigger_slug="daily-player-stats",
     )
 
     def __init__(self):

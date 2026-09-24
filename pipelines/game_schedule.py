@@ -36,6 +36,7 @@ class GameSchedulePipeline(BasePipeline):
         description="Fetches NBA game schedule and results",
         target_table="nba.games",
         category=PipelineCategory.POST_GAME,
+        trigger_slug="game-schedule",
     )
 
     def __init__(self):

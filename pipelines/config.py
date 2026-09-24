@@ -25,6 +25,16 @@ class PipelineCategory(str, Enum):
     SCHEDULED = "scheduled"
 
 
+# cron-runner job that fires each category's batch endpoint (names are
+# cron-runner's, internal/jobs/registry.go). SCHEDULED has no batch: those
+# pipelines name their own job with `PipelineConfig.cron_job`.
+CATEGORY_CRON_JOBS: dict[PipelineCategory, str] = {
+    PipelineCategory.PRE_GAME: "pre-game",
+    PipelineCategory.LIVE: "live-stats",
+    PipelineCategory.POST_GAME: "post-game",
+}
+
+
 @dataclass(frozen=True)
 class PipelineConfig:
     """
@@ -45,6 +55,9 @@ class PipelineConfig:
         timeout_seconds: Maximum time for pipeline execution
         allow_concurrent: Whether multiple instances can run simultaneously
         depends_on: Pipeline names that must complete first
+        trigger_slug: Last segment of this pipeline's own trigger route
+        cron_job: cron-runner job that fires this pipeline, when it is not the
+            category's batch job
     """
 
     name: str
@@ -88,9 +101,25 @@ class PipelineConfig:
     # (outside the notification window) would block all subsequent invocations.
     skip_batch_dedup: bool = False
 
+    # Last path segment of this pipeline's own trigger route,
+    # POST /v1/internal/pipelines/{trigger_slug}. Every registered pipeline sets
+    # one (tests/api/test_pipeline_registry_metadata.py); the dashboard's Run
+    # button posts to it.
+    trigger_slug: Optional[str] = None
+
+    # cron-runner job that fires this pipeline, when it is not the category's
+    # batch job. SCHEDULED pipelines set it, or leave it None when nothing
+    # schedules them. Read it through `cron_job_name`.
+    cron_job: Optional[str] = None
+
     def __post_init__(self):
         """Validate configuration."""
         if not self.name:
             raise ValueError("Pipeline name is required")
         if not self.target_table:
             raise ValueError("Pipeline target_table is required")
+
+    @property
+    def cron_job_name(self) -> Optional[str]:
+        """The cron-runner job whose runs cover this pipeline, or None."""
+        return self.cron_job or CATEGORY_CRON_JOBS.get(self.category)

@@ -24,7 +24,7 @@ from core.pipeline_auth import verify_pipeline_token
 from db.base import run_in_db_thread
 from db.models.pipeline_run import PipelineRun
 from db.models.nba.cron_job_run import CronJobRun
-from pipelines import PIPELINE_REGISTRY
+from pipelines import PIPELINE_REGISTRY, PipelineConfig
 from schemas.cron import CronJobRunEntry
 from schemas.dashboard import (
     DashboardStatusData,
@@ -55,48 +55,16 @@ def set_templates(templates: Jinja2Templates) -> None:
     _templates = templates
 
 
-# Pipeline name → individual trigger endpoint path
-# Kept here so the dashboard JS can POST directly without hardcoding URLs.
-PIPELINE_TRIGGER_ENDPOINTS: dict[str, str] = {
-    "player_game_stats":    "/v1/internal/pipelines/daily-player-stats",
-    "player_ownership":     "/v1/internal/pipelines/player-ownership",
-    "player_season_stats":  "/v1/internal/pipelines/cumulative-player-stats",
-    "daily_matchup_scores": "/v1/internal/pipelines/daily-matchup-scores",
-    "player_rolling_stats": "/v1/internal/pipelines/player-rolling-stats",
-    "team_stats":           "/v1/internal/pipelines/team-stats",
-    "player_advanced_stats":"/v1/internal/pipelines/player-advanced-stats",
-    "game_schedule":        "/v1/internal/pipelines/game-schedule",
-    "game_start_times":     "/v1/internal/pipelines/game-start-times",
-    "player_profiles":      "/v1/internal/pipelines/player-profiles",
-    "live_game_stats":      "/v1/internal/pipelines/live-stats",
-    "espn_injury_status":   "/v1/internal/pipelines/espn-injury-status",
-    "breakout_detection":   "/v1/internal/pipelines/breakout-detection",
-    "lineup_alerts":        "/v1/internal/pipelines/lineup-alerts",
-    "playoff_bracket":      "/v1/internal/pipelines/playoffs",
-}
+# Where main.py / main_public.py mount api.v1.pipelines.router. A pipeline's own
+# trigger route is this plus its config.trigger_slug; the dashboard posts to it.
+PIPELINE_ROUTE_PREFIX = "/v1/internal/pipelines"
 
-# Pipeline name → cron-runner job name.
-# Used to supplement stale PipelineRun records with fresher CronJobRun data.
-# Category-triggered pipelines (pre-game / post-game) share a job name because
-# the cron-runner fires a single endpoint that runs all pipelines in that group.
-PIPELINE_CRON_JOB_MAP: dict[str, str] = {
-    "live_game_stats":      "live-stats",
-    "playoff_bracket":      "playoffs",
-    "game_start_times":     "schedule-sync",
-    # Post-game category (all share the same cron trigger)
-    "player_game_stats":    "post-game",
-    "player_ownership":     "post-game",
-    "player_season_stats":  "post-game",
-    "player_rolling_stats": "post-game",
-    "player_advanced_stats":"post-game",
-    "team_stats":           "post-game",
-    "game_schedule":        "post-game",
-    "daily_matchup_scores": "post-game",
-    # Pre-game category
-    "espn_injury_status":   "pre-game",
-    "breakout_detection":   "pre-game",
-    "lineup_alerts":        "pre-game",
-}
+
+def trigger_endpoint(config: PipelineConfig) -> str:
+    """Path the dashboard POSTs to run one pipeline ("" when it has no route)."""
+    if not config.trigger_slug:
+        return ""
+    return f"{PIPELINE_ROUTE_PREFIX}/{config.trigger_slug}"
 
 
 @router.get("", response_class=HTMLResponse)
@@ -234,7 +202,11 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
     Runs synchronously — caller must wrap in asyncio.to_thread.
     """
     # Pre-load the latest CronJobRun per job name so we avoid N extra queries.
-    cron_job_names = set(PIPELINE_CRON_JOB_MAP.values())
+    # Category-triggered pipelines share a job: cron-runner fires one endpoint
+    # that runs every pipeline in the group.
+    cron_job_names = {
+        cls.config.cron_job_name for cls in PIPELINE_REGISTRY.values()
+    } - {None}
     cron_latest: dict[str, CronJobRun] = {}
     for job_name in cron_job_names:
         row = (
@@ -254,7 +226,6 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
         # PipelineRun records are written using config.name (set in BasePipeline._run_sync),
         # which may differ from the registry key (e.g. "advanced_stats" vs "player_advanced_stats").
         db_name = config.name
-        trigger_endpoint = PIPELINE_TRIGGER_ENDPOINTS.get(name, "")
 
         # Most-recent run (any status)
         latest_run = (
@@ -293,7 +264,7 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
 
         # Determine whether CronJobRun data is fresher than PipelineRun.
         # Both tables store naive UTC datetimes — compare directly.
-        cron_job_name = PIPELINE_CRON_JOB_MAP.get(name)
+        cron_job_name = config.cron_job_name
         cron_run = cron_latest.get(cron_job_name) if cron_job_name else None
 
         pipeline_run_at: datetime | None = latest_run.started_at if latest_run else None
@@ -332,7 +303,7 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
             name=name,
             display_name=config.display_name,
             category=config.category.value,
-            trigger_endpoint=trigger_endpoint,
+            trigger_endpoint=trigger_endpoint(config),
             last_run_at=last_run_at,
             last_status=last_status,
             last_duration_seconds=last_duration_seconds,

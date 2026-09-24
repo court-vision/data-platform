@@ -40,6 +40,7 @@ class TeamStatsPipeline(BasePipeline):
         description="Daily team pace, ratings, and per-game stats for all 30 NBA teams",
         target_table="nba.team_stats",
         category=PipelineCategory.POST_GAME,
+        trigger_slug="team-stats",
     )
 
     def __init__(self):
