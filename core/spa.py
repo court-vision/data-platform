@@ -41,7 +41,12 @@ class ImmutableStaticFiles(StaticFiles):
     """Vite names assets by content hash, so a URL's bytes never change."""
 
     async def get_response(self, path: str, scope):
-        response = await super().get_response(path, scope)
+        try:
+            response = await super().get_response(path, scope)
+        except ValueError:
+            # A NUL byte in the path (os.path.realpath refuses it): a scanner's
+            # probe, not a server error.
+            raise HTTPException(status_code=404)
         if response.status_code == 200:
             response.headers["Cache-Control"] = IMMUTABLE
         return response
@@ -65,15 +70,23 @@ def mount_dashboard(app: FastAPI, dist: Path = DIST) -> bool:
 
     @app.api_route("/{path:path}", methods=ALL_METHODS, include_in_schema=False)
     async def dashboard_app(path: str, request: Request) -> FileResponse:
+        # Matching every path also switches off Starlette's trailing-slash
+        # redirect, so /health/ must be refused here too: answered with the
+        # page, it would read 200 to an uptime check while /health says 503.
         if (
             request.method not in ("GET", "HEAD")
-            or path in NOT_APP_PATHS
+            or path.rstrip("/") in NOT_APP_PATHS
             or path.startswith(NOT_APP_PREFIXES)
         ):
             raise HTTPException(status_code=404, detail="Not Found")
 
-        candidate = (root / path).resolve()
-        if path and candidate.is_file() and candidate.is_relative_to(root):
+        try:
+            candidate = (root / path).resolve()
+            is_file = bool(path) and candidate.is_relative_to(root) and candidate.is_file()
+        except (OSError, ValueError):
+            # A NUL byte or an over-long segment: not a file here, and not a 500.
+            is_file = False
+        if is_file and candidate != index:
             return FileResponse(candidate)
         return FileResponse(index, headers={"Cache-Control": REVALIDATE})
 

@@ -104,6 +104,18 @@ class TestNeverAnswersTheApiWithHtml:
     def test_docs_paths_are_not_the_app(self, client, path):
         assert client.get(path).status_code == 404
 
+    @pytest.mark.parametrize("path", ["/health/", "/ping/", "/docs/", "/v1/"])
+    def test_a_trailing_slash_does_not_make_a_probe_the_app(self, client, path):
+        """The catch-all stops Starlette's slash redirect; /health/ must not read 200."""
+        res = client.get(path)
+        assert res.status_code == 404
+        assert INDEX_HTML not in res.text
+
+    def test_index_html_by_name_still_revalidates(self, client):
+        res = client.get("/index.html")
+        assert res.status_code == 200
+        assert res.headers["cache-control"] == REVALIDATE
+
 
 @pytest.mark.api
 class TestStaysInsideDist:
@@ -116,6 +128,10 @@ class TestStaysInsideDist:
     def test_traversal_never_leaves_dist(self, client, path):
         res = client.get(path)
         assert "hunter2" not in res.text
+
+    @pytest.mark.parametrize("path", ["/%00", "/a%00b", "/" + "a" * 300, "/assets/%00.js"])
+    def test_a_scanners_odd_path_is_not_a_500(self, client, path):
+        assert client.get(path).status_code in (200, 404)
 
 
 @pytest.mark.api

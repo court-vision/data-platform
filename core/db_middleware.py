@@ -32,7 +32,7 @@ from db.base import db
 # liveness, health (which probes on its own thread), docs, and on the public
 # app the React dashboard's files — which must still load when the database is
 # down, since that is when someone opens the dashboard.
-# tests/api/test_db_middleware.py fails a route added outside /v1.
+# tests/api/test_db_route_accounting.py fails a route added outside /v1.
 DB_PATH_PREFIX = "/v1/"
 
 
