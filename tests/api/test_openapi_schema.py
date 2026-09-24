@@ -47,6 +47,12 @@ class TestPublicAppServesNoDocs:
     def test_schema_still_builds_offline(self, paths):
         assert "/v1/dashboard/status" in paths
 
+    def test_schema_does_not_depend_on_whether_the_dashboard_is_built(self, paths):
+        # `/` is index.html with a build and a JSON stub without one. Either in
+        # the schema would make the export differ between a laptop and CI.
+        assert "/" not in paths
+        assert not any("{path}" in path for path in paths)
+
 
 @pytest.mark.api
 class TestDashboardRoutesHaveConcreteSchemas:

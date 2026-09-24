@@ -1,0 +1,121 @@
+/* Colour tokens live in styles/tokens.css (a guarded copy of the frontend's).
+   This file is the dashboard's own: fonts, base rules, and the few frontend
+   utilities the copied shadcn primitives rely on.
+
+   The import order is load-bearing. tailwind.config.ts, copied verbatim from
+   the frontend, has a plugin that writes every theme colour to :root as a
+   variable, including `--background: hsl(var(--background))`. That declaration
+   refers to itself: if it wins the cascade the variable is invalid and every
+   colour on the page goes with it, with no error anywhere. So the tokens come
+   after Tailwind's base, as they do in the frontend's globals.css.
+   scripts/check-build.ts fails the build if that order is ever lost. */
+@import "tailwindcss/base";
+@import "./styles/tokens.css";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  /* The frontend sets these three with next/font; tailwind.config.ts reads
+     them by name, so defining the same variables keeps that file a verbatim
+     copy. Families come from @fontsource-variable (imported in main.tsx). */
+  :root {
+    --font-jakarta: "Plus Jakarta Sans Variable";
+    --font-jetbrains: "JetBrains Mono Variable";
+    --font-outfit: "Outfit Variable";
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    overscroll-behavior-y: none;
+  }
+
+  /* 44 px hit areas on touch screens without changing the visual size
+     (button.tsx uses it). */
+  @media (pointer: coarse) {
+    .touch-hit {
+      position: relative;
+    }
+    .touch-hit::after {
+      content: "";
+      position: absolute;
+      inset: -8px;
+    }
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(24 8% 30%);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.4);
+  }
+}
+
+@layer utilities {
+  .page-enter {
+    animation: pageEnter 180ms ease-out both;
+  }
+
+  @keyframes pageEnter {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Loading sweep (skeleton.tsx uses it). */
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    background: hsl(var(--muted));
+  }
+
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.07),
+      transparent
+    );
+    animation: skeleton-sweep 1.6s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-sweep {
+    to {
+      transform: translateX(100%);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .page-enter,
+    .skeleton-shimmer::after {
+      animation: none;
+    }
+  }
+}

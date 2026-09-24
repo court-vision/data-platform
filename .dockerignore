@@ -34,3 +34,7 @@ htmlcov/
 .DS_Store
 .env
 .env.*
+
+# Dashboard: the image builds its own dist/ from source
+dashboard/node_modules/
+dashboard/dist/

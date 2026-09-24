@@ -7,13 +7,14 @@ Pydantic models for the pipeline monitoring dashboard API.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from schemas.common import ApiModel
 from schemas.pipeline import PipelineJobInfo
 from schemas.cron import CronJobRunEntry
 
 
-class PipelineHealthEntry(BaseModel):
+class PipelineHealthEntry(ApiModel):
     """Health status for a single registered pipeline."""
 
     name: str
@@ -29,7 +30,7 @@ class PipelineHealthEntry(BaseModel):
     error_streak: int = 0
 
 
-class QualityRunEntry(BaseModel):
+class QualityRunEntry(ApiModel):
     """Summary of a data quality run."""
 
     run_id: str
@@ -44,7 +45,7 @@ class QualityRunEntry(BaseModel):
     error_message: Optional[str] = None
 
 
-class QualityCheckEntry(BaseModel):
+class QualityCheckEntry(ApiModel):
     """Single failed/errored quality check entry."""
 
     check_name: str
@@ -55,7 +56,7 @@ class QualityCheckEntry(BaseModel):
     duration_ms: Optional[int] = None
 
 
-class DashboardStatusData(BaseModel):
+class DashboardStatusData(ApiModel):
     """Data payload for the dashboard status endpoint."""
 
     pipelines: list[PipelineHealthEntry]
@@ -66,7 +67,7 @@ class DashboardStatusData(BaseModel):
     cron_job_runs: list[CronJobRunEntry] = Field(default_factory=list)
 
 
-class DashboardStatusResponse(BaseModel):
+class DashboardStatusResponse(ApiModel):
     """Response for GET /v1/dashboard/status."""
 
     status: str

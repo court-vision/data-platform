@@ -7,6 +7,21 @@ from enum import Enum
 # The status vocabulary is shared with the backend via cv-core.
 from cv_core.status import ApiStatus  # noqa: E402
 
+class ApiModel(BaseModel):
+    """Base for response models the dashboard's generated types describe.
+
+    `json_schema_serialization_defaults_required`: FastAPI serializes every
+    field of a response model, so a default-bearing field is always on the
+    wire. Without this flag pydantic marks such fields optional in the OpenAPI
+    schema and the generated TypeScript becomes `field?: X | null`, which
+    forces an undefined check for something that cannot be undefined. Same
+    rule as backend's `schemas.common.ApiModel`. It changes the schema only,
+    never the response.
+    """
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+
 class BaseResponse(BaseModel, Generic[TypeVar('T')]):
     """
     Base response model that all API responses should extend.

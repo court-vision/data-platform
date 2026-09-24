@@ -1,9 +1,12 @@
 """
 Court Vision Data Platform — Public Interface
 
-Serves only the pipeline monitoring dashboard on a public-facing port
-(0.0.0.0:$PORT). Pipeline trigger endpoints, live routes, and all
-internal APIs remain on the private port (::8001) only.
+Serves the pipeline monitoring dashboard on a public-facing port
+(0.0.0.0:$PORT): the React app at / (core/spa.py) and, until the rewrite
+reaches parity, the Jinja page at /v1/dashboard. Beside it are the routes the
+dashboard calls, all token-authed: its status API, the pipeline triggers and
+the quality checks. Live routes, cron reporting and the API docs stay on the
+private port (::8001) only.
 
 Started alongside main.py by entrypoint.sh. `GET /health` here also probes
 the private process, so Railway / Better Stack (which only see this port)
@@ -28,6 +31,7 @@ from core.health import health_response
 from core.logging import setup_logging, get_logger
 from core.middleware import setup_middleware
 from core.settings import settings
+from core.spa import DIST, mount_dashboard
 from core.telemetry import init_sentry
 from db.base import close_db, init_db
 from api.v1 import dashboard, pipelines, quality
@@ -53,6 +57,11 @@ async def lifespan(app: FastAPI):
 
     init_db()
     log.info("public_database_initialized")
+
+    if DASHBOARD_MOUNTED:
+        log.info("dashboard_mounted", path=str(DIST))
+    else:
+        log.warning("dashboard_dist_missing", path=str(DIST))
 
     yield
 
@@ -104,11 +113,6 @@ async def private_server_check() -> dict:
     return result
 
 
-@app.get("/")
-async def root():
-    return {"message": "Court Vision Data Platform"}
-
-
 # Liveness only; never touches the database
 @app.get("/ping")
 async def ping():
@@ -119,3 +123,14 @@ async def ping():
 @app.get("/health")
 async def health():
     return await health_response({"private_server": await private_server_check()})
+
+
+# The React dashboard at / — last, because its fallback route matches every
+# path. Without a build (tests, a Python-only checkout) / keeps its JSON reply,
+# out of the schema so the export does not depend on whether dist/ exists.
+DASHBOARD_MOUNTED = mount_dashboard(app)
+if not DASHBOARD_MOUNTED:
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return {"message": "Court Vision Data Platform"}
