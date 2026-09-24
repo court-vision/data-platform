@@ -145,3 +145,36 @@ jobs:
       - name: Typecheck and build
         working-directory: dashboard
         run: bun run build
+
+  # The production image. Railway builds this Dockerfile on merge; building it
+  # here catches a broken bun stage, or a runtime image without dist/, on the
+  # PR instead. Build only: nothing is pushed, nothing talks to a database.
+  image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: data-platform:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Runtime image has the dashboard and none of the toolchain
+        run: |
+          docker run --rm --entrypoint sh data-platform:ci -c '
+            test -f dashboard/dist/index.html &&
+            ls dashboard/dist/assets | grep -q "^index-.*\.js$" &&
+            test ! -d dashboard/node_modules &&
+            ! command -v bun >/dev/null && ! command -v node >/dev/null &&
+            echo "ok: dist present, bun/node absent, running as $(id -un)"
+          '
