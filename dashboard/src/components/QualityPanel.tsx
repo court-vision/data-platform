@@ -62,8 +62,9 @@ export function QualityPanel({ quality_latest: latest, recent_quality_runs: rece
                 <ul className="mt-2 flex flex-col gap-2">
                   {failed.map((check) => (
                     <li key={check.check_name} className="text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-medium">{check.check_name}</span>
+                      {/* Check names are long mono words; on a phone this row must wrap. */}
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="break-all font-mono font-medium">{check.check_name}</span>
                         <StatusBadge status={check.status} />
                         <span className="text-muted-foreground">
                           {check.severity} · {check.failures.toLocaleString()} failures
@@ -79,7 +80,7 @@ export function QualityPanel({ quality_latest: latest, recent_quality_runs: rece
             {recent.length > 1 && (
               <ol className="md:col-span-2 flex flex-col divide-y divide-border/50 text-xs" aria-label="Recent runs">
                 {recent.map((entry) => (
-                  <li key={entry.run_id} className="flex items-center gap-3 py-1.5">
+                  <li key={entry.run_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
                     <StatusBadge status={entry.status} />
                     <span className="font-mono" title={formatCentral(entry.started_at)}>{relativeTime(entry.started_at, now)}</span>
                     <span className="font-mono text-muted-foreground">

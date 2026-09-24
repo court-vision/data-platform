@@ -28,8 +28,14 @@
     @apply border-border;
   }
 
+  /* The shell is exactly one viewport tall and <main> is the only scroller,
+     so the document itself never scrolls. */
   html,
-  body,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
   #root {
     height: 100%;
   }
