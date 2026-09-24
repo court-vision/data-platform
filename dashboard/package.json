@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && bun scripts/check-build.ts",
+    "build": "tsc -b && VITE_DEV_TOKEN=__cv_dev_token_sentinel__ vite build && bun scripts/check-build.ts",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "bun test src",

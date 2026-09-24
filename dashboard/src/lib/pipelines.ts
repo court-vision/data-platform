@@ -1,10 +1,17 @@
 import type { PipelineHealth } from "@/hooks/useDashboardStatus"
 
-export type PipelineState = "running" | "failed" | "success" | "never"
+export type PipelineState = "running" | "stuck" | "failed" | "success" | "never"
 
-/** One word for a pipeline's health; `running` wins over whatever ran last. */
+/**
+ * One word for a pipeline's health; `running` wins over whatever ran last.
+ *
+ * `stuck` is a run still marked running after the backend stopped counting it
+ * as live (PipelineRun.is_running gives up after two hours): it hung, and
+ * nothing rewrites the row until the service restarts.
+ */
 export function pipelineState(pipeline: PipelineHealth): PipelineState {
   if (pipeline.is_running) return "running"
+  if (pipeline.last_status === "running") return "stuck"
   if (pipeline.last_status === "failed") return "failed"
   if (pipeline.last_status === "success") return "success"
   return pipeline.last_run_at ? "success" : "never"
@@ -62,7 +69,7 @@ export function summarize(pipelines: PipelineHealth[]): HealthSummary {
   for (const pipeline of pipelines) {
     const state = pipelineState(pipeline)
     if (state === "running") summary.running += 1
-    else if (state === "failed") summary.failing += 1
+    else if (state === "failed" || state === "stuck") summary.failing += 1
     else if (state === "success") summary.healthy += 1
     else summary.neverRun += 1
   }

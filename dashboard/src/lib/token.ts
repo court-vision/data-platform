@@ -9,13 +9,17 @@ const TOKEN_KEY = "cv_pipeline_token"
 // build-time constant, so none of this reaches a production bundle.
 let devToken: string | null = import.meta.env.DEV ? (import.meta.env.VITE_DEV_TOKEN ?? null) : null
 
+// Where the token lives when storage refuses it (site data blocked): until
+// reload. Only set then, so a sign-out in another tab still signs this one out.
+let memoryToken: string | null = null
+
 const listeners = new Set<() => void>()
 
 function read(): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY) ?? devToken
+    return localStorage.getItem(TOKEN_KEY) ?? memoryToken ?? devToken
   } catch {
-    return devToken
+    return memoryToken ?? devToken
   }
 }
 
@@ -30,14 +34,16 @@ export function getToken(): string | null {
 export function setToken(token: string) {
   try {
     localStorage.setItem(TOKEN_KEY, token)
+    memoryToken = null
   } catch {
-    // Private mode: the token lasts until reload, which is still usable.
+    memoryToken = token
   }
   emit()
 }
 
 export function clearToken() {
   devToken = null // "Forget token" must work in dev too, until the next reload
+  memoryToken = null
   try {
     localStorage.removeItem(TOKEN_KEY)
   } catch {

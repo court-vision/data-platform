@@ -7,7 +7,10 @@
  *    src/index.css: if the Tailwind plugin's self-referential
  *    `--background: hsl(var(--background))` lands after the real token, every
  *    colour resolves to nothing and the page renders unthemed, without an error.
- * 2. No dev-only token code reached the bundle (src/lib/token.ts).
+ * 2. No dev token reached the bundle (src/lib/token.ts). `bun run build` sets
+ *    VITE_DEV_TOKEN to a sentinel, so a lost `import.meta.env.DEV` guard puts
+ *    that string in the JS. Looking for identifiers could not catch it: the
+ *    minifier renames `devToken`, and Vite inlines the value in place of the name.
  */
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -32,12 +35,12 @@ if (token === -1) {
   )
 }
 
-if (/VITE_DEV_TOKEN|devToken/.test(js)) {
-  failures.push("dev-only token code is in the production bundle (src/lib/token.ts)")
+if (js.includes("__cv_dev_token_sentinel__")) {
+  failures.push("VITE_DEV_TOKEN's value is in the production bundle: src/lib/token.ts must read it only when import.meta.env.DEV")
 }
 
 if (failures.length > 0) {
   console.error("build check failed:\n" + failures.map((failure) => `  - ${failure}`).join("\n"))
   process.exit(1)
 }
-console.log("build check ok: tokens win the cascade; no dev-token code in the bundle")
+console.log("build check ok: tokens win the cascade; no dev token in the bundle")

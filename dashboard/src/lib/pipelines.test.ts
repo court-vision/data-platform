@@ -30,6 +30,10 @@ describe("pipelineState", () => {
     expect(pipelineState(pipeline())).toBe("success")
   })
 
+  test("a run still marked running after the backend gave up on it is stuck, not OK", () => {
+    expect(pipelineState(pipeline({ is_running: false, last_status: "running" }))).toBe("stuck")
+  })
+
   test("no run at all is `never`, not a failure", () => {
     expect(pipelineState(pipeline({ last_status: null, last_run_at: null }))).toBe("never")
   })
@@ -58,6 +62,7 @@ test("summarize counts each pipeline once", () => {
     pipeline({ last_status: "failed" }),
     pipeline({ is_running: true }),
     pipeline({ last_status: null, last_run_at: null }),
+    pipeline({ last_status: "running" }),
   ])
-  expect(summary).toEqual({ total: 4, healthy: 1, failing: 1, running: 1, neverRun: 1 })
+  expect(summary).toEqual({ total: 5, healthy: 1, failing: 2, running: 1, neverRun: 1 })
 })

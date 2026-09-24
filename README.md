@@ -237,7 +237,7 @@ VITE_DEV_TOKEN=<pipeline token> bun run dev    # the variable is optional: it sk
 
 | Command (in `dashboard/`) | What it does |
 |---|---|
-| `bun run build` | `tsc`, `vite build`, then `scripts/check-build.ts`, which fails the build when the theme's colour tokens would lose the cascade (the page renders unthemed, with no error) or dev-only code reached the bundle |
+| `bun run build` | `tsc`, `vite build`, then `scripts/check-build.ts`, which fails the build when the theme's colour tokens would lose the cascade (the page renders unthemed, with no error) or a dev token reached the bundle (the build sets `VITE_DEV_TOKEN` to a sentinel and looks for it) |
 | `bun test src` | Unit tests for the pure logic (`src/lib`) |
 | `bun run generate:api` | Regenerates `src/types/generated/api.ts` from `openapi/openapi.json` |
 
