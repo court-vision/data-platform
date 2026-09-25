@@ -193,7 +193,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
         name="daily_matchup_scores",
         display_name="Daily Matchup Scores",
         description="Fetches current matchup scores for all saved teams",
-        target_table="stats_s2.daily_matchup_score",
+        target_table="stats_s2.daily_matchup_scores",
         # ESPN matchup data (totalPoints + lineup slots) isn't ready until ESPN's
         # nightly batch (~2 AM ET), which runs after games end (~midnight–1 AM ET).
         # espn_gated=True tells the post-game endpoint to hold this pipeline until

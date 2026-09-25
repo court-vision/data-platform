@@ -8,6 +8,7 @@ Routes:
     GET  /v1/dashboard           — redirect to /, where the app lives (no auth)
     GET  /v1/dashboard/status    — pipeline health, cron runs, quality, jobs (token auth)
     GET  /v1/dashboard/services  — running version of each deployed service (token auth)
+    GET  /v1/dashboard/freshness — what date each pipeline's table runs through (token auth)
 """
 
 import asyncio
@@ -32,6 +33,7 @@ from schemas.cron import CronJobRunEntry
 from schemas.dashboard import (
     DashboardStatusData,
     DashboardStatusResponse,
+    FreshnessResponse,
     PipelineHealthEntry,
     QualityRunEntry,
     QualityCheckEntry,
@@ -41,6 +43,7 @@ from schemas.dashboard import (
 )
 from schemas.pipeline import PipelineJobInfo
 from services.data_quality_service import DataQualityService
+from services.freshness_service import build_freshness
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 log = get_logger("dashboard_api")
@@ -165,6 +168,24 @@ async def get_services(
         status="success",
         message=f"{len(services)} services",
         data=ServicesData(services=services, fetched_at=datetime.now(timezone.utc)),
+    )
+
+
+@router.get("/freshness", response_model=FreshnessResponse)
+async def get_freshness(
+    _: str = Security(verify_pipeline_token),
+) -> FreshnessResponse:
+    """
+    What date each pipeline's table runs through and when it was last written,
+    judged against the season calendar and the last settled game date. Its own
+    route, so its per-table queries never slow the 30 s status poll.
+    """
+    data = await run_in_db_thread(build_freshness)
+    stale = sum(1 for table in data.tables if table.state == "stale")
+    return FreshnessResponse(
+        status="success",
+        message=f"{len(data.tables)} tables, {stale} stale",
+        data=data,
     )
 
 

@@ -38,6 +38,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/freshness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Freshness
+         * @description What date each pipeline's table runs through and when it was last written,
+         *     judged against the season calendar and the last settled game date. Its own
+         *     route, so its per-table queries never slow the 30 s status poll.
+         */
+        get: operations["get_freshness_v1_dashboard_freshness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/services": {
         parameters: {
             query?: never;
@@ -955,6 +977,48 @@ export interface components {
             message: string;
             status: components["schemas"]["ApiStatus"];
         };
+        /** FreshnessData */
+        FreshnessData: {
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Last Game Date */
+            last_game_date: string | null;
+            /** Next Game Date */
+            next_game_date: string | null;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "preseason" | "regular" | "offseason";
+            /** Season */
+            season: string;
+            /**
+             * Settled Through
+             * Format: date
+             */
+            settled_through: string;
+            /** Tables */
+            tables: components["schemas"]["TableFreshness"][];
+            /**
+             * Today
+             * Format: date
+             */
+            today: string;
+        };
+        /**
+         * FreshnessResponse
+         * @description Response for GET /v1/dashboard/freshness.
+         */
+        FreshnessResponse: {
+            data: components["schemas"]["FreshnessData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1333,6 +1397,47 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * TableFreshness
+         * @description What date one table runs through, when it was last written, and the verdict.
+         */
+        TableFreshness: {
+            /** Category */
+            category: string;
+            /** Date Column */
+            date_column: string | null;
+            /** Error */
+            error: string | null;
+            /** Expected Date */
+            expected_date: string | null;
+            /** Latest Date */
+            latest_date: string | null;
+            /** Latest Written At */
+            latest_written_at: string | null;
+            /** Pipelines */
+            pipelines: components["schemas"]["TableWriter"][];
+            /** Rows Estimate */
+            rows_estimate: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "fresh" | "stale" | "idle" | "empty" | "unjudged" | "error";
+            /** Table */
+            table: string;
+            /** Write Column */
+            write_column: string | null;
+        };
+        /**
+         * TableWriter
+         * @description A registered pipeline that writes a table.
+         */
+        TableWriter: {
+            /** Display Name */
+            display_name: string;
+            /** Name */
+            name: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1387,6 +1492,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_freshness_v1_dashboard_freshness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FreshnessResponse"];
                 };
             };
         };

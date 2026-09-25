@@ -4,8 +4,8 @@ Dashboard Response Schemas
 Pydantic models for the pipeline monitoring dashboard API.
 """
 
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import Literal, Optional
 
 from pydantic import Field
 
@@ -102,3 +102,47 @@ class ServicesResponse(ApiModel):
     status: str
     message: str
     data: ServicesData
+
+
+class TableWriter(ApiModel):
+    """A registered pipeline that writes a table."""
+
+    name: str          # registry key
+    display_name: str
+
+
+class TableFreshness(ApiModel):
+    """What date one table runs through, when it was last written, and the verdict."""
+
+    table: str                              # "nba.player_game_stats"
+    pipelines: list[TableWriter]            # its writers, registry order
+    category: str                           # the most time-critical writer's
+    date_column: Optional[str] = None       # the business date: game_date, as_of_date, ...
+    latest_date: Optional[date] = None
+    write_column: Optional[str] = None      # updated_at, created_at, ...
+    latest_written_at: Optional[datetime] = None
+    rows_estimate: Optional[int] = None     # planner statistics, not a count
+    # The game date a nightly table was expected to run through when judged.
+    expected_date: Optional[date] = None
+    state: Literal["fresh", "stale", "idle", "empty", "unjudged", "error"]
+    error: Optional[str] = None
+
+
+class FreshnessData(ApiModel):
+    tables: list[TableFreshness]
+    season: str
+    phase: Literal["preseason", "regular", "offseason"]
+    today: date                             # the ET calendar date
+    # The last game date whose post-game deadline (6 AM ET next morning) has passed.
+    settled_through: date
+    last_game_date: Optional[date] = None   # last final game on or before settled_through
+    next_game_date: Optional[date] = None
+    fetched_at: datetime
+
+
+class FreshnessResponse(ApiModel):
+    """Response for GET /v1/dashboard/freshness."""
+
+    status: str
+    message: str
+    data: FreshnessData
