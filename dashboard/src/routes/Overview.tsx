@@ -3,6 +3,7 @@ import { TriangleAlert } from "lucide-react"
 import { JobsTable } from "@/components/JobsTable"
 import { PipelineSection } from "@/components/PipelineSection"
 import { QualityPanel } from "@/components/QualityPanel"
+import { RefreshNote } from "@/components/RefreshNote"
 import { SchedulerTimeline } from "@/components/SchedulerTimeline"
 import { ServiceCards } from "@/components/ServiceCards"
 import { Card } from "@/components/ui/card"
@@ -10,7 +11,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { STATUS_REFETCH_MS, useDashboardStatus, type PipelineHealth } from "@/hooks/useDashboardStatus"
 import { useNow } from "@/hooks/useNow"
 import { groupByCategory, summarize } from "@/lib/pipelines"
-import { relativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
 export function Overview() {
@@ -25,7 +25,7 @@ export function Overview() {
           <h1 className="font-display text-2xl font-bold tracking-tight">Overview</h1>
           <p className="text-sm text-muted-foreground">Every pipeline, the scheduler, data quality and what is deployed.</p>
         </div>
-        <RefreshNote updatedAt={status.dataUpdatedAt} fetching={status.isFetching} now={now} />
+        <RefreshNote updatedAt={status.dataUpdatedAt} fetching={status.isFetching} now={now} intervalMs={STATUS_REFETCH_MS} />
       </header>
 
       {status.error && (
@@ -61,18 +61,6 @@ export function Overview() {
         </>
       )}
     </div>
-  )
-}
-
-function RefreshNote({ updatedAt, fetching, now }: { updatedAt: number; fetching: boolean; now: number }) {
-  if (!updatedAt) return null
-  const next = Math.max(0, Math.ceil((updatedAt + STATUS_REFETCH_MS - now) / 1000))
-  return (
-    <p className="font-mono text-xs text-muted-foreground" aria-live="off">
-      updated {relativeTime(new Date(updatedAt).toISOString(), now)}
-      <span className="mx-1.5 text-border">·</span>
-      {fetching ? "refreshing…" : `next in ${next}s`}
-    </p>
   )
 }
 

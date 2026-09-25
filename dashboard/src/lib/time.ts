@@ -88,3 +88,20 @@ export function formatUptime(seconds: number | null | undefined): string {
   if (minutes > 0) return `${minutes}m`
   return `${Math.floor(seconds)}s`
 }
+
+const dayFormat = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" })
+
+/**
+ * "Mar 4" for a plain `YYYY-MM-DD`. A calendar date has no zone, so it is
+ * formatted in UTC: read as local time it would shift a day west of Greenwich.
+ */
+export function formatDay(day: string | null | undefined): string {
+  if (!day) return "—"
+  const date = new Date(`${day}T00:00:00Z`)
+  return Number.isNaN(date.getTime()) ? "—" : dayFormat.format(date)
+}
+
+/** Whole days from one plain date to another (negative when `to` is earlier). */
+export function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
+}

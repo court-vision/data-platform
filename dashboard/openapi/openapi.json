@@ -519,6 +519,104 @@
         "title": "DataQualityRunResponse",
         "type": "object"
       },
+      "FreshnessData": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "last_game_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Game Date"
+          },
+          "next_game_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Game Date"
+          },
+          "phase": {
+            "enum": [
+              "preseason",
+              "regular",
+              "offseason"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "season": {
+            "title": "Season",
+            "type": "string"
+          },
+          "settled_through": {
+            "format": "date",
+            "title": "Settled Through",
+            "type": "string"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/TableFreshness"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "today": {
+            "format": "date",
+            "title": "Today",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tables",
+          "season",
+          "phase",
+          "today",
+          "settled_through",
+          "last_game_date",
+          "next_game_date",
+          "fetched_at"
+        ],
+        "title": "FreshnessData",
+        "type": "object"
+      },
+      "FreshnessResponse": {
+        "description": "Response for GET /v1/dashboard/freshness.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FreshnessData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "FreshnessResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1455,6 +1553,152 @@
         "title": "ServicesResponse",
         "type": "object"
       },
+      "TableFreshness": {
+        "description": "What date one table runs through, when it was last written, and the verdict.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "date_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Column"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expected_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Date"
+          },
+          "latest_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Date"
+          },
+          "latest_written_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Written At"
+          },
+          "pipelines": {
+            "items": {
+              "$ref": "#/components/schemas/TableWriter"
+            },
+            "title": "Pipelines",
+            "type": "array"
+          },
+          "rows_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows Estimate"
+          },
+          "state": {
+            "enum": [
+              "fresh",
+              "stale",
+              "idle",
+              "empty",
+              "unjudged",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "write_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write Column"
+          }
+        },
+        "required": [
+          "table",
+          "pipelines",
+          "category",
+          "date_column",
+          "latest_date",
+          "write_column",
+          "latest_written_at",
+          "rows_estimate",
+          "expected_date",
+          "state",
+          "error"
+        ],
+        "title": "TableFreshness",
+        "type": "object"
+      },
+      "TableWriter": {
+        "description": "A registered pipeline that writes a table.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name"
+        ],
+        "title": "TableWriter",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -1533,6 +1777,33 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/v1/dashboard/freshness": {
+      "get": {
+        "description": "What date each pipeline's table runs through and when it was last written,\njudged against the season calendar and the last settled game date. Its own\nroute, so its per-table queries never slow the 30 s status poll.",
+        "operationId": "get_freshness_v1_dashboard_freshness_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreshnessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Freshness",
+        "tags": [
+          "dashboard"
+        ]
       }
     },
     "/v1/dashboard/services": {
