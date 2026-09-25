@@ -88,6 +88,16 @@ async def build_health(
     }
 
 
+def service_info() -> dict[str, Any]:
+    """This process's identity, as /health reports it, without the probes."""
+    return {
+        "service": settings.service_name,
+        "version": settings.version,
+        "environment": settings.environment,
+        "uptime_s": round(time.monotonic() - _STARTED_AT),
+    }
+
+
 def failing_checks(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {name: check for name, check in payload["checks"].items() if not check.get("ok")}
 

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from schemas.common import ApiStatus
+from schemas.common import ApiModel, ApiStatus
 
 
-class DataQualityCheckResult(BaseModel):
+class DataQualityCheckResult(ApiModel):
     check_name: str
     status: str
     severity: str
@@ -21,7 +21,7 @@ class DataQualityCheckResult(BaseModel):
     duration_ms: int | None = None
 
 
-class DataQualityRunInfo(BaseModel):
+class DataQualityRunInfo(ApiModel):
     run_id: str
     status: str
     started_at: str

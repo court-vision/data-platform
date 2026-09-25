@@ -278,7 +278,11 @@
         "required": [
           "check_name",
           "status",
-          "severity"
+          "severity",
+          "failures",
+          "message",
+          "details",
+          "duration_ms"
         ],
         "title": "DataQualityCheckResult",
         "type": "object"
@@ -367,7 +371,15 @@
         "required": [
           "run_id",
           "status",
-          "started_at"
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "total_checks",
+          "passed_checks",
+          "failed_checks",
+          "triggered_by",
+          "error_message",
+          "checks"
         ],
         "title": "DataQualityRunDetail",
         "type": "object"
@@ -449,7 +461,14 @@
         "required": [
           "run_id",
           "status",
-          "started_at"
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "total_checks",
+          "passed_checks",
+          "failed_checks",
+          "triggered_by",
+          "error_message"
         ],
         "title": "DataQualityRunInfo",
         "type": "object"
@@ -669,6 +688,11 @@
       "PipelineHealthEntry": {
         "description": "Health status for a single registered pipeline.",
         "properties": {
+          "accepts_date": {
+            "default": false,
+            "title": "Accepts Date",
+            "type": "boolean"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -764,7 +788,8 @@
           "last_records_processed",
           "last_success_at",
           "is_running",
-          "error_streak"
+          "error_streak",
+          "accepts_date"
         ],
         "title": "PipelineHealthEntry",
         "type": "object"
@@ -1306,6 +1331,130 @@
         "title": "QualityRunEntry",
         "type": "object"
       },
+      "ServiceInfo": {
+        "description": "One deployed service, as its own /health reports it.",
+        "properties": {
+          "configured": {
+            "default": true,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "default": false,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "uptime_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime S"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "configured",
+          "ok",
+          "version",
+          "environment",
+          "uptime_s",
+          "error"
+        ],
+        "title": "ServiceInfo",
+        "type": "object"
+      },
+      "ServicesData": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceInfo"
+            },
+            "title": "Services",
+            "type": "array"
+          }
+        },
+        "required": [
+          "services",
+          "fetched_at"
+        ],
+        "title": "ServicesData",
+        "type": "object"
+      },
+      "ServicesResponse": {
+        "description": "Response for GET /v1/dashboard/services.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ServicesData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "ServicesResponse",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -1386,23 +1535,28 @@
         "summary": "Ping"
       }
     },
-    "/v1/dashboard": {
+    "/v1/dashboard/services": {
       "get": {
-        "description": "Serve the pipeline monitoring dashboard.",
-        "operationId": "get_dashboard_v1_dashboard_get",
+        "description": "The running version of each deployed service, for the dashboard's service\ncards: this process from its own settings, the backend from its /health\nover Railway's private network. Replaces the Deployments section, which\nread a nightly `deploy` cron job that no longer exists.",
+        "operationId": "get_services_v1_dashboard_services_get",
         "responses": {
           "200": {
             "content": {
-              "text/html": {
+              "application/json": {
                 "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ServicesResponse"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Get Dashboard",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Services",
         "tags": [
           "dashboard"
         ]

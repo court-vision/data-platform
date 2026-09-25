@@ -47,6 +47,9 @@ class TestPublicAppServesNoDocs:
     def test_schema_still_builds_offline(self, paths):
         assert "/v1/dashboard/status" in paths
 
+    def test_the_legacy_redirect_is_not_part_of_the_contract(self, paths):
+        assert "/v1/dashboard" not in paths
+
     def test_schema_does_not_depend_on_whether_the_dashboard_is_built(self, paths):
         # `/` is index.html with a build and a JSON stub without one. Either in
         # the schema would make the export differ between a laptop and CI.

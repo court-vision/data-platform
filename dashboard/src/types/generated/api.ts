@@ -38,7 +38,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/dashboard": {
+    "/v1/dashboard/services": {
         parameters: {
             query?: never;
             header?: never;
@@ -46,10 +46,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Dashboard
-         * @description Serve the pipeline monitoring dashboard.
+         * Get Services
+         * @description The running version of each deployed service, for the dashboard's service
+         *     cards: this process from its own settings, the backend from its /health
+         *     over Railway's private network. Replaces the Deployments section, which
+         *     read a nightly `deploy` cron job that no longer exists.
          */
-        get: operations["get_dashboard_v1_dashboard_get"];
+        get: operations["get_services_v1_dashboard_services_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -854,18 +857,18 @@ export interface components {
             /** Check Name */
             check_name: string;
             /** Details */
-            details?: {
+            details: {
                 [key: string]: unknown;
             } | null;
             /** Duration Ms */
-            duration_ms?: number | null;
+            duration_ms: number | null;
             /**
              * Failures
              * @default 0
              */
-            failures?: number;
+            failures: number;
             /** Message */
-            message?: string | null;
+            message: string | null;
             /** Severity */
             severity: string;
             /** Status */
@@ -874,23 +877,23 @@ export interface components {
         /** DataQualityRunDetail */
         DataQualityRunDetail: {
             /** Checks */
-            checks?: components["schemas"]["DataQualityCheckResult"][];
+            checks: components["schemas"]["DataQualityCheckResult"][];
             /** Completed At */
-            completed_at?: string | null;
+            completed_at: string | null;
             /** Duration Seconds */
-            duration_seconds?: number | null;
+            duration_seconds: number | null;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /**
              * Failed Checks
              * @default 0
              */
-            failed_checks?: number;
+            failed_checks: number;
             /**
              * Passed Checks
              * @default 0
              */
-            passed_checks?: number;
+            passed_checks: number;
             /** Run Id */
             run_id: string;
             /** Started At */
@@ -901,28 +904,28 @@ export interface components {
              * Total Checks
              * @default 0
              */
-            total_checks?: number;
+            total_checks: number;
             /** Triggered By */
-            triggered_by?: string | null;
+            triggered_by: string | null;
         };
         /** DataQualityRunInfo */
         DataQualityRunInfo: {
             /** Completed At */
-            completed_at?: string | null;
+            completed_at: string | null;
             /** Duration Seconds */
-            duration_seconds?: number | null;
+            duration_seconds: number | null;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /**
              * Failed Checks
              * @default 0
              */
-            failed_checks?: number;
+            failed_checks: number;
             /**
              * Passed Checks
              * @default 0
              */
-            passed_checks?: number;
+            passed_checks: number;
             /** Run Id */
             run_id: string;
             /** Started At */
@@ -933,9 +936,9 @@ export interface components {
              * Total Checks
              * @default 0
              */
-            total_checks?: number;
+            total_checks: number;
             /** Triggered By */
-            triggered_by?: string | null;
+            triggered_by: string | null;
         };
         /** DataQualityRunListResponse */
         DataQualityRunListResponse: {
@@ -1043,6 +1046,11 @@ export interface components {
          * @description Health status for a single registered pipeline.
          */
         PipelineHealthEntry: {
+            /**
+             * Accepts Date
+             * @default false
+             */
+            accepts_date: boolean;
             /** Category */
             category: string;
             /** Display Name */
@@ -1276,6 +1284,55 @@ export interface components {
             /** Triggered By */
             triggered_by: string | null;
         };
+        /**
+         * ServiceInfo
+         * @description One deployed service, as its own /health reports it.
+         */
+        ServiceInfo: {
+            /**
+             * Configured
+             * @default true
+             */
+            configured: boolean;
+            /** Environment */
+            environment: string | null;
+            /** Error */
+            error: string | null;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /**
+             * Ok
+             * @default false
+             */
+            ok: boolean;
+            /** Uptime S */
+            uptime_s: number | null;
+            /** Version */
+            version: string | null;
+        };
+        /** ServicesData */
+        ServicesData: {
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Services */
+            services: components["schemas"]["ServiceInfo"][];
+        };
+        /**
+         * ServicesResponse
+         * @description Response for GET /v1/dashboard/services.
+         */
+        ServicesResponse: {
+            data: components["schemas"]["ServicesData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1334,7 +1391,7 @@ export interface operations {
             };
         };
     };
-    get_dashboard_v1_dashboard_get: {
+    get_services_v1_dashboard_services_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1349,7 +1406,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/html": string;
+                    "application/json": components["schemas"]["ServicesResponse"];
                 };
             };
         };

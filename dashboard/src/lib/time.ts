@@ -48,3 +48,43 @@ export function formatCentral(iso: string | null | undefined): string {
   )
   return `${parts.month} ${parts.day}, ${parts.hour}:${parts.minute} ${parts.dayPeriod} CT`
 }
+
+const centralClock = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  hour: "numeric",
+  minute: "2-digit",
+})
+
+/** "2:30 PM" in Central, for axis ticks. */
+export function formatClockCentral(ms: number): string {
+  return centralClock.format(new Date(ms))
+}
+
+const centralLong = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+})
+
+/** As formatCentral, with seconds: the exact moment a cron job fired. */
+export function formatCentralLong(iso: string | null | undefined): string {
+  const date = parseUtc(iso)
+  if (!date) return "—"
+  const parts = Object.fromEntries(centralLong.formatToParts(date).map((part) => [part.type, part.value]))
+  return `${parts.month} ${parts.day}, ${parts.hour}:${parts.minute}:${parts.second} ${parts.dayPeriod} CT`
+}
+
+/** "3d 4h", "2h 10m", "5m", "40s": how long a process has been up. */
+export function formatUptime(seconds: number | null | undefined): string {
+  if (seconds == null) return "—"
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m`
+  return `${Math.floor(seconds)}s`
+}

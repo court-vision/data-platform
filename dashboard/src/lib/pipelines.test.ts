@@ -16,6 +16,7 @@ function pipeline(overrides: Partial<PipelineHealth> = {}): PipelineHealth {
     last_success_at: "2026-09-21T07:04:23",
     is_running: false,
     error_streak: 0,
+    accepts_date: true,
     ...overrides,
   }
 }

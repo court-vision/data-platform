@@ -28,6 +28,9 @@ class PipelineHealthEntry(ApiModel):
     last_success_at: Optional[datetime] = None
     is_running: bool = False
     error_streak: int = 0
+    # The trigger route takes ?date=YYYY-MM-DD (a backfill). Most do; the live,
+    # lineup-alerts and playoffs routes run for "now" only.
+    accepts_date: bool = False
 
 
 class QualityRunEntry(ApiModel):
@@ -73,3 +76,29 @@ class DashboardStatusResponse(ApiModel):
     status: str
     message: str
     data: DashboardStatusData
+
+
+class ServiceInfo(ApiModel):
+    """One deployed service, as its own /health reports it."""
+
+    key: str  # "data_platform" | "backend"
+    name: str
+    configured: bool = True  # False: no URL to ask (local dev)
+    ok: bool = False
+    version: Optional[str] = None  # git SHA[:7], "dev" locally
+    environment: Optional[str] = None
+    uptime_s: Optional[int] = None
+    error: Optional[str] = None
+
+
+class ServicesData(ApiModel):
+    services: list[ServiceInfo]
+    fetched_at: datetime
+
+
+class ServicesResponse(ApiModel):
+    """Response for GET /v1/dashboard/services."""
+
+    status: str
+    message: str
+    data: ServicesData
