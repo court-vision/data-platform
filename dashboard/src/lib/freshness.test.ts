@@ -79,21 +79,36 @@ describe("daysBehind", () => {
 })
 
 describe("describeSeason", () => {
-  test("in season: what the verdicts are judged against", () => {
-    expect(describeSeason({ season: "2025-26", phase: "regular", last_game_date: "2026-03-04", next_game_date: "2026-03-06" }))
-      .toBe("Regular season 2025-26 · last settled game Mar 4 · next game Mar 6")
+  test("in season, before today's first tip: both cadences due through last night", () => {
+    expect(describeSeason({ season: "2025-26", phase: "regular", post_game_due: "2026-03-04", pre_game_due: "2026-03-04", next_game_date: "2026-03-05" }))
+      .toBe("Regular season 2025-26 · post-game and pre-game due through Mar 4 · next game Mar 5")
   })
 
-  test("opening week has no settled game yet", () => {
-    expect(describeSeason({ season: "2026-27", phase: "regular", last_game_date: null, next_game_date: "2026-10-21" }))
-      .toBe("Regular season 2026-27 · no game settled yet · next game Oct 21")
+  test("after today's first tip the pre-game cadence is a day ahead", () => {
+    expect(describeSeason({ season: "2025-26", phase: "regular", post_game_due: "2026-03-04", pre_game_due: "2026-03-05", next_game_date: "2026-03-06" }))
+      .toBe("Regular season 2025-26 · post-game due through Mar 4 · pre-game through Mar 5 · next game Mar 6")
   })
 
-  test("outside the season nothing nightly is due", () => {
-    expect(describeSeason({ season: "2026-27", phase: "preseason", last_game_date: null, next_game_date: "2026-10-03" }))
-      .toBe("Preseason 2026-27 · nothing nightly is due · next game Oct 3")
-    expect(describeSeason({ season: "2025-26", phase: "offseason", last_game_date: "2026-04-12", next_game_date: null }))
-      .toBe("Offseason 2025-26 · nothing nightly is due · no game scheduled")
+  test("opening night after tip: only pre-game is due", () => {
+    expect(describeSeason({ season: "2026-27", phase: "regular", post_game_due: null, pre_game_due: "2026-10-21", next_game_date: "2026-10-22" }))
+      .toBe("Regular season 2026-27 · pre-game due through Oct 21 · next game Oct 22")
+  })
+
+  test("opening day before anything is due", () => {
+    expect(describeSeason({ season: "2026-27", phase: "regular", post_game_due: null, pre_game_due: null, next_game_date: "2026-10-21" }))
+      .toBe("Regular season 2026-27 · nothing due until the first night settles · next game Oct 21")
+  })
+
+  test("preseason: nothing nightly is due yet", () => {
+    expect(describeSeason({ season: "2026-27", phase: "preseason", post_game_due: null, pre_game_due: null, next_game_date: "2026-10-03" }))
+      .toBe("Preseason 2026-27 · nothing nightly is due yet · next game Oct 3")
+  })
+
+  test("offseason keeps judging through the season's last night", () => {
+    expect(describeSeason({ season: "2025-26", phase: "offseason", post_game_due: "2026-04-12", pre_game_due: "2026-04-12", next_game_date: null }))
+      .toBe("Offseason 2025-26 · judged through the season's last night, Apr 12")
+    expect(describeSeason({ season: "2026-27", phase: "offseason", post_game_due: null, pre_game_due: null, next_game_date: null }))
+      .toBe("Offseason 2026-27 · nothing nightly is due · no game scheduled")
   })
 })
 

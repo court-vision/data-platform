@@ -13,7 +13,7 @@ export function FreshnessTable({ tables, now }: { tables: TableFreshness[]; now:
           <span className="font-mono text-xs font-normal text-muted-foreground">{tables.length}</span>
         </CardTitle>
         <CardDescription>
-          Nightly tables are judged in season against the last settled game date. Live and scheduled
+          Nightly tables are judged against the schedule: post-game tables through the last settled night, pre-game tables through the last day whose first tip-off has passed. Live and scheduled
           writers, and pipelines that only write when there is something to say, are shown but not judged.
         </CardDescription>
       </CardHeader>

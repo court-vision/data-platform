@@ -37,14 +37,28 @@ export function daysBehind(table: TableFreshness): number | null {
 }
 
 /** One line on where the season is, and so on what the page is judging against. */
-export function describeSeason(data: Pick<FreshnessData, "season" | "phase" | "last_game_date" | "next_game_date">): string {
+export function describeSeason(
+  data: Pick<FreshnessData, "season" | "phase" | "post_game_due" | "pre_game_due" | "next_game_date">,
+): string {
   const next = data.next_game_date ? `next game ${formatDay(data.next_game_date)}` : "no game scheduled"
+  const due = describeDue(data)
   if (data.phase === "regular") {
-    const last = data.last_game_date ? `last settled game ${formatDay(data.last_game_date)}` : "no game settled yet"
-    return `Regular season ${data.season} · ${last} · ${next}`
+    return `Regular season ${data.season} · ${due ?? "nothing due until the first night settles"} · ${next}`
   }
-  const phase = data.phase === "preseason" ? "Preseason" : "Offseason"
-  return `${phase} ${data.season} · nothing nightly is due · ${next}`
+  if (data.phase === "preseason") return `Preseason ${data.season} · nothing nightly is due yet · ${next}`
+  // The season's last night stays judged until the calendar rolls over.
+  return data.post_game_due
+    ? `Offseason ${data.season} · judged through the season's last night, ${formatDay(data.post_game_due)}`
+    : `Offseason ${data.season} · nothing nightly is due · ${next}`
+}
+
+/** "post-game due through Mar 4 · pre-game through Mar 5", or null while nothing is due. */
+function describeDue({ post_game_due: post, pre_game_due: pre }: Pick<FreshnessData, "post_game_due" | "pre_game_due">): string | null {
+  if (post && pre && post === pre) return `post-game and pre-game due through ${formatDay(post)}`
+  const parts: string[] = []
+  if (post) parts.push(`post-game due through ${formatDay(post)}`)
+  if (pre) parts.push(`pre-game ${post ? "" : "due "}through ${formatDay(pre)}`)
+  return parts.length > 0 ? parts.join(" · ") : null
 }
 
 /** The table's own name, and the schema it lives in. */

@@ -13,19 +13,24 @@ Where the facts come from:
   `as_of_date`, `snapshot_date`, ...) and which is its write timestamp. A test
   checks that every registry target resolves to a model with both, so a config
   naming a table that does not exist fails there and not on the page.
-- The season calendar and `nba.games` say what to expect. Outside the regular
-  season nothing nightly is due, so those tables are `idle`, not `stale`.
+- The schedule says what to expect: the game days in `nba.games` (any status)
+  and their first tip-offs. Those rows are written for the whole season ahead
+  by `game_start_times` (its own cron, with a static fallback), never by the
+  nightly batch being judged, so a batch-wide failure cannot move the mark.
+  Before the regular season nothing nightly is due, so those tables are
+  `idle`, not `stale`; after it they stay judged through its last night.
 
-The judgement (`judge`) is a pure function of dates, so it is tested without a
-database; `build_freshness` is the only thing that queries.
+The judgement (`judge`) and the due dates (`due_dates`) are pure functions of
+dates, so they are tested without a database; `build_freshness` is the only
+thing that queries.
 """
 
 from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from typing import Iterable, Literal, Optional
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Callable, Iterable, Literal, Mapping, Optional
 
 import pytz
 from peewee import DateField, DateTimeField, Model
@@ -36,7 +41,7 @@ from db.base import BaseModel, db
 from pipelines import PIPELINE_REGISTRY
 from pipelines.config import PipelineCategory
 from schemas.dashboard import FreshnessData, TableFreshness, TableWriter
-from services.schedule_service import SeasonPhase, get_season_phase
+from services.schedule_service import SeasonPhase, get_season_bounds, get_season_phase
 
 log = get_logger("freshness")
 
@@ -52,7 +57,10 @@ WRITE_COLUMNS = ("updated_at", "last_updated", "captured_at", "created_at", "sen
 
 # Pipelines that write only when there is something to say. A quiet night
 # leaves their table untouched, so its age says nothing about their health.
-CONDITIONAL_WRITERS = frozenset({"lineup_alerts"})
+# lineup_alerts: only when a lineup needs attention. breakout_detection: only
+# when a prominent player is out (`no_prominent_injuries_today` returns
+# without a row).
+CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection"})
 
 # Most time-critical first: the category shown for a table with two writers
 # (nba.games: game_schedule nightly, game_start_times on its own cron).
@@ -154,17 +162,66 @@ def targets() -> list[TableTarget]:
 class Clock:
     """What time it is, for the rule: computed once per request, passed in."""
 
+    now_et: datetime       # naive, Eastern
     today: date            # the ET calendar date
     settled_through: date  # last game date whose post-game deadline has passed
-    phase: SeasonPhase
+    phase: SeasonPhase     # where the season is today (display; the rule uses `Due`)
 
 
 def clock(now: Optional[datetime] = None, season: Optional[str] = None) -> Clock:
-    now_et = (now or datetime.now(timezone.utc)).astimezone(EASTERN)
+    now_et = (now or datetime.now(timezone.utc)).astimezone(EASTERN).replace(tzinfo=None)
     today = now_et.date()
     # A game date is settled once the next morning's deadline has passed.
     settled_through = (now_et - timedelta(hours=POST_GAME_DEADLINE_HOUR_ET)).date() - timedelta(days=1)
-    return Clock(today=today, settled_through=settled_through, phase=get_season_phase(today, season))
+    return Clock(now_et=now_et, today=today, settled_through=settled_through,
+                 phase=get_season_phase(today, season))
+
+
+@dataclass(frozen=True)
+class Due:
+    """The game date each nightly cadence should have run through by now.
+
+    None: nothing is due yet (before the regular season's first settled night,
+    or a calendar with no games). After the season ends this stays at its last
+    night, so a final night that never landed is reported, not forgotten.
+    """
+
+    post_game: Optional[date]  # last regular-season game day whose morning deadline has passed
+    pre_game: Optional[date]   # last regular-season game day whose first tip-off has passed
+
+
+def due_dates(
+    clk: Clock,
+    first_tips: Mapping[date, Optional[time]],
+    in_regular_season: Callable[[date], bool],
+) -> Due:
+    """
+    Read the due dates off the schedule.
+
+    `first_tips` is every game day on or before today with the day's earliest
+    tip-off (ET), None when the start times are not known yet. Preseason days
+    are on the calendar too; only regular-season days can be due.
+
+    Post-game: the last game day that is settled (its 6 AM ET next-morning
+    deadline has passed). Pre-game: a run for a game day is due at that day's
+    first tip-off — the injury report should be in by then — so yesterday's
+    game day until today's tip, today's from then on. A game day without
+    known start times is not due until it is over.
+    """
+    game_days = sorted(day for day in first_tips if in_regular_season(day))
+
+    post_game = max((day for day in game_days if day <= clk.settled_through), default=None)
+
+    def pre_game_due(day: date) -> bool:
+        if day < clk.today:
+            return True
+        if day > clk.today:
+            return False
+        tip = first_tips.get(day)
+        return tip is not None and clk.now_et.time() >= tip
+
+    pre_game = max((day for day in game_days if pre_game_due(day)), default=None)
+    return Due(post_game=post_game, pre_game=pre_game)
 
 
 def judge(
@@ -172,8 +229,7 @@ def judge(
     *,
     latest_date: Optional[date],
     latest_written_at: Optional[datetime],
-    last_game_date: Optional[date],
-    clock: Clock,
+    due: Due,
 ) -> tuple[FreshnessState, Optional[date]]:
     """
     One word for a table, and the date it was expected to run through.
@@ -181,36 +237,41 @@ def judge(
     - `unjudged`: no nightly cadence to hold it to — a scheduled or live
       pipeline, a conditional writer, or a table with no business date. What
       it holds is shown, not judged.
-    - `idle`: a nightly table outside the regular season, or before the first
-      settled game of one. Nothing is due.
+    - `idle`: nothing is due yet for its cadence (see `Due`).
     - `empty`: a nightly table with nothing in it while something is due.
-    - `fresh` / `stale`: in season, against the last settled game date (the
-      last date with a final game whose next-morning deadline has passed).
-      Pre-game tables are held to the same date: their run for that day
-      preceded its games.
+    - `fresh` / `stale`: against the game day its cadence is due through —
+      post-game tables the last settled night, pre-game tables the last day
+      whose first tip-off has passed.
     """
-    if target.category not in (PipelineCategory.POST_GAME, PipelineCategory.PRE_GAME):
+    if target.category == PipelineCategory.POST_GAME:
+        expected = due.post_game
+    elif target.category == PipelineCategory.PRE_GAME:
+        expected = due.pre_game
+    else:
         return "unjudged", None
     if any(p in CONDITIONAL_WRITERS for p in target.pipelines) or target.date_column is None:
         return "unjudged", None
-    if clock.phase != "regular" or last_game_date is None:
+    if expected is None:
         return "idle", None
     if latest_date is None and latest_written_at is None:
         return "empty", None
     if latest_date is None:
-        return "stale", last_game_date
-    return ("stale" if latest_date < last_game_date else "fresh"), last_game_date
+        return "stale", expected
+    return ("stale" if latest_date < expected else "fresh"), expected
 
 
 # ---- queries ---------------------------------------------------------------
 
 
-def _last_game_date(through: date) -> Optional[date]:
-    row = db.execute_sql(
-        "SELECT max(game_date) FROM nba.games WHERE status = 'final' AND game_date <= %s",
-        (through,),
-    ).fetchone()
-    return row[0] if row else None
+def _first_tips(through: date, season: str) -> dict[date, Optional[time]]:
+    """Every game day of the season on or before `through`, with its earliest
+    tip-off (ET). Any status: the schedule, not the results."""
+    rows = db.execute_sql(
+        "SELECT game_date, min(start_time_et) FROM nba.games "
+        "WHERE season = %s AND game_date <= %s GROUP BY game_date",
+        (season, through),
+    ).fetchall()
+    return {day: tip for day, tip in rows}
 
 
 def _next_game_date(today: date) -> Optional[date]:
@@ -247,7 +308,12 @@ def build_freshness(now: Optional[datetime] = None) -> FreshnessData:
     """Every target table, judged. Runs synchronously: wrap in run_in_db_thread."""
     now = now or datetime.now(timezone.utc)
     clk = clock(now)
-    last_game = _last_game_date(clk.settled_through)
+    bounds = get_season_bounds()
+    due = due_dates(
+        clk,
+        _first_tips(clk.today, settings.nba_season),
+        lambda day: bounds.opening_night <= day <= bounds.regular_season_end,
+    )
     next_game = _next_game_date(clk.today)
     try:
         estimates = _row_estimates()
@@ -279,8 +345,7 @@ def build_freshness(now: Optional[datetime] = None) -> FreshnessData:
             tables.append(TableFreshness(**base, state="error", error=type(exc).__name__))
             continue
         state, expected = judge(
-            target, latest_date=latest_date, latest_written_at=latest_written,
-            last_game_date=last_game, clock=clk,
+            target, latest_date=latest_date, latest_written_at=latest_written, due=due,
         )
         tables.append(TableFreshness(
             **base,
@@ -296,7 +361,8 @@ def build_freshness(now: Optional[datetime] = None) -> FreshnessData:
         phase=clk.phase,
         today=clk.today,
         settled_through=clk.settled_through,
-        last_game_date=last_game,
+        post_game_due=due.post_game,
+        pre_game_due=due.pre_game,
         next_game_date=next_game,
         fetched_at=now,
     )

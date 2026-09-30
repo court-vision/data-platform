@@ -526,18 +526,6 @@
             "title": "Fetched At",
             "type": "string"
           },
-          "last_game_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Game Date"
-          },
           "next_game_date": {
             "anyOf": [
               {
@@ -558,6 +546,30 @@
             ],
             "title": "Phase",
             "type": "string"
+          },
+          "post_game_due": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Game Due"
+          },
+          "pre_game_due": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Game Due"
           },
           "season": {
             "title": "Season",
@@ -587,7 +599,8 @@
           "phase",
           "today",
           "settled_through",
-          "last_game_date",
+          "post_game_due",
+          "pre_game_due",
           "next_game_date",
           "fetched_at"
         ],

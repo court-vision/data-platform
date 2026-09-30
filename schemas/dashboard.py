@@ -135,7 +135,9 @@ class FreshnessData(ApiModel):
     today: date                             # the ET calendar date
     # The last game date whose post-game deadline (6 AM ET next morning) has passed.
     settled_through: date
-    last_game_date: Optional[date] = None   # last final game on or before settled_through
+    # The regular-season game day each cadence is held to; None while nothing is due.
+    post_game_due: Optional[date] = None    # last settled game day
+    pre_game_due: Optional[date] = None     # last game day whose first tip-off has passed
     next_game_date: Optional[date] = None
     fetched_at: datetime
 

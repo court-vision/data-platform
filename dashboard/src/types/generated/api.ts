@@ -984,8 +984,6 @@ export interface components {
              * Format: date-time
              */
             fetched_at: string;
-            /** Last Game Date */
-            last_game_date: string | null;
             /** Next Game Date */
             next_game_date: string | null;
             /**
@@ -993,6 +991,10 @@ export interface components {
              * @enum {string}
              */
             phase: "preseason" | "regular" | "offseason";
+            /** Post Game Due */
+            post_game_due: string | null;
+            /** Pre Game Due */
+            pre_game_due: string | null;
             /** Season */
             season: string;
             /**

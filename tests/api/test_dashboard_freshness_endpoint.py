@@ -37,7 +37,7 @@ def _fake_freshness() -> FreshnessData:
             ),
         ],
         season="2025-26", phase="regular", today=date(2026, 3, 5), settled_through=date(2026, 3, 4),
-        last_game_date=date(2026, 3, 4), next_game_date=date(2026, 3, 5),
+        post_game_due=date(2026, 3, 4), pre_game_due=date(2026, 3, 4), next_game_date=date(2026, 3, 5),
         fetched_at=datetime(2026, 3, 5, 13, 0, tzinfo=timezone.utc),
     )
 
@@ -58,7 +58,8 @@ def test_freshness_returns_every_table_and_counts_the_stale_ones(monkeypatch) ->
     assert body["status"] == "success"
     assert body["message"] == "2 tables, 1 stale"
     data = body["data"]
-    assert (data["phase"], data["last_game_date"], data["settled_through"]) == ("regular", "2026-03-04", "2026-03-04")
+    assert (data["phase"], data["settled_through"]) == ("regular", "2026-03-04")
+    assert (data["post_game_due"], data["pre_game_due"]) == ("2026-03-04", "2026-03-04")
     stale, profiles = data["tables"]
     assert stale["state"] == "stale" and stale["expected_date"] == "2026-03-04"
     assert stale["latest_date"] == "2026-03-03" and stale["latest_written_at"] == "2026-03-04T08:01:00"
