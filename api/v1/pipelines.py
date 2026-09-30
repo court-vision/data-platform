@@ -11,6 +11,7 @@ The /all endpoint uses a fire-and-forget pattern:
 """
 
 import asyncio
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, NamedTuple, Optional
 
@@ -71,6 +72,7 @@ DEPLOY_ALERT_DEDUPE = timedelta(hours=12)
 # `PipelineBatch.swept` latch — long enough that a restart mid-sweep cannot
 # produce a second message for the same night.
 POST_GAME_INCOMPLETE_DEDUPE = timedelta(hours=12)
+_SEASON_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 @router.get("/")
@@ -1786,11 +1788,64 @@ async def trigger_preseason_market(
     no-ops outside the Aug 15 – Oct 31 window and when the league has not
     rolled to the target season. Called daily by the 'preseason-market' cron
     job in cron-runner during draft season.
+
+    Two pipelines follow it on the same trigger, in order: player-profiles, so
+    every player's current team is today's (it had no schedule of its own, and
+    a whole offseason of trades went unrecorded), then cv-projection, which is
+    built on the day's ESPN line and those rosters. Both run whatever the
+    market run did; cv-projection gates itself on the same window.
     """
     options = {"league_id": league_id} if league_id is not None else None
     result = await run_pipeline("preseason_market", date_override=date, options=options)
+    profiles = await run_pipeline("player_profiles")
+    projection = await run_pipeline("cv_projection", date_override=date)
+    log.info(
+        "preseason_chain_complete",
+        preseason_market=result.status, player_profiles=profiles.status, cv_projection=projection.status,
+    )
     return PipelineResponse(
         status=result.status,
         message=result.message,
         data=result,
     )
+
+
+@router.post("/season-history", response_model=PipelineResponse)
+async def trigger_season_history(
+    _: str = Security(verify_pipeline_token),
+    seasons: list[str] = Query(
+        default=[],
+        description="Seasons to write, e.g. `seasons=2023-24&seasons=2024-25`. Omit for the season just finished.",
+    ),
+) -> PipelineResponse:
+    """
+    Trigger the season-history pipeline.
+
+    Writes one row per player per completed regular season into
+    nba.player_history — the Court Vision projection's input. Manual: the
+    one-time backfill passes every season wanted; the yearly append passes
+    nothing, after the regular season ends.
+    """
+    for season in seasons:
+        if not _SEASON_RE.match(season):
+            raise HTTPException(status_code=422, detail=f"season must look like 2025-26, got {season!r}")
+    result = await run_pipeline("season_history", options={"seasons": seasons} if seasons else None)
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+@router.post("/cv-projection", response_model=PipelineResponse)
+async def trigger_cv_projection(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Override snapshot date (YYYY-MM-DD). Omit for automatic date."),
+    force: bool = Query(False, description="Run outside the Aug 15 - Oct 31 preseason window."),
+) -> PipelineResponse:
+    """
+    Trigger the cv-projection pipeline.
+
+    Builds Court Vision's projection — three seasons of history, ESPN's line,
+    the curated adjustments — into nba.player_projections with source 'cv'.
+    Called daily by the 'cv-projection' cron job after preseason-market, and
+    by the projections editor after an adjustment is saved.
+    """
+    result = await run_pipeline("cv_projection", date_override=date, options={"force": True} if force else None)
+    return PipelineResponse(status=result.status, message=result.message, data=result)

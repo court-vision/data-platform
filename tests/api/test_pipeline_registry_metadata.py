@@ -28,7 +28,7 @@ CRON_RUNNER_JOBS = {
 }
 
 # SCHEDULED pipelines that no cron-runner job fires (manual trigger only).
-UNSCHEDULED = {"player_profiles"}
+UNSCHEDULED = {"season_history"}
 
 
 def _post_paths(app) -> set[str]:
