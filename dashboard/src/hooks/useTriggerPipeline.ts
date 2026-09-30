@@ -1,11 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import type { PipelineHealth } from "@/hooks/useDashboardStatus"
 import { apiFetch, type Schemas } from "@/lib/api"
+import type { Runnable } from "@/lib/pipelines"
 
 interface TriggerArgs {
-  pipeline: PipelineHealth
+  pipeline: Runnable
   /** YYYY-MM-DD backfill date; only for pipelines whose route accepts one. */
   date?: string
 }

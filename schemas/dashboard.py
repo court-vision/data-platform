@@ -148,3 +148,65 @@ class FreshnessResponse(ApiModel):
     status: str
     message: str
     data: FreshnessData
+
+
+class PipelineInfo(ApiModel):
+    """What the registry says about one pipeline: its config, as the page shows it."""
+
+    name: str                    # registry key, the URL segment
+    display_name: str
+    description: str
+    category: str
+    target_table: str
+    trigger_endpoint: str
+    accepts_date: bool
+    cron_job: Optional[str] = None            # cron-runner job that fires it
+    depends_on: list[str] = Field(default_factory=list)
+    timeout_seconds: int
+    allow_concurrent: bool = False
+    espn_gated: bool = False                  # post-game: waits for ESPN's scoring period to flip
+    earliest_run_time_cst: Optional[str] = None   # post-game: "HH:MM" wall-clock gate
+    pre_game_window_minutes: Optional[int] = None # pre-game: minutes before first tip; None = default
+    is_running: bool = False
+
+
+class PipelineRunEntry(ApiModel):
+    """One row of nba.pipeline_runs."""
+
+    id: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str                  # running | success | failed
+    duration_seconds: Optional[float] = None
+    records_processed: int = 0
+    error_message: Optional[str] = None
+
+
+class RunsSummary(ApiModel):
+    """Over the runs returned (a window, newest first), not all time."""
+
+    total: int
+    succeeded: int
+    failed: int
+    running: int
+    success_rate: Optional[float] = None          # succeeded / finished; None with nothing finished
+    median_duration_seconds: Optional[float] = None
+    max_duration_seconds: Optional[float] = None
+    last_success_at: Optional[datetime] = None
+    oldest_started_at: Optional[datetime] = None  # how far back the window reaches
+
+
+class PipelineRunsData(ApiModel):
+    pipeline: PipelineInfo
+    runs: list[PipelineRunEntry]                  # newest first
+    summary: RunsSummary
+    limit: int
+    fetched_at: datetime
+
+
+class PipelineRunsResponse(ApiModel):
+    """Response for GET /v1/dashboard/pipelines/{name}/runs."""
+
+    status: str
+    message: str
+    data: PipelineRunsData

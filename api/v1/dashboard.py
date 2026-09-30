@@ -9,14 +9,16 @@ Routes:
     GET  /v1/dashboard/status    — pipeline health, cron runs, quality, jobs (token auth)
     GET  /v1/dashboard/services  — running version of each deployed service (token auth)
     GET  /v1/dashboard/freshness — what date each pipeline's table runs through (token auth)
+    GET  /v1/dashboard/pipelines/{name}/runs — one pipeline's config and run history (token auth)
 """
 
 import asyncio
+import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Security
+from fastapi import APIRouter, HTTPException, Query, Security
 from fastapi.responses import RedirectResponse
 
 from api.v1.pipelines import router as pipelines_router
@@ -34,6 +36,11 @@ from schemas.dashboard import (
     DashboardStatusData,
     DashboardStatusResponse,
     FreshnessResponse,
+    PipelineInfo,
+    PipelineRunEntry,
+    PipelineRunsData,
+    PipelineRunsResponse,
+    RunsSummary,
     PipelineHealthEntry,
     QualityRunEntry,
     QualityCheckEntry,
@@ -216,6 +223,104 @@ def _probe_backend() -> ServiceInfo:
         environment=body.get("environment"),
         uptime_s=body.get("uptime_s"),
         error=None if ok else f"degraded: {', '.join(failing) or f'HTTP {response.status_code}'}",
+    )
+
+
+RUNS_DEFAULT_LIMIT = 50
+RUNS_MAX_LIMIT = 200
+
+
+@router.get("/pipelines/{name}/runs", response_model=PipelineRunsResponse)
+async def get_pipeline_runs(
+    name: str,
+    limit: int = Query(RUNS_DEFAULT_LIMIT, ge=1, le=RUNS_MAX_LIMIT, description="Newest runs to return"),
+    _: str = Security(verify_pipeline_token),
+) -> PipelineRunsResponse:
+    """
+    One pipeline's page: what the registry says about it (trigger, cron job,
+    gates, dependencies) and its newest runs with a summary over that window.
+    """
+    if name not in PIPELINE_REGISTRY:
+        raise HTTPException(status_code=404, detail=f"Unknown pipeline '{name}'")
+    data = await run_in_db_thread(_build_runs, name, limit)
+    return PipelineRunsResponse(
+        status="success",
+        message=f"{len(data.runs)} runs of {name}",
+        data=data,
+    )
+
+
+def pipeline_info(name: str, *, is_running: bool = False) -> PipelineInfo:
+    """The registry entry as the page shows it. Every field is on PipelineConfig."""
+    config = PIPELINE_REGISTRY[name].config
+    return PipelineInfo(
+        name=name,
+        display_name=config.display_name,
+        description=config.description,
+        category=config.category.value,
+        target_table=config.target_table,
+        trigger_endpoint=trigger_endpoint(config),
+        accepts_date=trigger_accepts_date(config),
+        cron_job=config.cron_job_name,
+        depends_on=list(config.depends_on),
+        timeout_seconds=config.timeout_seconds,
+        allow_concurrent=config.allow_concurrent,
+        espn_gated=config.espn_gated,
+        earliest_run_time_cst=(
+            config.earliest_run_time_cst.strftime("%H:%M") if config.earliest_run_time_cst else None
+        ),
+        pre_game_window_minutes=config.pre_game_window_minutes,
+        is_running=is_running,
+    )
+
+
+def summarize_runs(runs: list[PipelineRunEntry]) -> RunsSummary:
+    """Counts and durations over the window. Pure: tested without a database."""
+    finished = [r for r in runs if r.status in ("success", "failed")]
+    durations = [r.duration_seconds for r in finished if r.duration_seconds is not None]
+    succeeded = sum(1 for r in finished if r.status == "success")
+    successes = [r.completed_at or r.started_at for r in runs if r.status == "success"]
+    return RunsSummary(
+        total=len(runs),
+        succeeded=succeeded,
+        failed=len(finished) - succeeded,
+        running=sum(1 for r in runs if r.status == "running"),
+        success_rate=(succeeded / len(finished)) if finished else None,
+        median_duration_seconds=statistics.median(durations) if durations else None,
+        max_duration_seconds=max(durations) if durations else None,
+        last_success_at=max(successes) if successes else None,
+        oldest_started_at=min((r.started_at for r in runs), default=None),
+    )
+
+
+def _build_runs(name: str, limit: int) -> PipelineRunsData:
+    """Runs synchronously — caller must wrap in run_in_db_thread."""
+    # Rows are keyed by config.name, which can differ from the registry key.
+    db_name = PIPELINE_REGISTRY[name].config.name
+    rows = (
+        PipelineRun.select()
+        .where(PipelineRun.pipeline_name == db_name)
+        .order_by(PipelineRun.started_at.desc())
+        .limit(limit)
+    )
+    runs = [
+        PipelineRunEntry(
+            id=str(r.id),
+            started_at=r.started_at,
+            completed_at=r.completed_at,
+            status=r.status,
+            duration_seconds=r.duration_seconds,
+            records_processed=r.records_processed or 0,
+            error_message=r.error_message,
+        )
+        for r in rows
+    ]
+    return PipelineRunsData(
+        pipeline=pipeline_info(name, is_running=PipelineRun.is_running(db_name)),
+        runs=runs,
+        summary=summarize_runs(runs),
+        limit=limit,
+        fetched_at=datetime.now(timezone.utc),
     )
 
 

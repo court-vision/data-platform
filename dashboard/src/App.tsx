@@ -7,6 +7,7 @@ import { useToken } from "@/lib/token"
 import { Freshness } from "@/routes/Freshness"
 import { NotFound } from "@/routes/NotFound"
 import { Overview } from "@/routes/Overview"
+import { PipelineDetail } from "@/routes/PipelineDetail"
 
 /** The gate lives inside the router, so a deep link survives signing in. */
 function Root() {
@@ -22,6 +23,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Overview /> },
       { path: "data", element: <Freshness /> },
+      { path: "pipelines/:name", element: <PipelineDetail /> },
       { path: "*", element: <NotFound /> },
     ],
   },

@@ -905,6 +905,117 @@
         "title": "PipelineHealthEntry",
         "type": "object"
       },
+      "PipelineInfo": {
+        "description": "What the registry says about one pipeline: its config, as the page shows it.",
+        "properties": {
+          "accepts_date": {
+            "title": "Accepts Date",
+            "type": "boolean"
+          },
+          "allow_concurrent": {
+            "default": false,
+            "title": "Allow Concurrent",
+            "type": "boolean"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "cron_job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Job"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Depends On",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "earliest_run_time_cst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Earliest Run Time Cst"
+          },
+          "espn_gated": {
+            "default": false,
+            "title": "Espn Gated",
+            "type": "boolean"
+          },
+          "is_running": {
+            "default": false,
+            "title": "Is Running",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pre_game_window_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Game Window Minutes"
+          },
+          "target_table": {
+            "title": "Target Table",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "trigger_endpoint": {
+            "title": "Trigger Endpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name",
+          "description",
+          "category",
+          "target_table",
+          "trigger_endpoint",
+          "accepts_date",
+          "cron_job",
+          "depends_on",
+          "timeout_seconds",
+          "allow_concurrent",
+          "espn_gated",
+          "earliest_run_time_cst",
+          "pre_game_window_minutes",
+          "is_running"
+        ],
+        "title": "PipelineInfo",
+        "type": "object"
+      },
       "PipelineJobDetail": {
         "description": "Full details of a pipeline job including results.",
         "properties": {
@@ -1298,6 +1409,132 @@
         "title": "PipelineResult",
         "type": "object"
       },
+      "PipelineRunEntry": {
+        "description": "One row of nba.pipeline_runs.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "records_processed": {
+            "default": 0,
+            "title": "Records Processed",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "completed_at",
+          "status",
+          "duration_seconds",
+          "records_processed",
+          "error_message"
+        ],
+        "title": "PipelineRunEntry",
+        "type": "object"
+      },
+      "PipelineRunsData": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "pipeline": {
+            "$ref": "#/components/schemas/PipelineInfo"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineRunEntry"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/RunsSummary"
+          }
+        },
+        "required": [
+          "pipeline",
+          "runs",
+          "summary",
+          "limit",
+          "fetched_at"
+        ],
+        "title": "PipelineRunsData",
+        "type": "object"
+      },
+      "PipelineRunsResponse": {
+        "description": "Response for GET /v1/dashboard/pipelines/{name}/runs.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PipelineRunsData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "PipelineRunsResponse",
+        "type": "object"
+      },
       "QualityCheckEntry": {
         "description": "Single failed/errored quality check entry.",
         "properties": {
@@ -1440,6 +1677,97 @@
           "error_message"
         ],
         "title": "QualityRunEntry",
+        "type": "object"
+      },
+      "RunsSummary": {
+        "description": "Over the runs returned (a window, newest first), not all time.",
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "max_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Seconds"
+          },
+          "median_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Duration Seconds"
+          },
+          "oldest_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Started At"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "success_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success Rate"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "running",
+          "success_rate",
+          "median_duration_seconds",
+          "max_duration_seconds",
+          "last_success_at",
+          "oldest_started_at"
+        ],
+        "title": "RunsSummary",
         "type": "object"
       },
       "ServiceInfo": {
@@ -1814,6 +2142,68 @@
           }
         ],
         "summary": "Get Freshness",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/pipelines/{name}/runs": {
+      "get": {
+        "description": "One pipeline's page: what the registry says about it (trigger, cron job,\ngates, dependencies) and its newest runs with a summary over that window.",
+        "operationId": "get_pipeline_runs_v1_dashboard_pipelines__name__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Newest runs to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Newest runs to return",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRunsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Pipeline Runs",
         "tags": [
           "dashboard"
         ]

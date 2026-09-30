@@ -60,6 +60,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/pipelines/{name}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pipeline Runs
+         * @description One pipeline's page: what the registry says about it (trigger, cron job,
+         *     gates, dependencies) and its newest runs with a summary over that window.
+         */
+        get: operations["get_pipeline_runs_v1_dashboard_pipelines__name__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/services": {
         parameters: {
             query?: never;
@@ -1147,6 +1168,51 @@ export interface components {
             trigger_endpoint: string;
         };
         /**
+         * PipelineInfo
+         * @description What the registry says about one pipeline: its config, as the page shows it.
+         */
+        PipelineInfo: {
+            /** Accepts Date */
+            accepts_date: boolean;
+            /**
+             * Allow Concurrent
+             * @default false
+             */
+            allow_concurrent: boolean;
+            /** Category */
+            category: string;
+            /** Cron Job */
+            cron_job: string | null;
+            /** Depends On */
+            depends_on: string[];
+            /** Description */
+            description: string;
+            /** Display Name */
+            display_name: string;
+            /** Earliest Run Time Cst */
+            earliest_run_time_cst: string | null;
+            /**
+             * Espn Gated
+             * @default false
+             */
+            espn_gated: boolean;
+            /**
+             * Is Running
+             * @default false
+             */
+            is_running: boolean;
+            /** Name */
+            name: string;
+            /** Pre Game Window Minutes */
+            pre_game_window_minutes: number | null;
+            /** Target Table */
+            target_table: string;
+            /** Timeout Seconds */
+            timeout_seconds: number;
+            /** Trigger Endpoint */
+            trigger_endpoint: string;
+        };
+        /**
          * PipelineJobDetail
          * @description Full details of a pipeline job including results.
          */
@@ -1295,6 +1361,57 @@ export interface components {
             status: components["schemas"]["ApiStatus"];
         };
         /**
+         * PipelineRunEntry
+         * @description One row of nba.pipeline_runs.
+         */
+        PipelineRunEntry: {
+            /** Completed At */
+            completed_at: string | null;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Records Processed
+             * @default 0
+             */
+            records_processed: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+        };
+        /** PipelineRunsData */
+        PipelineRunsData: {
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Limit */
+            limit: number;
+            pipeline: components["schemas"]["PipelineInfo"];
+            /** Runs */
+            runs: components["schemas"]["PipelineRunEntry"][];
+            summary: components["schemas"]["RunsSummary"];
+        };
+        /**
+         * PipelineRunsResponse
+         * @description Response for GET /v1/dashboard/pipelines/{name}/runs.
+         */
+        PipelineRunsResponse: {
+            data: components["schemas"]["PipelineRunsData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * QualityCheckEntry
          * @description Single failed/errored quality check entry.
          */
@@ -1349,6 +1466,30 @@ export interface components {
             total_checks: number;
             /** Triggered By */
             triggered_by: string | null;
+        };
+        /**
+         * RunsSummary
+         * @description Over the runs returned (a window, newest first), not all time.
+         */
+        RunsSummary: {
+            /** Failed */
+            failed: number;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Max Duration Seconds */
+            max_duration_seconds: number | null;
+            /** Median Duration Seconds */
+            median_duration_seconds: number | null;
+            /** Oldest Started At */
+            oldest_started_at: string | null;
+            /** Running */
+            running: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Success Rate */
+            success_rate: number | null;
+            /** Total */
+            total: number;
         };
         /**
          * ServiceInfo
@@ -1514,6 +1655,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FreshnessResponse"];
+                };
+            };
+        };
+    };
+    get_pipeline_runs_v1_dashboard_pipelines__name__runs_get: {
+        parameters: {
+            query?: {
+                /** @description Newest runs to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
