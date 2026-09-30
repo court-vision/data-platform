@@ -72,7 +72,7 @@ async def get_dashboard(request: Request) -> HTMLResponse:
     """Serve the pipeline monitoring dashboard."""
     if _templates is None:
         return HTMLResponse("<h1>Templates not configured</h1>", status_code=500)
-    return _templates.TemplateResponse("dashboard.html", {"request": request})
+    return _templates.TemplateResponse(request, "dashboard.html")
 
 
 @router.get("/status", response_model=DashboardStatusResponse)

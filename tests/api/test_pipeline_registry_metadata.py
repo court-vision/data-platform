@@ -8,6 +8,7 @@ its cron runs. These tests make that a failure at the registry instead.
 """
 
 import pytest
+from fastapi.routing import iter_route_contexts
 
 import main
 import main_public
@@ -32,10 +33,11 @@ UNSCHEDULED = {"player_profiles"}
 
 
 def _post_paths(app) -> set[str]:
+    # iter_route_contexts: app.routes holds included routers as tree nodes
     return {
         route.path
-        for route in app.routes
-        if "POST" in (getattr(route, "methods", None) or ())
+        for route in iter_route_contexts(app.routes)
+        if "POST" in (route.methods or ())
     }
 
 
