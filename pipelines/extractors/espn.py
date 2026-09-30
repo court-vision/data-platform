@@ -91,6 +91,10 @@ def parse_draft_market_players(players: list[dict], projected_split_id: str) -> 
             "injury_status": player.get("injuryStatus"),
             "projected_total": projected.get("appliedTotal") if projected else None,
             "projected_avg": projected.get("appliedAverage") if projected else None,
+            # Stat 42 is games played. ESPN projects it directly, and it is the
+            # only projected-games figure a category league's payload carries:
+            # the applied total/average are points-scoring fields, empty there.
+            "projected_games": (projected.get("stats") or {}).get("42") if projected else None,
             "projected_stats": (projected.get("averageStats") or None) if projected else None,
         })
     return rows
