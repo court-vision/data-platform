@@ -81,6 +81,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/projections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Projections
+         * @description Every projected player with the four lines side by side — statistical,
+         *     ESPN, blend, final — his live adjustment, and where the final line ranks in
+         *     the standard league next to ESPN's own ranks.
+         *
+         *     The lines are computed here from the same inputs cv-projection reads, so
+         *     the page reflects an adjustment the moment it is saved; `unpublished` says
+         *     how many of them the published snapshot has not caught up with.
+         */
+        get: operations["get_projections_v1_dashboard_projections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/projections/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Adjustment
+         * @description One player's final line and standard ranks as they stand, and as they
+         *     would be under the adjustment in the body (or with none at all). Nothing is
+         *     written. The whole pool is re-valued, because a rank is a place among
+         *     everybody.
+         */
+        post: operations["preview_adjustment_v1_dashboard_projections_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/projections/{player_id}/adjustment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Adjustment
+         * @description Make the body the player's live adjustment for the season. The previous
+         *     version is kept and marked superseded. Then republish the projection.
+         */
+        put: operations["save_adjustment_v1_dashboard_projections__player_id__adjustment_put"];
+        post?: never;
+        /**
+         * Retire Adjustment
+         * @description Withdraw the player's live adjustment without a replacement (the row is
+         *     kept, marked retired), then republish the projection.
+         */
+        delete: operations["retire_adjustment_v1_dashboard_projections__player_id__adjustment_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/projections/{player_id}/adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Adjustment History
+         * @description Every version of the player's adjustment this season, newest first:
+         *     the live one, the ones it superseded, and any that were retired.
+         */
+        get: operations["get_adjustment_history_v1_dashboard_projections__player_id__adjustments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/services": {
         parameters: {
             query?: never;
@@ -246,6 +342,31 @@ export interface paths {
          *     Pass ?date=YYYY-MM-DD to backfill a specific date.
          */
         post: operations["trigger_cumulative_player_stats_v1_internal_pipelines_cumulative_player_stats_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/internal/pipelines/cv-projection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Cv Projection
+         * @description Trigger the cv-projection pipeline.
+         *
+         *     Builds Court Vision's projection — three seasons of history, ESPN's line,
+         *     the curated adjustments — into nba.player_projections with source 'cv'.
+         *     Called daily by the 'cv-projection' cron job after preseason-market, and
+         *     by the projections editor after an adjustment is saved.
+         */
+        post: operations["trigger_cv_projection_v1_internal_pipelines_cv_projection_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -726,8 +847,39 @@ export interface paths {
          *     no-ops outside the Aug 15 – Oct 31 window and when the league has not
          *     rolled to the target season. Called daily by the 'preseason-market' cron
          *     job in cron-runner during draft season.
+         *
+         *     Two pipelines follow it on the same trigger, in order: player-profiles, so
+         *     every player's current team is today's (it had no schedule of its own, and
+         *     a whole offseason of trades went unrecorded), then cv-projection, which is
+         *     built on the day's ESPN line and those rosters. Both run whatever the
+         *     market run did; cv-projection gates itself on the same window.
          */
         post: operations["trigger_preseason_market_v1_internal_pipelines_preseason_market_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/internal/pipelines/season-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Season History
+         * @description Trigger the season-history pipeline.
+         *
+         *     Writes one row per player per completed regular season into
+         *     nba.player_history — the Court Vision projection's input. Manual: the
+         *     one-time backfill passes every season wanted; the yearly append passes
+         *     nothing, after the regular season ends.
+         */
+        post: operations["trigger_season_history_v1_internal_pipelines_season_history_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -814,6 +966,174 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdjustmentChange
+         * @description The numbers an adjustment sets. Minutes and games are targets, not deltas.
+         */
+        AdjustmentChange: {
+            /**
+             * Games
+             * @description Target games played
+             */
+            games?: number | null;
+            /**
+             * Minutes
+             * @description Target minutes per game
+             */
+            minutes?: number | null;
+            /**
+             * Rates
+             * @description Per-stat multipliers on the final line, e.g. {"blk": 1.1}
+             */
+            rates?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Return Date
+             * @description First game back: games are capped at the ones his team plays from then
+             */
+            return_date?: string | null;
+            /**
+             * Usage
+             * @description Multiplier on scoring and playmaking together (pts, makes and attempts, ast, tov)
+             */
+            usage?: number | null;
+        };
+        /**
+         * AdjustmentEntry
+         * @description One version of one player's adjustment (nba.projection_adjustments).
+         */
+        AdjustmentEntry: {
+            /** Author */
+            author: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Games */
+            games: number | null;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Minutes */
+            minutes: number | null;
+            /** Note */
+            note: string;
+            /** Rates */
+            rates: {
+                [key: string]: number;
+            } | null;
+            /** Return Date */
+            return_date: string | null;
+            /** Source Url */
+            source_url: string | null;
+            /**
+             * State
+             * @default live
+             */
+            state: string;
+            /** Usage */
+            usage: number | null;
+        };
+        /** AdjustmentHistory */
+        AdjustmentHistory: {
+            /** Player Id */
+            player_id: number;
+            /** Season */
+            season: string;
+            /**
+             * Versions
+             * @description Every version, newest first
+             */
+            versions: components["schemas"]["AdjustmentEntry"][];
+        };
+        /** AdjustmentHistoryResponse */
+        AdjustmentHistoryResponse: {
+            data: components["schemas"]["AdjustmentHistory"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * AdjustmentSave
+         * @description A new version of a player's adjustment. Saving supersedes the live one.
+         */
+        AdjustmentSave: {
+            /**
+             * Author
+             * @default dashboard
+             */
+            author?: string;
+            /**
+             * Games
+             * @description Target games played
+             */
+            games?: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "year2" | "trade" | "role" | "injury_return" | "injury_current" | "age" | "other";
+            /**
+             * Minutes
+             * @description Target minutes per game
+             */
+            minutes?: number | null;
+            /**
+             * Note
+             * @description Why — the judgment being recorded
+             */
+            note: string;
+            /**
+             * Rates
+             * @description Per-stat multipliers on the final line, e.g. {"blk": 1.1}
+             */
+            rates?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Return Date
+             * @description First game back: games are capped at the ones his team plays from then
+             */
+            return_date?: string | null;
+            /**
+             * Source Url
+             * @description The report it came from
+             */
+            source_url?: string | null;
+            /**
+             * Usage
+             * @description Multiplier on scoring and playmaking together (pts, makes and attempts, ast, tov)
+             */
+            usage?: number | null;
+        };
+        /**
+         * AdjustmentSaved
+         * @description What a save or a retire did: the table write, and the republish that followed.
+         */
+        AdjustmentSaved: {
+            /** @description The new live adjustment; None after a retire */
+            adjustment: components["schemas"]["AdjustmentEntry"] | null;
+            pipeline: components["schemas"]["PipelineResult"] | null;
+            /** Player Id */
+            player_id: number;
+            /**
+             * Published
+             * @description Whether cv-projection republished the board's snapshot
+             */
+            published: boolean;
+        };
+        /** AdjustmentSavedResponse */
+        AdjustmentSavedResponse: {
+            data: components["schemas"]["AdjustmentSaved"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
         /**
          * AllPipelinesResponse
          * @description Response for triggering all pipelines
@@ -1409,6 +1729,217 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** PreviewRequest */
+        PreviewRequest: {
+            /** @description The adjustment to try. Omit (or null) to preview having none. */
+            adjustment?: components["schemas"]["AdjustmentChange"] | null;
+            /** Player Id */
+            player_id: number;
+        };
+        /** PreviewResponse */
+        PreviewResponse: {
+            data: components["schemas"]["ProjectionPreview"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /** PreviewSide */
+        PreviewSide: {
+            final: components["schemas"]["ProjectionLine"];
+            ranks: components["schemas"]["StandardRanks"];
+        };
+        /**
+         * ProjectionLine
+         * @description One per-game stat line and the games it is expected over.
+         */
+        ProjectionLine: {
+            /**
+             * Ast
+             * @default 0
+             */
+            ast: number;
+            /**
+             * Blk
+             * @default 0
+             */
+            blk: number;
+            /**
+             * Fg3A
+             * @default 0
+             */
+            fg3a: number;
+            /**
+             * Fg3M
+             * @default 0
+             */
+            fg3m: number;
+            /**
+             * Fga
+             * @default 0
+             */
+            fga: number;
+            /**
+             * Fgm
+             * @default 0
+             */
+            fgm: number;
+            /**
+             * Fta
+             * @default 0
+             */
+            fta: number;
+            /**
+             * Ftm
+             * @default 0
+             */
+            ftm: number;
+            /**
+             * Games
+             * @description Expected games; None where the source has none
+             */
+            games: number | null;
+            /** Min */
+            min: number | null;
+            /**
+             * Pts
+             * @default 0
+             */
+            pts: number;
+            /**
+             * Reb
+             * @default 0
+             */
+            reb: number;
+            /**
+             * Stl
+             * @default 0
+             */
+            stl: number;
+            /**
+             * Tov
+             * @default 0
+             */
+            tov: number;
+        };
+        /**
+         * ProjectionPreview
+         * @description One player's published line and ranks, and what they would be under the edit.
+         */
+        ProjectionPreview: {
+            after: components["schemas"]["PreviewSide"];
+            before: components["schemas"]["PreviewSide"];
+            /** Player Id */
+            player_id: number;
+            /** Ranks Available */
+            ranks_available: boolean;
+            /** Ranks Reason */
+            ranks_reason: string | null;
+        };
+        /**
+         * ProjectionRow
+         * @description One projected player: the four lines, his ranks, and his live adjustment.
+         */
+        ProjectionRow: {
+            adjustment: components["schemas"]["AdjustmentEntry"] | null;
+            /**
+             * Age
+             * @description Age in the season being projected
+             */
+            age: number | null;
+            /** @description The two combined, before any adjustment */
+            blended: components["schemas"]["ProjectionLine"];
+            /** @description ESPN's projection, where ESPN has one */
+            espn: components["schemas"]["ProjectionLine"] | null;
+            /** @description ESPN's published draft ranks: points board and category board */
+            espn_ranks: components["schemas"]["StandardRanks"];
+            /**
+             * Espn Weight
+             * @description ESPN's share of the blend: 0 with no ESPN line, 1 with no NBA history
+             */
+            espn_weight: number | null;
+            /** @description With the live adjustment applied: what is published */
+            final: components["schemas"]["ProjectionLine"];
+            /** Name */
+            name: string;
+            /** Player Id */
+            player_id: number;
+            /** Position */
+            position: string | null;
+            /** @description Court Vision's rank for the final line; nulls when the backend could not be asked */
+            ranks: components["schemas"]["StandardRanks"];
+            /**
+             * Seasons
+             * @description Start years of the seasons the statistical line was built from
+             */
+            seasons: number[];
+            /** @description History alone: three seasons, aged and regressed. None for a rookie. */
+            statistical: components["schemas"]["ProjectionLine"] | null;
+            /** Team */
+            team: string | null;
+        };
+        /** ProjectionsData */
+        ProjectionsData: {
+            /** Coefficients Version */
+            coefficients_version: string;
+            /**
+             * Espn As Of
+             * @description The ESPN snapshot the lines were read from
+             */
+            espn_as_of: string | null;
+            /**
+             * Espn Weight
+             * @description The blend's default weight on ESPN's line
+             */
+            espn_weight: number;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /**
+             * Kinds
+             * @description The adjustment kinds the table accepts
+             */
+            kinds: string[];
+            league: components["schemas"]["StandardLeague"] | null;
+            /** Players */
+            players: components["schemas"]["ProjectionRow"][];
+            /**
+             * Published As Of
+             * @description The latest Court Vision snapshot in nba.player_projections
+             */
+            published_as_of: string | null;
+            /**
+             * Ranks Available
+             * @description Whether the backend valued the pool
+             */
+            ranks_available: boolean;
+            /**
+             * Ranks Reason
+             * @description Why not, when it did not
+             */
+            ranks_reason: string | null;
+            /** Season */
+            season: string;
+            /**
+             * Unpublished
+             * @description Players whose line here differs from the published snapshot (or is missing from it): 0 means the board is reading exactly what this page shows
+             * @default 0
+             */
+            unpublished: number;
+        };
+        /**
+         * ProjectionsResponse
+         * @description Response for GET /v1/dashboard/projections.
+         */
+        ProjectionsResponse: {
+            data: components["schemas"]["ProjectionsData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
         /**
          * QualityCheckEntry
          * @description Single failed/errored quality check entry.
@@ -1539,6 +2070,30 @@ export interface components {
             message: string;
             /** Status */
             status: string;
+        };
+        /**
+         * StandardLeague
+         * @description What the ranks were measured in.
+         */
+        StandardLeague: {
+            /** League Size */
+            league_size: number;
+            /** Playoff Weeks */
+            playoff_weeks: number[];
+            /** Playoff Weight */
+            playoff_weight: number;
+            /** Rounds */
+            rounds: number;
+        };
+        /**
+         * StandardRanks
+         * @description A place in the standard league: 12 teams, ESPN's default points weights or 9-cat.
+         */
+        StandardRanks: {
+            /** Categories */
+            categories: number | null;
+            /** Points */
+            points: number | null;
         };
         /**
          * TableFreshness
@@ -1684,6 +2239,159 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineRunsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_projections_v1_dashboard_projections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectionsResponse"];
+                };
+            };
+        };
+    };
+    preview_adjustment_v1_dashboard_projections_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_adjustment_v1_dashboard_projections__player_id__adjustment_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description NBA player id (nba.players.id) */
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdjustmentSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdjustmentSavedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retire_adjustment_v1_dashboard_projections__player_id__adjustment_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description NBA player id (nba.players.id) */
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdjustmentSavedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_adjustment_history_v1_dashboard_projections__player_id__adjustments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description NBA player id (nba.players.id) */
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdjustmentHistoryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1860,6 +2568,40 @@ export interface operations {
             query?: {
                 /** @description Override game date (YYYY-MM-DD). Omit for automatic date. */
                 date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_cv_projection_v1_internal_pipelines_cv_projection_post: {
+        parameters: {
+            query?: {
+                /** @description Override snapshot date (YYYY-MM-DD). Omit for automatic date. */
+                date?: string | null;
+                /** @description Run outside the Aug 15 - Oct 31 preseason window. */
+                force?: boolean;
             };
             header?: never;
             path?: never;
@@ -2413,6 +3155,38 @@ export interface operations {
                 date?: string | null;
                 /** @description Override the ESPN league to pull from (must be rolled to the target season). */
                 league_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_season_history_v1_internal_pipelines_season_history_post: {
+        parameters: {
+            query?: {
+                /** @description Seasons to write, e.g. `seasons=2023-24&seasons=2024-25`. Omit for the season just finished. */
+                seasons?: string[];
             };
             header?: never;
             path?: never;
