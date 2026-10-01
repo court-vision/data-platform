@@ -119,7 +119,6 @@ data-platform/
 │   ├── etl_helpers.py
 │   └── yahoo_helpers.py
 ├── static/                  # NBA schedule JSON files
-├── templates/               # Jinja2 templates (the old dashboard, until the React one reaches parity)
 ├── dashboard/               # React dashboard (bun + Vite) — see "Dashboard (React app)"
 ├── tests/
 └── scripts/                 # Utility scripts and guards (mirror, theme, OpenAPI export)
@@ -328,8 +327,9 @@ All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query par
 |---|---|---|---|
 | `GET` | `/` and any path outside `/v1`, `/assets` | None | The React dashboard (public port only; `core/spa.py`). Client-side routes all get `index.html` |
 | `GET` | `/assets/*` | None | Its content-hashed bundles and fonts, cached as immutable |
-| `GET` | `/v1/dashboard` | None | The old Jinja dashboard, kept until the React one reaches parity |
-| `GET` | `/v1/dashboard/status` | Token | Pipeline health + recent jobs JSON |
+| `GET` | `/v1/dashboard` | None | Redirects to `/`, where the Jinja dashboard used to be |
+| `GET` | `/v1/dashboard/status` | Token | Pipeline health, cron runs, quality runs, batch jobs |
+| `GET` | `/v1/dashboard/services` | Token | Running version, environment and uptime of this service and the backend |
 
 ### Data Quality
 

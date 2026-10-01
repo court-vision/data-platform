@@ -123,7 +123,6 @@ def test_paths_outside_v1_skip_the_database(monkeypatch):
 @pytest.mark.unit
 @pytest.mark.parametrize("path", [
     "/v1/dashboard/status",
-    "/v1/dashboard",
     "/v1/internal/pipelines/post-game",
     "/v1/internal/cron/job-runs",
 ])
@@ -147,6 +146,25 @@ def test_api_paths_get_a_connection(path):
 ])
 def test_everything_else_does_not(path):
     assert not needs_db(path)
+
+
+# Two /v1 routes read nothing and are named one by one: the service cards, which
+# have to answer in a database outage to say that is what it is, and the redirect
+# to the app. Exact paths, so their neighbours keep their connection.
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["/v1/dashboard/services", "/v1/dashboard"])
+def test_the_dashboard_routes_that_read_nothing_do_not_either(path):
+    assert not needs_db(path)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", [
+    "/v1/dashboard/status",
+    "/v1/dashboard/services/history",
+    "/v1/dashboard/servicesx",
+])
+def test_the_exemption_is_exact_not_a_prefix(path):
+    assert needs_db(path)
 
 
 @pytest.mark.unit

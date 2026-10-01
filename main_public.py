@@ -2,11 +2,10 @@
 Court Vision Data Platform — Public Interface
 
 Serves the pipeline monitoring dashboard on a public-facing port
-(0.0.0.0:$PORT): the React app at / (core/spa.py) and, until the rewrite
-reaches parity, the Jinja page at /v1/dashboard. Beside it are the routes the
-dashboard calls, all token-authed: its status API, the pipeline triggers and
-the quality checks. Live routes, cron reporting and the API docs stay on the
-private port (::8001) only.
+(0.0.0.0:$PORT): the React app at / (core/spa.py) and, beside it, the routes
+the dashboard calls, all token-authed: its status API, the pipeline triggers
+and the quality checks. Live routes, cron reporting and the API docs stay on
+the private port (::8001) only.
 
 Started alongside main.py by entrypoint.sh. `GET /health` here also probes
 the private process, so Railway / Better Stack (which only see this port)
@@ -19,11 +18,9 @@ import utils.patches  # noqa: F401 - imported for side effect (patches nba_api)
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
-from fastapi.templating import Jinja2Templates
 
 from core.correlation_middleware import RequestContextMiddleware
 from core.db_middleware import DatabaseMiddleware
@@ -86,10 +83,6 @@ app = FastAPI(
 app.add_middleware(RequestContextMiddleware)  # correlation id + one http_request log line
 app.add_middleware(DatabaseMiddleware)        # per-request connection on the loop thread
 setup_middleware(app)                         # exception handlers + CORS
-
-# Templates
-_templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
-dashboard.set_templates(_templates)
 
 # Dashboard + pipeline triggers (triggers are token-authed via verify_pipeline_token)
 app.include_router(dashboard.router, prefix="/v1")

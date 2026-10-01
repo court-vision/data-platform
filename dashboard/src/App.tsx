@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider } from "react-router"
 
 import { AppShell } from "@/components/shell/AppShell"
 import { TokenGate } from "@/components/shell/TokenGate"
+import { Toaster } from "@/components/ui/sonner"
 import { useToken } from "@/lib/token"
 import { NotFound } from "@/routes/NotFound"
 import { Overview } from "@/routes/Overview"
@@ -25,5 +26,10 @@ const router = createBrowserRouter([
 ])
 
 export function App() {
-  return <RouterProvider router={router} />
+  return (
+    <>
+      <RouterProvider router={router} />
+      <Toaster />
+    </>
+  )
 }
