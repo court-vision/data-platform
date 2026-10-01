@@ -8,6 +8,8 @@ import { Freshness } from "@/routes/Freshness"
 import { NotFound } from "@/routes/NotFound"
 import { Overview } from "@/routes/Overview"
 import { PipelineDetail } from "@/routes/PipelineDetail"
+import { Quality } from "@/routes/Quality"
+import { QualityRun } from "@/routes/QualityRun"
 
 /** The gate lives inside the router, so a deep link survives signing in. */
 function Root() {
@@ -24,6 +26,8 @@ const router = createBrowserRouter([
       { index: true, element: <Overview /> },
       { path: "data", element: <Freshness /> },
       { path: "pipelines/:name", element: <PipelineDetail /> },
+      { path: "quality", element: <Quality /> },
+      { path: "quality/runs/:runId", element: <QualityRun /> },
       { path: "*", element: <NotFound /> },
     ],
   },
