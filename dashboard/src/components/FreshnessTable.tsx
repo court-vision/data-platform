@@ -21,21 +21,23 @@ export function FreshnessTable({ tables, now }: { tables: TableFreshness[]; now:
       <CardContent className="overflow-x-auto px-0 pb-2">
         <table className="w-full min-w-[52rem] table-fixed text-sm">
           <colgroup>
-            <col className="w-[24%]" />
+            <col className="w-[26%]" />
+            <col className="w-[15%]" />
             <col className="w-[20%]" />
             <col className="w-[16%]" />
-            <col className="w-[14%]" />
-            <col className="w-[10%]" />
-            <col className="w-[16%]" />
+            <col className="w-[12%]" />
+            <col className="w-[11%]" />
           </colgroup>
           <thead>
             <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <th scope="col" className="px-6 py-2 font-medium">Table</th>
+              <th scope="col" className="py-2 pl-6 pr-3 font-medium">Table</th>
+              {/* The verdict sits beside the name: the table is wider than a
+                  phone, and a last column is scrolled out of sight there. */}
+              <th scope="col" className="px-3 py-2 font-medium">State</th>
               <th scope="col" className="px-3 py-2 font-medium">Written by</th>
               <th scope="col" className="px-3 py-2 font-medium">Runs through</th>
               <th scope="col" className="px-3 py-2 font-medium">Last write</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Rows</th>
-              <th scope="col" className="px-6 py-2 font-medium">State</th>
+              <th scope="col" className="py-2 pl-3 pr-6 text-right font-medium">Rows</th>
             </tr>
           </thead>
           <tbody>
@@ -54,10 +56,20 @@ function FreshnessRow({ table, now }: { table: TableFreshness; now: number }) {
   const behind = daysBehind(table)
   return (
     <tr className="border-b border-border/50 last:border-0">
-      <th scope="row" className="px-6 py-2.5 text-left font-mono text-xs font-medium">
+      <th scope="row" className="py-2.5 pl-6 pr-3 text-left font-mono text-xs font-medium">
         <span className="text-muted-foreground">{schema}.</span>
+        {/* A name too long for the column wraps here, not over the verdict. */}
+        <wbr />
         {name}
       </th>
+      <td className="px-3 py-2.5">
+        <FreshnessBadge state={table.state} />
+        {table.error && (
+          <span className="mt-1 block truncate text-xs text-status-loss" title={table.error}>
+            {table.error}
+          </span>
+        )}
+      </td>
       <td className="px-3 py-2.5 text-xs">
         {table.pipelines.map((pipeline) => (
           <span key={pipeline.name} className="block truncate" title={pipeline.name}>
@@ -79,16 +91,8 @@ function FreshnessRow({ table, now }: { table: TableFreshness; now: number }) {
       >
         {relativeTime(table.latest_written_at, now)}
       </td>
-      <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums" title="Planner estimate, not a count">
+      <td className="py-2.5 pl-3 pr-6 text-right font-mono text-xs tabular-nums" title="Planner estimate, not a count">
         {table.rows_estimate?.toLocaleString() ?? "—"}
-      </td>
-      <td className="px-6 py-2.5">
-        <FreshnessBadge state={table.state} />
-        {table.error && (
-          <span className="mt-1 block truncate text-xs text-status-loss" title={table.error}>
-            {table.error}
-          </span>
-        )}
       </td>
     </tr>
   )
