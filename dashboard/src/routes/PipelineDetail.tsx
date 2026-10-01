@@ -4,7 +4,7 @@ import { Link, useParams, useSearchParams } from "react-router"
 import { DurationChart } from "@/components/DurationChart"
 import { RefreshNote } from "@/components/RefreshNote"
 import { RunPipelineButton } from "@/components/RunPipelineButton"
-import { StatusBadge } from "@/components/StateBadge"
+import { StateBadge, StatusBadge } from "@/components/StateBadge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,7 +13,7 @@ import { useNow } from "@/hooks/useNow"
 import { RUNS_REFETCH_MS, usePipelineRuns } from "@/hooks/usePipelineRuns"
 import { ApiError } from "@/lib/api"
 import { CATEGORIES } from "@/lib/pipelines"
-import { formatRate, LIMITS, parseLimit, type PipelineInfo, type PipelineRun, type RunsSummary } from "@/lib/runs"
+import { formatRate, LIMITS, parseLimit, type Limit, type PipelineInfo, type PipelineRun, type RunsSummary } from "@/lib/runs"
 import { formatCentral, formatCentralLong, formatDuration, relativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
@@ -24,6 +24,9 @@ export function PipelineDetail() {
   const now = useNow()
   const query = usePipelineRuns(name, limit)
   const data = query.data
+  const limitButtons = (
+    <LimitButtons limit={limit} onChange={(size) => setParams(size === 50 ? {} : { limit: String(size) })} />
+  )
 
   if (query.error instanceof ApiError && query.error.status === 404) {
     return (
@@ -71,7 +74,12 @@ export function PipelineDetail() {
       )}
 
       {!data ? (
-        <LoadingState />
+        <>
+          {/* This limit's fetch failed with nothing to stand in for it. Another
+              limit may still be cached, and these are the way back to it. */}
+          {query.error && <div className="flex justify-end">{limitButtons}</div>}
+          <LoadingState />
+        </>
       ) : (
         <>
           <Facts pipeline={data.pipeline} />
@@ -83,20 +91,7 @@ export function PipelineDetail() {
                 <CardTitle className="text-base">Duration</CardTitle>
                 <CardDescription>The last {data.runs.length} runs, oldest on the left.</CardDescription>
               </div>
-              <div className="flex gap-1" role="group" aria-label="How many runs">
-                {LIMITS.map((size) => (
-                  <Button
-                    key={size}
-                    size="sm"
-                    variant={size === limit ? "secondary" : "ghost"}
-                    className="h-7 px-2 font-mono text-xs"
-                    onClick={() => setParams(size === 50 ? {} : { limit: String(size) })}
-                    aria-pressed={size === limit}
-                  >
-                    {size}
-                  </Button>
-                ))}
-              </div>
+              {limitButtons}
             </CardHeader>
             <CardContent>
               <DurationChart runs={data.runs} now={now} />
@@ -106,6 +101,25 @@ export function PipelineDetail() {
           <RunsTable runs={data.runs} now={now} />
         </>
       )}
+    </div>
+  )
+}
+
+function LimitButtons({ limit, onChange }: { limit: Limit; onChange: (size: Limit) => void }) {
+  return (
+    <div className="flex gap-1" role="group" aria-label="How many runs">
+      {LIMITS.map((size) => (
+        <Button
+          key={size}
+          size="sm"
+          variant={size === limit ? "secondary" : "ghost"}
+          className="h-7 px-2 font-mono text-xs"
+          onClick={() => onChange(size)}
+          aria-pressed={size === limit}
+        >
+          {size}
+        </Button>
+      ))}
     </div>
   )
 }
@@ -153,7 +167,7 @@ function SummaryTiles({ summary, now }: { summary: RunsSummary; now: number }) {
   const rate = summary.success_rate
   const tiles = [
     { label: "Runs", value: String(summary.total), tone: "text-foreground", note: summary.oldest_started_at ? `since ${formatCentral(summary.oldest_started_at)}` : "" },
-    { label: "Success rate", value: formatRate(rate), tone: rate == null ? "text-muted-foreground" : rate >= 0.9 ? "text-status-win" : rate >= 0.5 ? "text-status-projected" : "text-status-loss", note: `${summary.failed} failed` },
+    { label: "Success rate", value: formatRate(rate), tone: rate == null ? "text-muted-foreground" : rate >= 0.9 ? "text-status-win" : rate >= 0.5 ? "text-status-projected" : "text-status-loss", note: `${summary.failed} failed${summary.stuck > 0 ? ` · ${summary.stuck} stuck` : ""}` },
     { label: "Median duration", value: formatDuration(summary.median_duration_seconds), tone: "text-foreground", note: summary.max_duration_seconds != null ? `max ${formatDuration(summary.max_duration_seconds)}` : "" },
     { label: "Last success", value: summary.last_success_at ? relativeTime(summary.last_success_at, now) : "never", tone: summary.last_success_at ? "text-foreground" : "text-status-loss", note: summary.last_success_at ? formatCentral(summary.last_success_at) : "" },
   ]
@@ -198,7 +212,10 @@ function RunsTable({ runs, now }: { runs: PipelineRun[]; now: number }) {
                     {formatCentralLong(run.started_at)}
                     <span className="block text-muted-foreground">{relativeTime(run.started_at, now)}</span>
                   </td>
-                  <td className="px-3 py-2.5"><StatusBadge status={run.status} /></td>
+                  {/* Stuck is the Overview's word and badge for the same state (lib/pipelines.ts). */}
+                  <td className="px-3 py-2.5">
+                    {run.status === "stuck" ? <StateBadge state="stuck" /> : <StatusBadge status={run.status} />}
+                  </td>
                   <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">
                     {run.status === "running" ? "…" : formatDuration(run.duration_seconds)}
                   </td>
