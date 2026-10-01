@@ -148,6 +148,10 @@ async def get_services(
     cards: this process from its own settings, the backend from its /health
     over Railway's private network. Replaces the Deployments section, which
     read a nightly `deploy` cron job that no longer exists.
+
+    Reads no database, and gets no connection (`NO_DB_V1_PATHS` in
+    core/db_middleware.py), so the cards still answer in a Postgres outage.
+    A query added here has to come off that list first.
     """
     own = service_info()
     services = [
