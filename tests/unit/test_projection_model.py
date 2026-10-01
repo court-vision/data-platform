@@ -10,7 +10,7 @@ from datetime import date
 
 import pytest
 
-from pipelines.cv_projection import COEFFICIENTS_PATH, adjustment_of, per_day_calendar
+from services.projection_inputs import COEFFICIENTS_PATH, adjustment_of, per_day_calendar
 from pipelines.season_history import history_record
 from services.projection_fit import backtest, fit_curve, fit_games, league_drift
 from services.projection_model import (
@@ -25,6 +25,7 @@ from services.projection_model import (
     bucket,
     games_fraction,
     project,
+    project_breakdown,
     season_label,
     season_start,
     statistical_line,
@@ -192,6 +193,45 @@ class TestProject:
         out = project(2026, history, {}, {1: Adjustment(games=40.0)}, roster={1}, coeffs=FLAT)
         assert out[0].games == 40.0
         assert out[0].components["version"] == FLAT.version
+
+
+class TestBreakdown:
+    """The four lines the editor shows side by side."""
+
+    ESPN = EspnLine(per_game={k: 1.0 for k in LINE_KEYS} | {"pts": 24.0}, minutes=34.0, games=72.0)
+
+    def test_every_stage_is_kept_and_the_published_line_is_the_last(self):
+        history = {1: [_row(1, 2025)]}
+        adj = {1: Adjustment(id=9, minutes=36.0, games=60)}
+        (b,) = project_breakdown(2026, history, {1: self.ESPN}, adj, {1}, FLAT)
+
+        assert b.statistical.minutes == pytest.approx(30.0)        # history alone
+        assert b.espn is self.ESPN
+        assert b.blended.minutes == pytest.approx(32.0)            # halfway to ESPN's 34
+        assert b.blended.games == pytest.approx((72 + 0.72 * 82) / 2)
+        assert (b.final.minutes, b.final.games) == (36.0, 60.0)    # the adjustment, last
+        assert b.final.components["adjustment_id"] == 9
+        # `project` is the published line of the same computation.
+        (p,) = project(2026, history, {1: self.ESPN}, adj, {1}, FLAT)
+        assert p.line() == b.final.line() and p.games == b.final.games
+
+    def test_the_statistical_line_shown_is_not_the_object_later_stages_write_to(self):
+        """With no ESPN line the blend *is* the statistical line, and the
+        adjustment then scales it. The editor's copy must still say what
+        history alone said."""
+        history = {1: [_row(1, 2025)]}
+        (b,) = project_breakdown(2026, history, {}, {1: Adjustment(usage=2.0)}, {1}, FLAT)
+
+        assert b.espn is None
+        assert b.statistical.per_game["pts"] == pytest.approx(18.0)
+        assert b.final.per_game["pts"] == pytest.approx(36.0)
+        assert b.statistical is not b.blended
+        assert "espn_weight" not in b.statistical.components and b.blended.components["espn_weight"] == 0.0
+
+    def test_a_rookie_has_no_statistical_line(self):
+        (b,) = project_breakdown(2026, {}, {7: self.ESPN}, {}, {7}, FLAT)
+        assert b.statistical is None and b.espn is self.ESPN
+        assert b.blended.per_game["pts"] == 24.0 and b.final is b.blended
 
 
 class TestFit:

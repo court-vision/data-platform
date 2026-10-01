@@ -41,7 +41,7 @@ games, and `return_date` caps games at the ones his team plays after it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Iterable, Mapping, Optional, Sequence
 
@@ -400,15 +400,27 @@ def adjust(p: Projection, adj: Optional[Adjustment]) -> Projection:
     )
 
 
-def project(
+@dataclass
+class Breakdown:
+    """One player's projection at each stage, for the editor to show side by side."""
+
+    player_id: int
+    statistical: Optional[Projection]       # history alone; None for a player with no NBA minutes
+    espn: Optional[EspnLine]                # ESPN's line; None where ESPN projects nobody
+    blended: Projection                     # the two combined, before any adjustment
+    final: Projection                       # with his adjustment applied: what is published
+
+
+def project_breakdown(
     target: int,
     history: Mapping[int, Sequence[HistoryRow]],
     espn: Mapping[int, EspnLine],
     adjustments: Mapping[int, Adjustment],
     roster: Iterable[int],
     coeffs: Coefficients,
-) -> list[Projection]:
-    """Every rostered player's projection for the season starting `target`.
+) -> list[Breakdown]:
+    """Every rostered player's projection for the season starting `target`,
+    with the lines it was built from.
 
     `history` must hold only the window's seasons (target-3 .. target-1).
     `roster` is who is in the league now: a retired player keeps his history
@@ -420,17 +432,33 @@ def project(
     cells = role_cells(window)
     by_cell, league = cell_means(window, cells, target - 1)
 
-    out: list[Projection] = []
+    out: list[Breakdown] = []
     for pid in sorted(set(roster)):
         rows = window.get(pid)
         stat = statistical_line(rows, target, coeffs, by_cell.get(cells.get(pid), league)) if rows else None
+        # `blend` hands the statistical line back as the blend when ESPN has
+        # none, and later stages write to it; the copy is what the editor shows.
+        shown = replace(stat, per_game=dict(stat.per_game), components=dict(stat.components)) if stat else None
         blended = blend(stat, espn.get(pid), pid, coeffs.espn_weight, coeffs.rookie_gp_mean * SEASON_GAMES)
         if blended is None:
             continue
         final = adjust(blended, adjustments.get(pid))
         final.components["version"] = coeffs.version
-        out.append(final)
+        out.append(Breakdown(player_id=pid, statistical=shown, espn=espn.get(pid), blended=blended, final=final))
     return out
+
+
+def project(
+    target: int,
+    history: Mapping[int, Sequence[HistoryRow]],
+    espn: Mapping[int, EspnLine],
+    adjustments: Mapping[int, Adjustment],
+    roster: Iterable[int],
+    coeffs: Coefficients,
+) -> list[Projection]:
+    """Every rostered player's projection for the season starting `target`:
+    the published line of `project_breakdown`."""
+    return [b.final for b in project_breakdown(target, history, espn, adjustments, roster, coeffs)]
 
 
 def team_games_after(day: date, per_day: Mapping[date, Sequence[str]], team: Optional[str]) -> Optional[int]:
