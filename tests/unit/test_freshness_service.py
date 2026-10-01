@@ -134,6 +134,21 @@ class TestJudge:
     def test_a_business_date_that_is_all_null_is_stale(self):
         assert _judge(_target(), None) == ("stale", MAR_4)
 
+    def test_a_run_dated_table_is_held_to_the_morning_after_the_game_night(self):
+        # daily_matchup_scores dates its rows by the run, and the batch for
+        # Mar 4 runs after midnight: it writes Mar 5. A newest row of Mar 4 is
+        # what the Mar 3 batch left, so last night's never landed.
+        matchups = TARGETS["stats_s2.daily_matchup_scores"]
+        assert _judge(matchups, MAR_4) == ("stale", MAR_5)
+        assert _judge(matchups, MAR_5) == ("fresh", MAR_5)
+        # The game-dated table beside it, after the same missed night.
+        assert _judge(_target(), MAR_3) == ("stale", MAR_4)
+
+    def test_the_run_date_lag_does_not_make_something_due(self):
+        matchups = TARGETS["stats_s2.daily_matchup_scores"]
+        assert _judge(matchups, date(2025, 4, 14), due=NOTHING_DUE) == ("idle", None)
+        assert _judge(matchups, None, written=None) == ("empty", None)
+
     def test_pre_game_tables_are_held_to_their_own_due_date(self):
         injuries = _target(PipelineCategory.PRE_GAME, ("espn_injury_status",), "report_date", "created_at")
         assert _judge(injuries, MAR_4) == ("fresh", MAR_4)

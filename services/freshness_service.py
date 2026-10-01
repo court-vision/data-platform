@@ -62,6 +62,15 @@ WRITE_COLUMNS = ("updated_at", "last_updated", "captured_at", "created_at", "sen
 # without a row).
 CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection"})
 
+# Tables dated by the run, not by the game night, and how far ahead that is.
+# daily_matchup_scores stamps its rows with the Central calendar date it ran
+# on, and the run for game night D is held past midnight (ESPN's flip, ~2 AM
+# CT), so it writes D + 1. Held to D, the row the night before left would
+# already satisfy it and a missed night would read fresh. A run forced before
+# midnight writes D and reads stale until the gated one lands: the safe
+# direction for a monitor.
+RUN_DATE_LAG = {"stats_s2.daily_matchup_scores": timedelta(days=1)}
+
 # Most time-critical first: the category shown for a table with two writers
 # (nba.games: game_schedule nightly, game_start_times on its own cron).
 CATEGORY_PRIORITY = (
@@ -241,7 +250,8 @@ def judge(
     - `empty`: a nightly table with nothing in it while something is due.
     - `fresh` / `stale`: against the game day its cadence is due through —
       post-game tables the last settled night, pre-game tables the last day
-      whose first tip-off has passed.
+      whose first tip-off has passed. A run-dated table (`RUN_DATE_LAG`) is
+      expected that much later, in its own dates.
     """
     if target.category == PipelineCategory.POST_GAME:
         expected = due.post_game
@@ -253,6 +263,7 @@ def judge(
         return "unjudged", None
     if expected is None:
         return "idle", None
+    expected += RUN_DATE_LAG.get(target.table, timedelta(0))
     if latest_date is None and latest_written_at is None:
         return "empty", None
     if latest_date is None:
