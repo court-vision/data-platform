@@ -42,7 +42,11 @@ export function Overview() {
       )}
 
       {!data ? (
-        <LoadingState />
+        <>
+          {/* The cards read no database: in an outage they are what can still answer. */}
+          {status.error && <ServiceCards />}
+          <LoadingState />
+        </>
       ) : (
         <>
           <SummaryTiles pipelines={data.pipelines} />
