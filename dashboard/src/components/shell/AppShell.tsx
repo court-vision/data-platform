@@ -29,7 +29,9 @@ export function AppShell() {
               }
             >
               <Icon className="size-4" aria-hidden />
-              {label}
+              {/* Below md the header is one row that cannot wrap or scroll: a
+                  label per page pushes the Forget-token button off a phone. */}
+              <span className="sr-only md:not-sr-only">{label}</span>
             </NavLink>
           ))}
         </nav>

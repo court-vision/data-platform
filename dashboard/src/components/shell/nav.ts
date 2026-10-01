@@ -1,4 +1,4 @@
-import { Activity, type LucideIcon } from "lucide-react"
+import { Activity, Database, type LucideIcon } from "lucide-react"
 
 export interface NavItem {
   to: string
@@ -11,4 +11,5 @@ export interface NavItem {
 /** One entry per page. Adding a page is a route in App.tsx plus a line here. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { to: "/", label: "Overview", icon: Activity, end: true },
+  { to: "/data", label: "Data", icon: Database },
 ]

@@ -4,6 +4,7 @@ import { AppShell } from "@/components/shell/AppShell"
 import { TokenGate } from "@/components/shell/TokenGate"
 import { Toaster } from "@/components/ui/sonner"
 import { useToken } from "@/lib/token"
+import { Freshness } from "@/routes/Freshness"
 import { NotFound } from "@/routes/NotFound"
 import { Overview } from "@/routes/Overview"
 
@@ -20,6 +21,7 @@ const router = createBrowserRouter([
     element: <Root />,
     children: [
       { index: true, element: <Overview /> },
+      { path: "data", element: <Freshness /> },
       { path: "*", element: <NotFound /> },
     ],
   },
