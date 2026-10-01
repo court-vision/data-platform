@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { formatCentral, formatDuration, parseUtc, relativeTime } from "@/lib/time"
+import { daysBetween, formatCentral, formatDay, formatDuration, parseUtc, relativeTime } from "@/lib/time"
 
 describe("parseUtc", () => {
   test("reads an offset-less timestamp as UTC, not local time", () => {
@@ -50,4 +50,46 @@ describe("formatDuration", () => {
 
 test("formatCentral renders in Central whatever the machine's zone", () => {
   expect(formatCentral("2026-09-21T07:04:00")).toBe("Sep 21, 2:04 AM CT")
+})
+
+import { formatCentralLong, formatClockCentral, formatUptime } from "@/lib/time"
+
+test("formatClockCentral is a Central wall-clock time", () => {
+  expect(formatClockCentral(Date.parse("2026-09-24T18:00:00Z"))).toBe("1:00 PM")
+})
+
+test("formatCentralLong carries seconds", () => {
+  expect(formatCentralLong("2026-09-24T18:00:07")).toBe("Sep 24, 1:00:07 PM CT")
+})
+
+describe("formatUptime", () => {
+  test.each([
+    [null, "—"],
+    [40, "40s"],
+    [300, "5m"],
+    [7_800, "2h 10m"],
+    [273_600, "3d 4h"],
+  ])("%p -> %s", (seconds, expected) => {
+    expect(formatUptime(seconds)).toBe(expected)
+  })
+})
+
+describe("formatDay", () => {
+  test("a plain date never shifts with the zone", () => {
+    expect(formatDay("2026-03-04")).toBe("Mar 4")
+    expect(formatDay("2026-10-21")).toBe("Oct 21")
+  })
+
+  test("missing or malformed is a dash", () => {
+    expect(formatDay(null)).toBe("—")
+    expect(formatDay("not a date")).toBe("—")
+  })
+})
+
+describe("daysBetween", () => {
+  test("whole days, signed", () => {
+    expect(daysBetween("2026-03-02", "2026-03-04")).toBe(2)
+    expect(daysBetween("2026-03-04", "2026-03-04")).toBe(0)
+    expect(daysBetween("2026-03-04", "2026-03-01")).toBe(-3)
+  })
 })

@@ -278,7 +278,11 @@
         "required": [
           "check_name",
           "status",
-          "severity"
+          "severity",
+          "failures",
+          "message",
+          "details",
+          "duration_ms"
         ],
         "title": "DataQualityCheckResult",
         "type": "object"
@@ -367,7 +371,15 @@
         "required": [
           "run_id",
           "status",
-          "started_at"
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "total_checks",
+          "passed_checks",
+          "failed_checks",
+          "triggered_by",
+          "error_message",
+          "checks"
         ],
         "title": "DataQualityRunDetail",
         "type": "object"
@@ -449,7 +461,14 @@
         "required": [
           "run_id",
           "status",
-          "started_at"
+          "started_at",
+          "completed_at",
+          "duration_seconds",
+          "total_checks",
+          "passed_checks",
+          "failed_checks",
+          "triggered_by",
+          "error_message"
         ],
         "title": "DataQualityRunInfo",
         "type": "object"
@@ -498,6 +517,117 @@
           "data"
         ],
         "title": "DataQualityRunResponse",
+        "type": "object"
+      },
+      "FreshnessData": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "next_game_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Game Date"
+          },
+          "phase": {
+            "enum": [
+              "preseason",
+              "regular",
+              "offseason"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "post_game_due": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Game Due"
+          },
+          "pre_game_due": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Game Due"
+          },
+          "season": {
+            "title": "Season",
+            "type": "string"
+          },
+          "settled_through": {
+            "format": "date",
+            "title": "Settled Through",
+            "type": "string"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/TableFreshness"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "today": {
+            "format": "date",
+            "title": "Today",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tables",
+          "season",
+          "phase",
+          "today",
+          "settled_through",
+          "post_game_due",
+          "pre_game_due",
+          "next_game_date",
+          "fetched_at"
+        ],
+        "title": "FreshnessData",
+        "type": "object"
+      },
+      "FreshnessResponse": {
+        "description": "Response for GET /v1/dashboard/freshness.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FreshnessData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "FreshnessResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -669,6 +799,11 @@
       "PipelineHealthEntry": {
         "description": "Health status for a single registered pipeline.",
         "properties": {
+          "accepts_date": {
+            "default": false,
+            "title": "Accepts Date",
+            "type": "boolean"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -764,9 +899,116 @@
           "last_records_processed",
           "last_success_at",
           "is_running",
-          "error_streak"
+          "error_streak",
+          "accepts_date"
         ],
         "title": "PipelineHealthEntry",
+        "type": "object"
+      },
+      "PipelineInfo": {
+        "description": "What the registry says about one pipeline: its config, as the page shows it.",
+        "properties": {
+          "accepts_date": {
+            "title": "Accepts Date",
+            "type": "boolean"
+          },
+          "allow_concurrent": {
+            "default": false,
+            "title": "Allow Concurrent",
+            "type": "boolean"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "cron_job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Job"
+          },
+          "depends_on": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Depends On",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "earliest_run_time_cst": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Earliest Run Time Cst"
+          },
+          "espn_gated": {
+            "default": false,
+            "title": "Espn Gated",
+            "type": "boolean"
+          },
+          "is_running": {
+            "default": false,
+            "title": "Is Running",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pre_game_window_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pre Game Window Minutes"
+          },
+          "target_table": {
+            "title": "Target Table",
+            "type": "string"
+          },
+          "trigger_endpoint": {
+            "title": "Trigger Endpoint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name",
+          "description",
+          "category",
+          "target_table",
+          "trigger_endpoint",
+          "accepts_date",
+          "cron_job",
+          "depends_on",
+          "allow_concurrent",
+          "espn_gated",
+          "earliest_run_time_cst",
+          "pre_game_window_minutes",
+          "is_running"
+        ],
+        "title": "PipelineInfo",
         "type": "object"
       },
       "PipelineJobDetail": {
@@ -1162,6 +1404,132 @@
         "title": "PipelineResult",
         "type": "object"
       },
+      "PipelineRunEntry": {
+        "description": "One row of nba.pipeline_runs.",
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "records_processed": {
+            "default": 0,
+            "title": "Records Processed",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "started_at",
+          "completed_at",
+          "status",
+          "duration_seconds",
+          "records_processed",
+          "error_message"
+        ],
+        "title": "PipelineRunEntry",
+        "type": "object"
+      },
+      "PipelineRunsData": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "pipeline": {
+            "$ref": "#/components/schemas/PipelineInfo"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/PipelineRunEntry"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/RunsSummary"
+          }
+        },
+        "required": [
+          "pipeline",
+          "runs",
+          "summary",
+          "limit",
+          "fetched_at"
+        ],
+        "title": "PipelineRunsData",
+        "type": "object"
+      },
+      "PipelineRunsResponse": {
+        "description": "Response for GET /v1/dashboard/pipelines/{name}/runs.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PipelineRunsData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "PipelineRunsResponse",
+        "type": "object"
+      },
       "QualityCheckEntry": {
         "description": "Single failed/errored quality check entry.",
         "properties": {
@@ -1306,8 +1674,381 @@
         "title": "QualityRunEntry",
         "type": "object"
       },
+      "RunsSummary": {
+        "description": "Over the runs returned (a window, newest first), not all time, but for last_success_at.",
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "max_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Seconds"
+          },
+          "median_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Duration Seconds"
+          },
+          "oldest_started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Started At"
+          },
+          "running": {
+            "title": "Running",
+            "type": "integer"
+          },
+          "stuck": {
+            "title": "Stuck",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "success_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success Rate"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "running",
+          "stuck",
+          "success_rate",
+          "median_duration_seconds",
+          "max_duration_seconds",
+          "last_success_at",
+          "oldest_started_at"
+        ],
+        "title": "RunsSummary",
+        "type": "object"
+      },
+      "ServiceInfo": {
+        "description": "One deployed service, as its own /health reports it.",
+        "properties": {
+          "configured": {
+            "default": true,
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ok": {
+            "default": false,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "uptime_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime S"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "configured",
+          "ok",
+          "version",
+          "environment",
+          "uptime_s",
+          "error"
+        ],
+        "title": "ServiceInfo",
+        "type": "object"
+      },
+      "ServicesData": {
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/ServiceInfo"
+            },
+            "title": "Services",
+            "type": "array"
+          }
+        },
+        "required": [
+          "services",
+          "fetched_at"
+        ],
+        "title": "ServicesData",
+        "type": "object"
+      },
+      "ServicesResponse": {
+        "description": "Response for GET /v1/dashboard/services.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ServicesData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "ServicesResponse",
+        "type": "object"
+      },
+      "TableFreshness": {
+        "description": "What date one table runs through, when it was last written, and the verdict.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "date_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Column"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "expected_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Date"
+          },
+          "latest_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Date"
+          },
+          "latest_written_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Written At"
+          },
+          "pipelines": {
+            "items": {
+              "$ref": "#/components/schemas/TableWriter"
+            },
+            "title": "Pipelines",
+            "type": "array"
+          },
+          "rows_estimate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows Estimate"
+          },
+          "state": {
+            "enum": [
+              "fresh",
+              "stale",
+              "idle",
+              "empty",
+              "unjudged",
+              "error"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          },
+          "write_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Write Column"
+          }
+        },
+        "required": [
+          "table",
+          "pipelines",
+          "category",
+          "date_column",
+          "latest_date",
+          "write_column",
+          "latest_written_at",
+          "rows_estimate",
+          "expected_date",
+          "state",
+          "error"
+        ],
+        "title": "TableFreshness",
+        "type": "object"
+      },
+      "TableWriter": {
+        "description": "A registered pipeline that writes a table.",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "display_name"
+        ],
+        "title": "TableWriter",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -1386,23 +2127,117 @@
         "summary": "Ping"
       }
     },
-    "/v1/dashboard": {
+    "/v1/dashboard/freshness": {
       "get": {
-        "description": "Serve the pipeline monitoring dashboard.",
-        "operationId": "get_dashboard_v1_dashboard_get",
+        "description": "What date each pipeline's table runs through and when it was last written,\njudged against the season calendar and the last settled game date. Its own\nroute, so its per-table queries never slow the 30 s status poll.",
+        "operationId": "get_freshness_v1_dashboard_freshness_get",
         "responses": {
           "200": {
             "content": {
-              "text/html": {
+              "application/json": {
                 "schema": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FreshnessResponse"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Get Dashboard",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Freshness",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/pipelines/{name}/runs": {
+      "get": {
+        "description": "One pipeline's page: what the registry says about it (trigger, cron job,\ngates, dependencies) and its newest runs with a summary over that window.",
+        "operationId": "get_pipeline_runs_v1_dashboard_pipelines__name__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Newest runs to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Newest runs to return",
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineRunsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Pipeline Runs",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/services": {
+      "get": {
+        "description": "The running version of each deployed service, for the dashboard's service\ncards: this process from its own settings, the backend from its /health\nover Railway's private network. Replaces the Deployments section, which\nread a nightly `deploy` cron job that no longer exists.",
+        "operationId": "get_services_v1_dashboard_services_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServicesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Services",
         "tags": [
           "dashboard"
         ]

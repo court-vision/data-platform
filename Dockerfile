@@ -39,7 +39,6 @@ COPY schemas/ ./schemas/
 COPY api/ ./api/
 COPY pipelines/ ./pipelines/
 COPY services/ ./services/
-COPY templates/ ./templates/
 
 # Install Python dependencies from requirements.txt and the local package
 RUN pip install --no-cache-dir -r requirements.txt && \

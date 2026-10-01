@@ -38,7 +38,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/dashboard": {
+    "/v1/dashboard/freshness": {
         parameters: {
             query?: never;
             header?: never;
@@ -46,10 +46,56 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Dashboard
-         * @description Serve the pipeline monitoring dashboard.
+         * Get Freshness
+         * @description What date each pipeline's table runs through and when it was last written,
+         *     judged against the season calendar and the last settled game date. Its own
+         *     route, so its per-table queries never slow the 30 s status poll.
          */
-        get: operations["get_dashboard_v1_dashboard_get"];
+        get: operations["get_freshness_v1_dashboard_freshness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/pipelines/{name}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pipeline Runs
+         * @description One pipeline's page: what the registry says about it (trigger, cron job,
+         *     gates, dependencies) and its newest runs with a summary over that window.
+         */
+        get: operations["get_pipeline_runs_v1_dashboard_pipelines__name__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Services
+         * @description The running version of each deployed service, for the dashboard's service
+         *     cards: this process from its own settings, the backend from its /health
+         *     over Railway's private network. Replaces the Deployments section, which
+         *     read a nightly `deploy` cron job that no longer exists.
+         */
+        get: operations["get_services_v1_dashboard_services_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -854,18 +900,18 @@ export interface components {
             /** Check Name */
             check_name: string;
             /** Details */
-            details?: {
+            details: {
                 [key: string]: unknown;
             } | null;
             /** Duration Ms */
-            duration_ms?: number | null;
+            duration_ms: number | null;
             /**
              * Failures
              * @default 0
              */
-            failures?: number;
+            failures: number;
             /** Message */
-            message?: string | null;
+            message: string | null;
             /** Severity */
             severity: string;
             /** Status */
@@ -874,23 +920,23 @@ export interface components {
         /** DataQualityRunDetail */
         DataQualityRunDetail: {
             /** Checks */
-            checks?: components["schemas"]["DataQualityCheckResult"][];
+            checks: components["schemas"]["DataQualityCheckResult"][];
             /** Completed At */
-            completed_at?: string | null;
+            completed_at: string | null;
             /** Duration Seconds */
-            duration_seconds?: number | null;
+            duration_seconds: number | null;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /**
              * Failed Checks
              * @default 0
              */
-            failed_checks?: number;
+            failed_checks: number;
             /**
              * Passed Checks
              * @default 0
              */
-            passed_checks?: number;
+            passed_checks: number;
             /** Run Id */
             run_id: string;
             /** Started At */
@@ -901,28 +947,28 @@ export interface components {
              * Total Checks
              * @default 0
              */
-            total_checks?: number;
+            total_checks: number;
             /** Triggered By */
-            triggered_by?: string | null;
+            triggered_by: string | null;
         };
         /** DataQualityRunInfo */
         DataQualityRunInfo: {
             /** Completed At */
-            completed_at?: string | null;
+            completed_at: string | null;
             /** Duration Seconds */
-            duration_seconds?: number | null;
+            duration_seconds: number | null;
             /** Error Message */
-            error_message?: string | null;
+            error_message: string | null;
             /**
              * Failed Checks
              * @default 0
              */
-            failed_checks?: number;
+            failed_checks: number;
             /**
              * Passed Checks
              * @default 0
              */
-            passed_checks?: number;
+            passed_checks: number;
             /** Run Id */
             run_id: string;
             /** Started At */
@@ -933,9 +979,9 @@ export interface components {
              * Total Checks
              * @default 0
              */
-            total_checks?: number;
+            total_checks: number;
             /** Triggered By */
-            triggered_by?: string | null;
+            triggered_by: string | null;
         };
         /** DataQualityRunListResponse */
         DataQualityRunListResponse: {
@@ -951,6 +997,50 @@ export interface components {
             /** Message */
             message: string;
             status: components["schemas"]["ApiStatus"];
+        };
+        /** FreshnessData */
+        FreshnessData: {
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Next Game Date */
+            next_game_date: string | null;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "preseason" | "regular" | "offseason";
+            /** Post Game Due */
+            post_game_due: string | null;
+            /** Pre Game Due */
+            pre_game_due: string | null;
+            /** Season */
+            season: string;
+            /**
+             * Settled Through
+             * Format: date
+             */
+            settled_through: string;
+            /** Tables */
+            tables: components["schemas"]["TableFreshness"][];
+            /**
+             * Today
+             * Format: date
+             */
+            today: string;
+        };
+        /**
+         * FreshnessResponse
+         * @description Response for GET /v1/dashboard/freshness.
+         */
+        FreshnessResponse: {
+            data: components["schemas"]["FreshnessData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1043,6 +1133,11 @@ export interface components {
          * @description Health status for a single registered pipeline.
          */
         PipelineHealthEntry: {
+            /**
+             * Accepts Date
+             * @default false
+             */
+            accepts_date: boolean;
             /** Category */
             category: string;
             /** Display Name */
@@ -1069,6 +1164,49 @@ export interface components {
             last_success_at: string | null;
             /** Name */
             name: string;
+            /** Trigger Endpoint */
+            trigger_endpoint: string;
+        };
+        /**
+         * PipelineInfo
+         * @description What the registry says about one pipeline: its config, as the page shows it.
+         */
+        PipelineInfo: {
+            /** Accepts Date */
+            accepts_date: boolean;
+            /**
+             * Allow Concurrent
+             * @default false
+             */
+            allow_concurrent: boolean;
+            /** Category */
+            category: string;
+            /** Cron Job */
+            cron_job: string | null;
+            /** Depends On */
+            depends_on: string[];
+            /** Description */
+            description: string;
+            /** Display Name */
+            display_name: string;
+            /** Earliest Run Time Cst */
+            earliest_run_time_cst: string | null;
+            /**
+             * Espn Gated
+             * @default false
+             */
+            espn_gated: boolean;
+            /**
+             * Is Running
+             * @default false
+             */
+            is_running: boolean;
+            /** Name */
+            name: string;
+            /** Pre Game Window Minutes */
+            pre_game_window_minutes: number | null;
+            /** Target Table */
+            target_table: string;
             /** Trigger Endpoint */
             trigger_endpoint: string;
         };
@@ -1221,6 +1359,57 @@ export interface components {
             status: components["schemas"]["ApiStatus"];
         };
         /**
+         * PipelineRunEntry
+         * @description One row of nba.pipeline_runs.
+         */
+        PipelineRunEntry: {
+            /** Completed At */
+            completed_at: string | null;
+            /** Duration Seconds */
+            duration_seconds: number | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Records Processed
+             * @default 0
+             */
+            records_processed: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status */
+            status: string;
+        };
+        /** PipelineRunsData */
+        PipelineRunsData: {
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Limit */
+            limit: number;
+            pipeline: components["schemas"]["PipelineInfo"];
+            /** Runs */
+            runs: components["schemas"]["PipelineRunEntry"][];
+            summary: components["schemas"]["RunsSummary"];
+        };
+        /**
+         * PipelineRunsResponse
+         * @description Response for GET /v1/dashboard/pipelines/{name}/runs.
+         */
+        PipelineRunsResponse: {
+            data: components["schemas"]["PipelineRunsData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * QualityCheckEntry
          * @description Single failed/errored quality check entry.
          */
@@ -1276,8 +1465,128 @@ export interface components {
             /** Triggered By */
             triggered_by: string | null;
         };
+        /**
+         * RunsSummary
+         * @description Over the runs returned (a window, newest first), not all time, but for last_success_at.
+         */
+        RunsSummary: {
+            /** Failed */
+            failed: number;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Max Duration Seconds */
+            max_duration_seconds: number | null;
+            /** Median Duration Seconds */
+            median_duration_seconds: number | null;
+            /** Oldest Started At */
+            oldest_started_at: string | null;
+            /** Running */
+            running: number;
+            /** Stuck */
+            stuck: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Success Rate */
+            success_rate: number | null;
+            /** Total */
+            total: number;
+        };
+        /**
+         * ServiceInfo
+         * @description One deployed service, as its own /health reports it.
+         */
+        ServiceInfo: {
+            /**
+             * Configured
+             * @default true
+             */
+            configured: boolean;
+            /** Environment */
+            environment: string | null;
+            /** Error */
+            error: string | null;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /**
+             * Ok
+             * @default false
+             */
+            ok: boolean;
+            /** Uptime S */
+            uptime_s: number | null;
+            /** Version */
+            version: string | null;
+        };
+        /** ServicesData */
+        ServicesData: {
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Services */
+            services: components["schemas"]["ServiceInfo"][];
+        };
+        /**
+         * ServicesResponse
+         * @description Response for GET /v1/dashboard/services.
+         */
+        ServicesResponse: {
+            data: components["schemas"]["ServicesData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * TableFreshness
+         * @description What date one table runs through, when it was last written, and the verdict.
+         */
+        TableFreshness: {
+            /** Category */
+            category: string;
+            /** Date Column */
+            date_column: string | null;
+            /** Error */
+            error: string | null;
+            /** Expected Date */
+            expected_date: string | null;
+            /** Latest Date */
+            latest_date: string | null;
+            /** Latest Written At */
+            latest_written_at: string | null;
+            /** Pipelines */
+            pipelines: components["schemas"]["TableWriter"][];
+            /** Rows Estimate */
+            rows_estimate: number | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "fresh" | "stale" | "idle" | "empty" | "unjudged" | "error";
+            /** Table */
+            table: string;
+            /** Write Column */
+            write_column: string | null;
+        };
+        /**
+         * TableWriter
+         * @description A registered pipeline that writes a table.
+         */
+        TableWriter: {
+            /** Display Name */
+            display_name: string;
+            /** Name */
+            name: string;
+        };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
@@ -1334,7 +1643,7 @@ export interface operations {
             };
         };
     };
-    get_dashboard_v1_dashboard_get: {
+    get_freshness_v1_dashboard_freshness_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1349,7 +1658,61 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/html": string;
+                    "application/json": components["schemas"]["FreshnessResponse"];
+                };
+            };
+        };
+    };
+    get_pipeline_runs_v1_dashboard_pipelines__name__runs_get: {
+        parameters: {
+            query?: {
+                /** @description Newest runs to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_services_v1_dashboard_services_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServicesResponse"];
                 };
             };
         };

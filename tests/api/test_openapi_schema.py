@@ -9,6 +9,7 @@ contract without anything failing.
 """
 
 import pytest
+from fastapi.routing import iter_route_contexts
 
 from api.v1.dashboard import trigger_endpoint
 from main_public import app
@@ -41,11 +42,14 @@ def _response_ref(paths, path, method):
 @pytest.mark.api
 class TestPublicAppServesNoDocs:
     def test_no_schema_or_docs_routes(self):
-        served = {route.path for route in app.routes}
+        served = {route.path for route in iter_route_contexts(app.routes)}
         assert not served & {"/openapi.json", "/docs", "/redoc"}
 
     def test_schema_still_builds_offline(self, paths):
         assert "/v1/dashboard/status" in paths
+
+    def test_the_legacy_redirect_is_not_part_of_the_contract(self, paths):
+        assert "/v1/dashboard" not in paths
 
     def test_schema_does_not_depend_on_whether_the_dashboard_is_built(self, paths):
         # `/` is index.html with a build and a JSON stub without one. Either in
@@ -58,6 +62,9 @@ class TestPublicAppServesNoDocs:
 class TestDashboardRoutesHaveConcreteSchemas:
     @pytest.mark.parametrize("path,method,ref", [
         ("/v1/dashboard/status", "get", "DashboardStatusResponse"),
+        ("/v1/dashboard/services", "get", "ServicesResponse"),
+        ("/v1/dashboard/freshness", "get", "FreshnessResponse"),
+        ("/v1/dashboard/pipelines/{name}/runs", "get", "PipelineRunsResponse"),
         ("/v1/internal/quality/run", "post", "DataQualityRunResponse"),
         ("/v1/internal/quality/runs", "get", "DataQualityRunListResponse"),
         ("/v1/internal/quality/runs/{run_id}", "get", "DataQualityRunResponse"),

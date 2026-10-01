@@ -18,6 +18,10 @@ from peewee import (
 
 from db.base import BaseModel
 
+# How long a `running` row counts as a live run. Past this the run is taken
+# for hung: is_running stops gating on it and the dashboard calls it stuck.
+RUNNING_MAX_AGE_MINUTES = 120
+
 
 class PipelineRun(BaseModel):
     """
@@ -123,7 +127,7 @@ class PipelineRun(BaseModel):
         )
 
     @classmethod
-    def is_running(cls, pipeline_name: str, max_age_minutes: int = 120) -> bool:
+    def is_running(cls, pipeline_name: str, max_age_minutes: int = RUNNING_MAX_AGE_MINUTES) -> bool:
         """
         Check if a pipeline is currently running.
 

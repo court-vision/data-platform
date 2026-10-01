@@ -4,8 +4,8 @@ Dashboard Response Schemas
 Pydantic models for the pipeline monitoring dashboard API.
 """
 
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import Literal, Optional
 
 from pydantic import Field
 
@@ -28,6 +28,9 @@ class PipelineHealthEntry(ApiModel):
     last_success_at: Optional[datetime] = None
     is_running: bool = False
     error_streak: int = 0
+    # The trigger route takes ?date=YYYY-MM-DD (a backfill). Most do; the live,
+    # lineup-alerts and playoffs routes run for "now" only.
+    accepts_date: bool = False
 
 
 class QualityRunEntry(ApiModel):
@@ -73,3 +76,140 @@ class DashboardStatusResponse(ApiModel):
     status: str
     message: str
     data: DashboardStatusData
+
+
+class ServiceInfo(ApiModel):
+    """One deployed service, as its own /health reports it."""
+
+    key: str  # "data_platform" | "backend"
+    name: str
+    configured: bool = True  # False: no URL to ask (local dev)
+    ok: bool = False
+    version: Optional[str] = None  # git SHA[:7], "dev" locally
+    environment: Optional[str] = None
+    uptime_s: Optional[int] = None
+    error: Optional[str] = None
+
+
+class ServicesData(ApiModel):
+    services: list[ServiceInfo]
+    fetched_at: datetime
+
+
+class ServicesResponse(ApiModel):
+    """Response for GET /v1/dashboard/services."""
+
+    status: str
+    message: str
+    data: ServicesData
+
+
+class TableWriter(ApiModel):
+    """A registered pipeline that writes a table."""
+
+    name: str          # registry key
+    display_name: str
+
+
+class TableFreshness(ApiModel):
+    """What date one table runs through, when it was last written, and the verdict."""
+
+    table: str                              # "nba.player_game_stats"
+    pipelines: list[TableWriter]            # its writers, registry order
+    category: str                           # the most time-critical writer's
+    date_column: Optional[str] = None       # the business date: game_date, as_of_date, ...
+    latest_date: Optional[date] = None
+    write_column: Optional[str] = None      # updated_at, created_at, ...
+    latest_written_at: Optional[datetime] = None
+    rows_estimate: Optional[int] = None     # planner statistics, not a count
+    # The game date a nightly table was expected to run through when judged.
+    expected_date: Optional[date] = None
+    state: Literal["fresh", "stale", "idle", "empty", "unjudged", "error"]
+    error: Optional[str] = None
+
+
+class FreshnessData(ApiModel):
+    tables: list[TableFreshness]
+    season: str
+    phase: Literal["preseason", "regular", "offseason"]
+    today: date                             # the ET calendar date
+    # The last game date whose post-game deadline (6 AM ET next morning) has passed.
+    settled_through: date
+    # The regular-season game day each cadence is held to; None while nothing is due.
+    post_game_due: Optional[date] = None    # last settled game day
+    pre_game_due: Optional[date] = None     # last game day whose first tip-off has passed
+    next_game_date: Optional[date] = None
+    fetched_at: datetime
+
+
+class FreshnessResponse(ApiModel):
+    """Response for GET /v1/dashboard/freshness."""
+
+    status: str
+    message: str
+    data: FreshnessData
+
+
+class PipelineInfo(ApiModel):
+    """What the registry says about one pipeline: its config, as the page shows it."""
+
+    name: str                    # registry key, the URL segment
+    display_name: str
+    description: str
+    category: str
+    target_table: str
+    trigger_endpoint: str
+    accepts_date: bool
+    cron_job: Optional[str] = None            # cron-runner job that fires it
+    depends_on: list[str] = Field(default_factory=list)
+    allow_concurrent: bool = False
+    espn_gated: bool = False                  # post-game: waits for ESPN's scoring period to flip
+    earliest_run_time_cst: Optional[str] = None   # post-game: "HH:MM" wall-clock gate
+    # pre-game: minutes before first tip, the settings default resolved; None for any other category
+    pre_game_window_minutes: Optional[int] = None
+    is_running: bool = False
+
+
+class PipelineRunEntry(ApiModel):
+    """One row of nba.pipeline_runs."""
+
+    id: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    # running | stuck | success | failed. `stuck` is not a stored status: it is a
+    # row left `running` longer than PipelineRun.is_running counts as live.
+    status: str
+    duration_seconds: Optional[float] = None
+    records_processed: int = 0
+    error_message: Optional[str] = None
+
+
+class RunsSummary(ApiModel):
+    """Over the runs returned (a window, newest first), not all time, but for last_success_at."""
+
+    total: int
+    succeeded: int
+    failed: int
+    running: int                                  # live runs only
+    stuck: int                                    # left `running` past the cutoff: see PipelineRunEntry.status
+    success_rate: Optional[float] = None          # succeeded / finished; None with nothing finished
+    median_duration_seconds: Optional[float] = None   # of the successful runs
+    max_duration_seconds: Optional[float] = None      # of the successful runs
+    last_success_at: Optional[datetime] = None    # all time: a window of failures is not "never"
+    oldest_started_at: Optional[datetime] = None  # how far back the window reaches
+
+
+class PipelineRunsData(ApiModel):
+    pipeline: PipelineInfo
+    runs: list[PipelineRunEntry]                  # newest first
+    summary: RunsSummary
+    limit: int
+    fetched_at: datetime
+
+
+class PipelineRunsResponse(ApiModel):
+    """Response for GET /v1/dashboard/pipelines/{name}/runs."""
+
+    status: str
+    message: str
+    data: PipelineRunsData
