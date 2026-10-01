@@ -315,8 +315,21 @@ def statistical_line(
 # ---- ESPN and adjustments ------------------------------------------------------------------
 
 
-def blend(stat: Optional[Projection], espn: Optional[EspnLine], player_id: int, weight: float) -> Optional[Projection]:
-    """Combine the statistical line with ESPN's. Either may be missing."""
+def blend(
+    stat: Optional[Projection],
+    espn: Optional[EspnLine],
+    player_id: int,
+    weight: float,
+    typical_games: float = SEASON_GAMES * 0.72,
+) -> Optional[Projection]:
+    """Combine the statistical line with ESPN's. Either may be missing.
+
+    A player with no NBA minutes takes ESPN's per-game line as it is, but not
+    ESPN's games: every veteran's games are pulled toward a typical season by
+    the blend, and a rookie left at ESPN's 72 would be the most durable player
+    on the board for no reason but having no history. His games are blended
+    with `typical_games` at the same weight.
+    """
     if stat is None and espn is None:
         return None
     if espn is None or not espn.minutes:
@@ -325,7 +338,7 @@ def blend(stat: Optional[Projection], espn: Optional[EspnLine], player_id: int, 
         return stat
     espn_rates = {k: (espn.per_game.get(k, 0.0) / espn.minutes) for k in LINE_KEYS}
     if stat is None:
-        games = espn.games if espn.games else SEASON_GAMES * 0.72
+        games = (weight * espn.games + (1 - weight) * typical_games) if espn.games else typical_games
         return Projection(
             player_id=player_id, minutes=espn.minutes, games=games,
             per_game={k: espn.per_game.get(k, 0.0) for k in LINE_KEYS},
@@ -402,7 +415,7 @@ def project(
     for pid in sorted(set(roster)):
         rows = window.get(pid)
         stat = statistical_line(rows, target, coeffs, by_cell.get(cells.get(pid), league)) if rows else None
-        blended = blend(stat, espn.get(pid), pid, coeffs.espn_weight)
+        blended = blend(stat, espn.get(pid), pid, coeffs.espn_weight, coeffs.gp_mean * SEASON_GAMES)
         if blended is None:
             continue
         final = adjust(blended, adjustments.get(pid))

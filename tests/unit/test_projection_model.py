@@ -138,6 +138,12 @@ class TestBlendAndAdjust:
         assert p.minutes == 25.0 and p.per_game["pts"] == 1.0
         assert p.components["espn_weight"] == 1.0
 
+    def test_rookie_games_are_pulled_toward_a_typical_season_like_everyone_elses(self):
+        espn = EspnLine(per_game={k: 1.0 for k in LINE_KEYS}, minutes=25.0, games=72.0)
+        p = blend(None, espn, 9, 0.5, typical_games=59.0)
+        assert p.games == pytest.approx(65.5)
+        assert blend(None, EspnLine(per_game={}, minutes=25.0, games=None), 9, 0.5, typical_games=59.0).games == 59.0
+
     def test_neither_is_nothing(self):
         assert blend(None, None, 1, 0.5) is None
 
@@ -291,3 +297,36 @@ class TestSeedRows:
         assert len(rows) >= 40
         for row in rows:
             parse_row(row)
+
+
+class TestSeedIdempotence:
+    def _live(self, **over):
+        from decimal import Decimal
+        from types import SimpleNamespace
+
+        base = dict(kind="role", minutes=Decimal("30.0"), games=None, return_date=None,
+                    usage=Decimal("0.950"), rates=None, note="why", source_url=None)
+        base.update(over)
+        return SimpleNamespace(**base)
+
+    def test_an_identical_row_is_left_alone(self):
+        from scripts.seed_projection_adjustments import same_as_live
+
+        fields = {"kind": "role", "minutes": 30.0, "usage": 0.95, "note": "why", "source_url": None}
+        assert same_as_live(self._live(), fields)
+
+    @pytest.mark.parametrize("change", [
+        {"usage": 0.93}, {"minutes": 31.0}, {"games": 60}, {"note": "another reason"},
+        {"rates": {"ast": 0.9}}, {"kind": "trade"},
+    ])
+    def test_any_changed_field_is_a_new_version(self, change):
+        from scripts.seed_projection_adjustments import same_as_live
+
+        fields = {"kind": "role", "minutes": 30.0, "usage": 0.95, "note": "why", "source_url": None}
+        fields.update(change)
+        assert not same_as_live(self._live(), fields)
+
+    def test_no_live_row_is_always_a_write(self):
+        from scripts.seed_projection_adjustments import same_as_live
+
+        assert not same_as_live(None, {"kind": "role", "games": 60, "note": "x"})
