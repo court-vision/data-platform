@@ -220,3 +220,44 @@ def test_probe_backend_unreachable_is_an_error_not_a_500(monkeypatch) -> None:
     info = dashboard._probe_backend()
     assert info.configured is True and info.ok is False
     assert info.error == "ConnectError" and info.version is None
+
+
+# Valid JSON that is not the backend's /health: whatever BACKEND_INTERNAL_URL
+# points at answered, or the contract moved.
+_NOT_A_HEALTH_BODY = [
+    pytest.param([1, 2, 3], id="a list"),
+    pytest.param("ok", id="a string"),
+    pytest.param({"status": "ok", "uptime_s": 12.5}, id="fractional uptime"),
+    pytest.param({"status": "ok", "version": 1234567}, id="numeric version"),
+    pytest.param({"status": "degraded", "checks": ["database"]}, id="checks as a list"),
+]
+
+
+@pytest.mark.api
+@pytest.mark.parametrize("body", _NOT_A_HEALTH_BODY)
+def test_probe_backend_unreadable_body_is_an_error_not_a_500(monkeypatch, body) -> None:
+    monkeypatch.setattr(dashboard.settings, "backend_internal_url", "http://backend")
+    monkeypatch.setattr(dashboard.httpx, "get", lambda url, timeout: _Response(200, body))
+    info = dashboard._probe_backend()
+    assert info.configured is True and info.ok is False
+    assert info.error and info.version is None
+
+
+@pytest.mark.api
+def test_probe_backend_body_that_is_not_an_object_says_so(monkeypatch) -> None:
+    monkeypatch.setattr(dashboard.settings, "backend_internal_url", "http://backend")
+    monkeypatch.setattr(dashboard.httpx, "get", lambda url, timeout: _Response(200, [1, 2, 3]))
+    assert dashboard._probe_backend().error == "HTTP 200: not a /health body"
+
+
+@pytest.mark.api
+@pytest.mark.parametrize("body", _NOT_A_HEALTH_BODY)
+def test_services_keeps_this_process_when_the_backend_body_is_unreadable(monkeypatch, body) -> None:
+    monkeypatch.setattr(dashboard.settings, "backend_internal_url", "http://backend")
+    monkeypatch.setattr(dashboard.httpx, "get", lambda url, timeout: _Response(200, body))
+    res = TestClient(_make_app(), raise_server_exceptions=False).get("/v1/dashboard/services", headers=_AUTH)
+
+    assert res.status_code == 200
+    services = {s["key"]: s for s in res.json()["data"]["services"]}
+    assert services["data_platform"]["ok"] is True and services["data_platform"]["version"]
+    assert services["backend"]["ok"] is False and services["backend"]["error"]

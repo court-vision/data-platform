@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { daysBehind, describeSeason, sortByUrgency, splitTable, summarizeFreshness, type TableFreshness } from "@/lib/freshness"
+import { daysBehind, describeSeason, sortByUrgency, splitTable, summarizeFreshness, summaryTiles, type TableFreshness } from "@/lib/freshness"
 
 function table(overrides: Partial<TableFreshness> = {}): TableFreshness {
   return {
@@ -60,6 +60,40 @@ describe("summarizeFreshness", () => {
       table({ state: "unjudged" }),
     ])
     expect(summary).toEqual({ total: 5, fresh: 2, stale: 1, idle: 0, empty: 1, unjudged: 1, error: 0 })
+  })
+})
+
+describe("summaryTiles", () => {
+  const tiles = (...states: TableFreshness["state"][]) => summaryTiles(summarizeFreshness(states.map((state) => table({ state }))))
+
+  test("a table whose query failed is counted in the red tile, and the tile says so", () => {
+    expect(tiles("fresh", "stale", "error", "error")).toEqual([
+      { label: "Tables", value: 4, tone: "plain" },
+      { label: "Fresh", value: 1, tone: "good" },
+      { label: "Stale / error", value: 3, tone: "bad" },
+      { label: "Empty", value: 0, tone: "quiet" },
+    ])
+  })
+
+  test("every table errored is red, not a row of quiet zeros", () => {
+    expect(tiles("error", "error").slice(1)).toEqual([
+      { label: "Fresh", value: 0, tone: "quiet" },
+      { label: "Stale / error", value: 2, tone: "bad" },
+      { label: "Empty", value: 0, tone: "quiet" },
+    ])
+  })
+
+  test("without errors the tile is plain Stale, quiet at zero", () => {
+    expect(tiles("fresh", "stale", "empty").slice(1)).toEqual([
+      { label: "Fresh", value: 1, tone: "good" },
+      { label: "Stale", value: 1, tone: "bad" },
+      { label: "Empty", value: 1, tone: "warn" },
+    ])
+    expect(tiles("idle", "unjudged").slice(1)).toEqual([
+      { label: "Fresh", value: 0, tone: "quiet" },
+      { label: "Stale", value: 0, tone: "quiet" },
+      { label: "Empty", value: 0, tone: "quiet" },
+    ])
   })
 })
 

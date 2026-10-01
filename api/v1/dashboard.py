@@ -159,6 +159,9 @@ async def get_services(
     over Railway's private network. Replaces the Deployments section, which
     read a nightly `deploy` cron job that no longer exists.
     """
+    # Reads no database, and gets no connection (NO_DB_V1_PATHS in
+    # core/db_middleware.py), so the cards still answer in a Postgres outage.
+    # A query added here has to come off that list first.
     own = service_info()
     services = [
         ServiceInfo(
@@ -206,9 +209,21 @@ def _probe_backend() -> ServiceInfo:
         )
     try:
         response = httpx.get(f"{base}/health", timeout=BACKEND_HEALTH_TIMEOUT_S)
-        body = response.json()
+        return _backend_card(response)
     except Exception as exc:
         return ServiceInfo(key="backend", name="Backend", error=type(exc).__name__)
+
+
+def _backend_card(response: httpx.Response) -> ServiceInfo:
+    """The backend's card from its /health answer. Raises on a body that is not
+    one (not JSON, a mistyped field): _probe_backend makes that the card's error,
+    so a strange answer costs the backend its card, not this endpoint a 500."""
+    body = response.json()
+    if not isinstance(body, dict):
+        return ServiceInfo(
+            key="backend", name="Backend",
+            error=f"HTTP {response.status_code}: not a /health body",
+        )
 
     failing = [
         name for name, check in (body.get("checks") or {}).items()

@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FRESHNESS_REFETCH_MS, useFreshness } from "@/hooks/useFreshness"
 import { useNow } from "@/hooks/useNow"
-import { describeSeason, sortByUrgency, summarizeFreshness, type FreshnessData } from "@/lib/freshness"
+import { describeSeason, sortByUrgency, summarizeFreshness, summaryTiles, type FreshnessData, type TileTone } from "@/lib/freshness"
 import { formatDay } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
@@ -58,20 +58,22 @@ export function Freshness() {
   )
 }
 
+const TILE_TONES: Record<TileTone, string> = {
+  plain: "text-foreground",
+  good: "text-status-win",
+  bad: "text-status-loss",
+  warn: "text-status-projected",
+  quiet: "text-muted-foreground",
+}
+
 function SummaryTiles({ data }: { data: FreshnessData }) {
-  const summary = summarizeFreshness(data.tables)
-  const tiles = [
-    { label: "Tables", value: summary.total, tone: "text-foreground" },
-    { label: "Fresh", value: summary.fresh, tone: "text-status-win" },
-    { label: "Stale", value: summary.stale, tone: summary.stale > 0 ? "text-status-loss" : "text-muted-foreground" },
-    { label: "Empty", value: summary.empty, tone: summary.empty > 0 ? "text-status-projected" : "text-muted-foreground" },
-  ]
+  const tiles = summaryTiles(summarizeFreshness(data.tables))
   return (
     <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      {tiles.map((tile) => (
-        <Card key={tile.label} variant="panel" className="px-4 py-3">
+      {tiles.map((tile, i) => (
+        <Card key={i} variant="panel" className="px-4 py-3">
           <dt className="text-xs uppercase tracking-wider text-muted-foreground">{tile.label}</dt>
-          <dd className={cn("font-mono text-3xl font-bold tabular-nums", tile.tone)}>{tile.value}</dd>
+          <dd className={cn("font-mono text-3xl font-bold tabular-nums", TILE_TONES[tile.tone])}>{tile.value}</dd>
         </Card>
       ))}
     </dl>

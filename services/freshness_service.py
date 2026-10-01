@@ -19,6 +19,10 @@ Where the facts come from:
   nightly batch being judged, so a batch-wide failure cannot move the mark.
   Before the regular season nothing nightly is due, so those tables are
   `idle`, not `stale`; after it they stay judged through its last night.
+- Two tables keep their own dates, each declared beside its rule below:
+  `nba.games` is that schedule, so it is read through its last final
+  (`DATE_FILTERS`), and `daily_matchup_scores` is dated by its run, the
+  morning after the game night (`RUN_DATE_LAG`).
 
 The judgement (`judge`) and the due dates (`due_dates`) are pure functions of
 dates, so they are tested without a database; `build_freshness` is the only
@@ -61,6 +65,22 @@ WRITE_COLUMNS = ("updated_at", "last_updated", "captured_at", "created_at", "sen
 # when a prominent player is out (`no_prominent_injuries_today` returns
 # without a row).
 CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection"})
+
+# Tables dated by the run, not by the game night, and how far ahead that is.
+# daily_matchup_scores stamps its rows with the Central calendar date it ran
+# on, and the run for game night D is held past midnight (ESPN's flip, ~2 AM
+# CT), so it writes D + 1. Held to D, the row the night before left would
+# already satisfy it and a missed night would read fresh. A run forced before
+# midnight writes D and reads stale until the gated one lands: the safe
+# direction for a monitor.
+RUN_DATE_LAG = {"stats_s2.daily_matchup_scores": timedelta(days=1)}
+
+# Tables whose business date only counts on some rows, as a SQL condition.
+# nba.games holds the whole season ahead (game_start_times writes it, and the
+# due dates are read from it), so its max(game_date) is the schedule's last
+# day whether or not a result ever landed. What the nightly writer adds is the
+# result, so the table runs through its last game day with a final.
+DATE_FILTERS = {"nba.games": "status = 'final'"}
 
 # Most time-critical first: the category shown for a table with two writers
 # (nba.games: game_schedule nightly, game_start_times on its own cron).
@@ -241,7 +261,8 @@ def judge(
     - `empty`: a nightly table with nothing in it while something is due.
     - `fresh` / `stale`: against the game day its cadence is due through —
       post-game tables the last settled night, pre-game tables the last day
-      whose first tip-off has passed.
+      whose first tip-off has passed. A run-dated table (`RUN_DATE_LAG`) is
+      expected that much later, in its own dates.
     """
     if target.category == PipelineCategory.POST_GAME:
         expected = due.post_game
@@ -253,6 +274,7 @@ def judge(
         return "unjudged", None
     if expected is None:
         return "idle", None
+    expected += RUN_DATE_LAG.get(target.table, timedelta(0))
     if latest_date is None and latest_written_at is None:
         return "empty", None
     if latest_date is None:
@@ -290,14 +312,21 @@ def _row_estimates() -> dict[str, int]:
     return {table: int(count) for table, count in rows}
 
 
-def _latest(target: TableTarget) -> tuple[Optional[date], Optional[datetime]]:
+def _latest_sql(target: TableTarget) -> str:
     """max(date column), max(write column). Both indexed-or-small; one statement."""
     parts = []
     for column in (target.date_column, target.write_column):
         parts.append(f'max("{column}")' if column else "NULL")
+    date_filter = DATE_FILTERS.get(target.table)
+    if date_filter and target.date_column:
+        parts[0] += f" FILTER (WHERE {date_filter})"
     schema, table = target.table.split(".", 1)
+    return f'SELECT {", ".join(parts)} FROM "{schema}"."{table}"'
+
+
+def _latest(target: TableTarget) -> tuple[Optional[date], Optional[datetime]]:
     with db.atomic():  # a failure here must not poison the next table's query
-        row = db.execute_sql(f'SELECT {", ".join(parts)} FROM "{schema}"."{table}"').fetchone()
+        row = db.execute_sql(_latest_sql(target)).fetchone()
     latest_date, latest_written = row if row else (None, None)
     if isinstance(latest_date, datetime):  # a DateField backed by a timestamp column
         latest_date = latest_date.date()

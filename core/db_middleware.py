@@ -35,9 +35,15 @@ from db.base import db
 # tests/api/test_db_route_accounting.py fails a route added outside /v1.
 DB_PATH_PREFIX = "/v1/"
 
+# The /v1 routes that read nothing, for the same reason: the dashboard's service
+# cards (settings, plus the backend's /health over HTTP) and the old bookmark's
+# redirect to the app. Behind a connect they would be a 503 in the very outage
+# the cards' "degraded: database" line exists to report.
+NO_DB_V1_PATHS = frozenset({"/v1/dashboard", "/v1/dashboard/services"})
+
 
 def needs_db(path: str) -> bool:
-    return path.startswith(DB_PATH_PREFIX)
+    return path.startswith(DB_PATH_PREFIX) and path not in NO_DB_V1_PATHS
 
 PHYSICALLY_CLOSE = False
 

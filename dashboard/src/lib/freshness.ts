@@ -29,6 +29,30 @@ export function summarizeFreshness(tables: TableFreshness[]): FreshnessSummary {
   return summary
 }
 
+export type TileTone = "plain" | "good" | "bad" | "warn" | "quiet"
+
+export interface SummaryTile {
+  label: string
+  value: number
+  tone: TileTone
+}
+
+/**
+ * The four tiles above the table. A table whose freshness query failed is
+ * counted with the stale ones: both need a look, and an error in no tile reads
+ * as "nothing stale". A zero is quiet, so a page with nothing judged (or
+ * nothing readable) is not green.
+ */
+export function summaryTiles(summary: FreshnessSummary): SummaryTile[] {
+  const broken = summary.stale + summary.error
+  return [
+    { label: "Tables", value: summary.total, tone: "plain" },
+    { label: "Fresh", value: summary.fresh, tone: summary.fresh > 0 ? "good" : "quiet" },
+    { label: summary.error > 0 ? "Stale / error" : "Stale", value: broken, tone: broken > 0 ? "bad" : "quiet" },
+    { label: "Empty", value: summary.empty, tone: summary.empty > 0 ? "warn" : "quiet" },
+  ]
+}
+
 /** How many game days a stale table is behind, or null when it is not judged stale. */
 export function daysBehind(table: TableFreshness): number | null {
   if (table.state !== "stale" || !table.expected_date) return null
