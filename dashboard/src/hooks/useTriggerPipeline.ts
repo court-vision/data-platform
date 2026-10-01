@@ -1,13 +1,26 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
-import type { PipelineHealth } from "@/hooks/useDashboardStatus"
+import { RUNS_KEY } from "@/hooks/usePipelineRuns"
 import { apiFetch, type Schemas } from "@/lib/api"
+import type { Runnable } from "@/lib/pipelines"
 
 interface TriggerArgs {
-  pipeline: PipelineHealth
+  pipeline: Runnable
   /** YYYY-MM-DD backfill date; only for pipelines whose route accepts one. */
   date?: string
+}
+
+/**
+ * Refetch what a run changes: the Overview's rows and the pipeline's own
+ * page, which holds a Run button too and would otherwise show the state from
+ * before the run until its next poll.
+ */
+export function refreshAfterRun(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["dashboard", "status"] }),
+    queryClient.invalidateQueries({ queryKey: RUNS_KEY }),
+  ])
 }
 
 /**
@@ -33,6 +46,6 @@ export function useTriggerPipeline() {
     onError: (error, { pipeline }) => {
       toast.error(`${pipeline.display_name} failed`, { description: error.message })
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["dashboard", "status"] }),
+    onSettled: () => refreshAfterRun(queryClient),
   })
 }

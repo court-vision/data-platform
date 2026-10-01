@@ -4,11 +4,11 @@ import { useState, type FormEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import type { PipelineHealth } from "@/hooks/useDashboardStatus"
 import { useTriggerPipeline } from "@/hooks/useTriggerPipeline"
+import type { Runnable } from "@/lib/pipelines"
 
 /** Run one pipeline: a popover to confirm, with a date box where a backfill can go. */
-export function RunPipelineButton({ pipeline }: { pipeline: PipelineHealth }) {
+export function RunPipelineButton({ pipeline }: { pipeline: Runnable }) {
   const [open, setOpen] = useState(false)
   const [date, setDate] = useState("")
   const trigger = useTriggerPipeline()

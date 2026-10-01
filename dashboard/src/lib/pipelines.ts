@@ -2,6 +2,10 @@ import type { PipelineHealth } from "@/hooks/useDashboardStatus"
 
 export type PipelineState = "running" | "stuck" | "failed" | "success" | "never"
 
+/** What it takes to run a pipeline from a button: the Overview's rows and the
+ * detail page's PipelineInfo both have these four. */
+export type Runnable = Pick<PipelineHealth, "display_name" | "is_running" | "trigger_endpoint" | "accepts_date">
+
 /**
  * One word for a pipeline's health; `running` wins over whatever ran last.
  *

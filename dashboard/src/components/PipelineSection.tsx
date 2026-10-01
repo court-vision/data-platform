@@ -1,3 +1,5 @@
+import { Link } from "react-router"
+
 import { RunPipelineButton } from "@/components/RunPipelineButton"
 import { StateBadge } from "@/components/StateBadge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -43,7 +45,9 @@ export function PipelineSection({ group, now }: { group: CategoryGroup; now: num
             {group.pipelines.map((pipeline) => (
               <tr key={pipeline.name} className="border-b border-border/50 last:border-0">
                 <th scope="row" className="px-6 py-2.5 text-left font-medium">
-                  {pipeline.display_name}
+                  <Link to={`/pipelines/${pipeline.name}`} className="hover:text-primary hover:underline underline-offset-4">
+                    {pipeline.display_name}
+                  </Link>
                   <span className="block font-mono text-xs font-normal text-muted-foreground">{pipeline.name}</span>
                 </th>
                 <td className="px-3 py-2.5">
