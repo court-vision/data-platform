@@ -14,7 +14,8 @@ export function FreshnessTable({ tables, now }: { tables: TableFreshness[]; now:
         </CardTitle>
         <CardDescription>
           Nightly tables are judged against the schedule: post-game tables through the last settled night, pre-game tables through the last day whose first tip-off has passed. Live and scheduled
-          writers, and pipelines that only write when there is something to say, are shown but not judged.
+          writers, and pipelines that only write when there is something to say, are shown but not judged. Two tables keep their own dates: nba.games is the schedule, so it runs through its last game day
+          with a result, and daily_matchup_scores is dated by its run, the morning after the game night.
         </CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto px-0 pb-2">

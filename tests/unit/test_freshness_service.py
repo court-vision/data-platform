@@ -125,8 +125,8 @@ class TestJudge:
         assert _judge(_target(), MAR_4) == ("fresh", MAR_4)
 
     def test_a_table_that_runs_past_it_is_fresh_too(self):
-        # nba.games holds the rest of the schedule.
-        assert _judge(_target(), date(2026, 4, 12)) == ("fresh", MAR_4)
+        # Tonight's batch can land before the morning deadline moves the mark.
+        assert _judge(_target(), MAR_5) == ("fresh", MAR_4)
 
     def test_stale_when_behind_the_due_date(self):
         assert _judge(_target(), MAR_3) == ("stale", MAR_4)
@@ -148,6 +148,13 @@ class TestJudge:
         matchups = TARGETS["stats_s2.daily_matchup_scores"]
         assert _judge(matchups, date(2025, 4, 14), due=NOTHING_DUE) == ("idle", None)
         assert _judge(matchups, None, written=None) == ("empty", None)
+
+    def test_a_schedule_with_no_result_yet_is_stale_not_fresh(self):
+        # nba.games is read through its last final (`DATE_FILTERS`): with the
+        # season loaded and game_schedule never run, that is no date at all.
+        assert _judge(TARGETS["nba.games"], None) == ("stale", MAR_4)
+        assert _judge(TARGETS["nba.games"], MAR_3) == ("stale", MAR_4)
+        assert _judge(TARGETS["nba.games"], MAR_4) == ("fresh", MAR_4)
 
     def test_pre_game_tables_are_held_to_their_own_due_date(self):
         injuries = _target(PipelineCategory.PRE_GAME, ("espn_injury_status",), "report_date", "created_at")
@@ -240,6 +247,27 @@ class TestTargets:
         assert games.pipelines == ("game_schedule", "game_start_times")
         assert games.category == PipelineCategory.POST_GAME
         assert (games.date_column, games.write_column) == ("game_date", "updated_at")
+
+    def test_games_runs_through_its_last_final_not_the_end_of_the_schedule(self):
+        # game_start_times writes the whole season ahead, so a bare
+        # max(game_date) is the schedule's last day on every day of the season.
+        assert fs._latest_sql(TARGETS["nba.games"]) == (
+            'SELECT max("game_date") FILTER (WHERE status = \'final\'), max("updated_at") FROM "nba"."games"'
+        )
+
+    def test_every_other_table_runs_through_its_newest_row(self):
+        assert fs._latest_sql(TARGETS["nba.player_game_stats"]) == (
+            'SELECT max("game_date"), max("updated_at") FROM "nba"."player_game_stats"'
+        )
+        assert fs._latest_sql(TARGETS["nba.player_profiles"]) == (
+            'SELECT NULL, max("updated_at") FROM "nba"."player_profiles"'
+        )
+
+    def test_a_per_table_exception_names_a_nightly_table_with_a_business_date(self):
+        # A renamed table would otherwise drop its rule without a word.
+        for table in (*fs.RUN_DATE_LAG, *fs.DATE_FILTERS):
+            assert TARGETS[table].category == PipelineCategory.POST_GAME
+            assert TARGETS[table].date_column
 
     def test_daily_matchup_scores_names_the_real_table(self):
         # The config said `stats_s2.daily_matchup_score` (singular) until this page.
