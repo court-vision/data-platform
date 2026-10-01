@@ -162,11 +162,11 @@ class PipelineInfo(ApiModel):
     accepts_date: bool
     cron_job: Optional[str] = None            # cron-runner job that fires it
     depends_on: list[str] = Field(default_factory=list)
-    timeout_seconds: int
     allow_concurrent: bool = False
     espn_gated: bool = False                  # post-game: waits for ESPN's scoring period to flip
     earliest_run_time_cst: Optional[str] = None   # post-game: "HH:MM" wall-clock gate
-    pre_game_window_minutes: Optional[int] = None # pre-game: minutes before first tip; None = default
+    # pre-game: minutes before first tip, the settings default resolved; None for any other category
+    pre_game_window_minutes: Optional[int] = None
     is_running: bool = False
 
 
@@ -176,23 +176,26 @@ class PipelineRunEntry(ApiModel):
     id: str
     started_at: datetime
     completed_at: Optional[datetime] = None
-    status: str                  # running | success | failed
+    # running | stuck | success | failed. `stuck` is not a stored status: it is a
+    # row left `running` longer than PipelineRun.is_running counts as live.
+    status: str
     duration_seconds: Optional[float] = None
     records_processed: int = 0
     error_message: Optional[str] = None
 
 
 class RunsSummary(ApiModel):
-    """Over the runs returned (a window, newest first), not all time."""
+    """Over the runs returned (a window, newest first), not all time, but for last_success_at."""
 
     total: int
     succeeded: int
     failed: int
-    running: int
+    running: int                                  # live runs only
+    stuck: int                                    # left `running` past the cutoff: see PipelineRunEntry.status
     success_rate: Optional[float] = None          # succeeded / finished; None with nothing finished
-    median_duration_seconds: Optional[float] = None
-    max_duration_seconds: Optional[float] = None
-    last_success_at: Optional[datetime] = None
+    median_duration_seconds: Optional[float] = None   # of the successful runs
+    max_duration_seconds: Optional[float] = None      # of the successful runs
+    last_success_at: Optional[datetime] = None    # all time: a window of failures is not "never"
     oldest_started_at: Optional[datetime] = None  # how far back the window reaches
 
 

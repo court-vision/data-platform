@@ -119,8 +119,9 @@ function Facts({ pipeline }: { pipeline: PipelineInfo }) {
   const gates: string[] = []
   if (pipeline.espn_gated) gates.push("waits for ESPN's scoring period to advance")
   if (pipeline.earliest_run_time_cst) gates.push(`not before ${pipeline.earliest_run_time_cst} CT`)
-  if (pipeline.category === "pre_game") {
-    gates.push(`${pipeline.pre_game_window_minutes ?? 150} min before first tip-off`)
+  // The API sends the window the gate uses, default resolved, for pre-game pipelines only.
+  if (pipeline.pre_game_window_minutes != null) {
+    gates.push(`${pipeline.pre_game_window_minutes} min before first tip-off`)
   }
   if (pipeline.allow_concurrent) gates.push("may run concurrently")
 
@@ -130,7 +131,6 @@ function Facts({ pipeline }: { pipeline: PipelineInfo }) {
     ["Cron job", pipeline.cron_job ?? "none (manual)"],
     ["Depends on", pipeline.depends_on.length > 0 ? pipeline.depends_on.join(", ") : "—"],
     ["Gates", gates.length > 0 ? gates.join(" · ") : "—"],
-    ["Timeout", formatDuration(pipeline.timeout_seconds)],
   ]
 
   return (

@@ -339,7 +339,7 @@ All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query par
 | `GET` | `/v1/dashboard/status` | Token | Pipeline health, cron runs, quality runs, batch jobs |
 | `GET` | `/v1/dashboard/services` | Token | Running version, environment and uptime of this service and the backend |
 | `GET` | `/v1/dashboard/freshness` | Token | What date each pipeline's table runs through, when it was last written, and a verdict (`fresh`, `stale`, `idle`, `empty`, `unjudged`, `error`) against the game days in `nba.games` — the schedule, never the results, so a failed batch cannot move its own mark (`services/freshness_service.py`) |
-| `GET` | `/v1/dashboard/pipelines/{name}/runs` | Token | One pipeline's registry config and its newest runs (`?limit=`, 1–200, default 50) with a summary over that window. 404 for a name not in the registry |
+| `GET` | `/v1/dashboard/pipelines/{name}/runs` | Token | One pipeline's registry config and its newest runs (`?limit=`, 1–200, default 50) with a summary over that window; only `last_success_at` is all-time. A row left `running` past the two-hour cutoff of `PipelineRun.is_running` has the status `stuck`. 404 for a name not in the registry |
 
 ### Data Quality
 

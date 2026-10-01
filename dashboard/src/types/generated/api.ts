@@ -1207,8 +1207,6 @@ export interface components {
             pre_game_window_minutes: number | null;
             /** Target Table */
             target_table: string;
-            /** Timeout Seconds */
-            timeout_seconds: number;
             /** Trigger Endpoint */
             trigger_endpoint: string;
         };
@@ -1469,7 +1467,7 @@ export interface components {
         };
         /**
          * RunsSummary
-         * @description Over the runs returned (a window, newest first), not all time.
+         * @description Over the runs returned (a window, newest first), not all time, but for last_success_at.
          */
         RunsSummary: {
             /** Failed */
@@ -1484,6 +1482,8 @@ export interface components {
             oldest_started_at: string | null;
             /** Running */
             running: number;
+            /** Stuck */
+            stuck: number;
             /** Succeeded */
             succeeded: number;
             /** Success Rate */

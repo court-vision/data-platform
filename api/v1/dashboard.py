@@ -28,9 +28,9 @@ from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
 from core.settings import settings
 from db.base import run_in_db_thread
-from db.models.pipeline_run import PipelineRun
+from db.models.pipeline_run import RUNNING_MAX_AGE_MINUTES, PipelineRun
 from db.models.nba.cron_job_run import CronJobRun
-from pipelines import PIPELINE_REGISTRY, PipelineConfig
+from pipelines import PIPELINE_REGISTRY, PipelineCategory, PipelineConfig
 from schemas.cron import CronJobRunEntry
 from schemas.dashboard import (
     DashboardStatusData,
@@ -251,8 +251,13 @@ async def get_pipeline_runs(
 
 
 def pipeline_info(name: str, *, is_running: bool = False) -> PipelineInfo:
-    """The registry entry as the page shows it. Every field is on PipelineConfig."""
+    """
+    The registry entry as the page shows it: only what something acts on.
+    config.timeout_seconds is left out because nothing enforces it, and the
+    pre-game window is the one the gate uses, default included.
+    """
     config = PIPELINE_REGISTRY[name].config
+    pre_game = config.category == PipelineCategory.PRE_GAME
     return PipelineInfo(
         name=name,
         display_name=config.display_name,
@@ -263,32 +268,60 @@ def pipeline_info(name: str, *, is_running: bool = False) -> PipelineInfo:
         accepts_date=trigger_accepts_date(config),
         cron_job=config.cron_job_name,
         depends_on=list(config.depends_on),
-        timeout_seconds=config.timeout_seconds,
         allow_concurrent=config.allow_concurrent,
         espn_gated=config.espn_gated,
         earliest_run_time_cst=(
             config.earliest_run_time_cst.strftime("%H:%M") if config.earliest_run_time_cst else None
         ),
-        pre_game_window_minutes=config.pre_game_window_minutes,
+        # As trigger_pre_game resolves it.
+        pre_game_window_minutes=(
+            (config.pre_game_window_minutes or settings.pre_game_window_minutes) if pre_game else None
+        ),
         is_running=is_running,
     )
 
 
-def summarize_runs(runs: list[PipelineRunEntry]) -> RunsSummary:
-    """Counts and durations over the window. Pure: tested without a database."""
+def _utc(dt: datetime) -> datetime:
+    """Aware, reading a naive value as UTC. The migrated table's timestamps are
+    timestamptz and come back aware; one created from the model (tests) is naive."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def run_status(status: str, started_at: datetime, stale_before: datetime) -> str:
+    """
+    A row's status as the page shows it. `stuck` is a row still marked running
+    after PipelineRun.is_running stopped counting it as live: the run hung or
+    was cut off, and nothing rewrites the row until the service restarts.
+    """
+    if status == "running" and _utc(started_at) < _utc(stale_before):
+        return "stuck"
+    return status
+
+
+def summarize_runs(runs: list[PipelineRunEntry], *, last_success_at: Optional[datetime] = None) -> RunsSummary:
+    """
+    Counts and durations over the window. Pure: tested without a database.
+
+    Durations are those of the runs that worked. A failed run's is how long it
+    took to fail, and one swept at startup (PipelineRun.reset_stale_runs) ends
+    at the next boot, hours after the work stopped.
+
+    `last_success_at` is the caller's, from all time: a window of nothing but
+    failures does not mean the pipeline has never succeeded.
+    """
     finished = [r for r in runs if r.status in ("success", "failed")]
-    durations = [r.duration_seconds for r in finished if r.duration_seconds is not None]
-    succeeded = sum(1 for r in finished if r.status == "success")
-    successes = [r.completed_at or r.started_at for r in runs if r.status == "success"]
+    succeeded = [r for r in finished if r.status == "success"]
+    durations = [r.duration_seconds for r in succeeded if r.duration_seconds is not None]
     return RunsSummary(
         total=len(runs),
-        succeeded=succeeded,
-        failed=len(finished) - succeeded,
+        succeeded=len(succeeded),
+        failed=len(finished) - len(succeeded),
         running=sum(1 for r in runs if r.status == "running"),
-        success_rate=(succeeded / len(finished)) if finished else None,
+        stuck=sum(1 for r in runs if r.status == "stuck"),
+        success_rate=(len(succeeded) / len(finished)) if finished else None,
         median_duration_seconds=statistics.median(durations) if durations else None,
         max_duration_seconds=max(durations) if durations else None,
-        last_success_at=max(successes) if successes else None,
+        last_success_at=last_success_at,
         oldest_started_at=min((r.started_at for r in runs), default=None),
     )
 
@@ -303,22 +336,28 @@ def _build_runs(name: str, limit: int) -> PipelineRunsData:
         .order_by(PipelineRun.started_at.desc())
         .limit(limit)
     )
+    # The cutoff PipelineRun.is_running applies, so a row is `running` here
+    # exactly when it would hold the pipeline's is_running true.
+    stale_before = datetime.now(timezone.utc) - timedelta(minutes=RUNNING_MAX_AGE_MINUTES)
     runs = [
         PipelineRunEntry(
             id=str(r.id),
             started_at=r.started_at,
             completed_at=r.completed_at,
-            status=r.status,
+            status=run_status(r.status, r.started_at, stale_before),
             duration_seconds=r.duration_seconds,
             records_processed=r.records_processed or 0,
             error_message=r.error_message,
         )
         for r in rows
     ]
+    # All time, as the Overview row reads it: not only the rows above.
+    latest_success = PipelineRun.get_latest_successful(db_name)
+    last_success_at = (latest_success.completed_at or latest_success.started_at) if latest_success else None
     return PipelineRunsData(
         pipeline=pipeline_info(name, is_running=PipelineRun.is_running(db_name)),
         runs=runs,
-        summary=summarize_runs(runs),
+        summary=summarize_runs(runs, last_success_at=last_success_at),
         limit=limit,
         fetched_at=datetime.now(timezone.utc),
     )

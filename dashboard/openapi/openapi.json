@@ -987,10 +987,6 @@
             "title": "Target Table",
             "type": "string"
           },
-          "timeout_seconds": {
-            "title": "Timeout Seconds",
-            "type": "integer"
-          },
           "trigger_endpoint": {
             "title": "Trigger Endpoint",
             "type": "string"
@@ -1006,7 +1002,6 @@
           "accepts_date",
           "cron_job",
           "depends_on",
-          "timeout_seconds",
           "allow_concurrent",
           "espn_gated",
           "earliest_run_time_cst",
@@ -1680,7 +1675,7 @@
         "type": "object"
       },
       "RunsSummary": {
-        "description": "Over the runs returned (a window, newest first), not all time.",
+        "description": "Over the runs returned (a window, newest first), not all time, but for last_success_at.",
         "properties": {
           "failed": {
             "title": "Failed",
@@ -1736,6 +1731,10 @@
             "title": "Running",
             "type": "integer"
           },
+          "stuck": {
+            "title": "Stuck",
+            "type": "integer"
+          },
           "succeeded": {
             "title": "Succeeded",
             "type": "integer"
@@ -1761,6 +1760,7 @@
           "succeeded",
           "failed",
           "running",
+          "stuck",
           "success_rate",
           "median_duration_seconds",
           "max_duration_seconds",
