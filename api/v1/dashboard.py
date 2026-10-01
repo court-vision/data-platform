@@ -10,12 +10,16 @@ Routes:
     GET  /v1/dashboard/services  — running version of each deployed service (token auth)
     GET  /v1/dashboard/freshness — what date each pipeline's table runs through (token auth)
     GET  /v1/dashboard/pipelines/{name}/runs — one pipeline's config and run history (token auth)
+    GET  /v1/dashboard/quality   — every check's definition and its result in recent runs (token auth)
+    GET  /v1/dashboard/quality/runs/{run_id} — one run: every check's outcome (token auth)
 """
 
 import asyncio
 import statistics
+import textwrap
+import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Iterable, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Security
@@ -44,12 +48,19 @@ from schemas.dashboard import (
     PipelineHealthEntry,
     QualityRunEntry,
     QualityCheckEntry,
+    QualityCheckInfo,
+    QualityCheckOutcome,
+    QualityCheckRow,
+    QualityOverviewData,
+    QualityOverviewResponse,
+    QualityRunDetailData,
+    QualityRunDetailResponse,
     ServiceInfo,
     ServicesData,
     ServicesResponse,
 )
 from schemas.pipeline import PipelineJobInfo
-from services.data_quality_service import DataQualityService
+from services.data_quality_service import DataQualityService, SQLQualityCheck
 from services.freshness_service import build_freshness
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -374,6 +385,149 @@ def _build_runs(name: str, limit: int) -> PipelineRunsData:
         runs=runs,
         summary=summarize_runs(runs, last_success_at=last_success_at),
         limit=limit,
+        fetched_at=datetime.now(timezone.utc),
+    )
+
+
+QUALITY_DEFAULT_LIMIT = 20
+QUALITY_MAX_LIMIT = 100
+
+
+@router.get("/quality", response_model=QualityOverviewResponse)
+async def get_quality(
+    limit: int = Query(QUALITY_DEFAULT_LIMIT, ge=1, le=QUALITY_MAX_LIMIT, description="Newest runs to return"),
+    _: str = Security(verify_pipeline_token),
+) -> QualityOverviewResponse:
+    """
+    The quality page: every check as it is defined (what it asserts, the table
+    and pipelines it guards, its SQL) with its result in each of the newest
+    runs, so a failure can be read as "new tonight" or "failing for a week".
+    """
+    data = await run_in_db_thread(_build_quality_overview, limit)
+    return QualityOverviewResponse(
+        status="success",
+        message=f"{len(data.checks)} checks over {len(data.runs)} runs",
+        data=data,
+    )
+
+
+@router.get("/quality/runs/{run_id}", response_model=QualityRunDetailResponse)
+async def get_quality_run(
+    run_id: str,
+    _: str = Security(verify_pipeline_token),
+) -> QualityRunDetailResponse:
+    """One run: every check's outcome, not only the failures, each with its definition."""
+    try:
+        uuid.UUID(run_id)
+    except ValueError:
+        # Not an id at all. Asked of Postgres it would be a cast error, a 500.
+        raise HTTPException(status_code=404, detail=f"Quality run '{run_id}' not found")
+    data = await run_in_db_thread(_build_quality_run, run_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Quality run '{run_id}' not found")
+    return QualityRunDetailResponse(
+        status="success",
+        message=f"{len(data.checks)} checks, {data.run.failed_checks} failed",
+        data=data,
+    )
+
+
+def table_writers() -> dict[str, list[str]]:
+    """Table -> the registered pipelines that write it, in registry order."""
+    writers: dict[str, list[str]] = {}
+    for name, cls in PIPELINE_REGISTRY.items():
+        writers.setdefault(cls.config.target_table, []).append(name)
+    return writers
+
+
+def quality_check_info(
+    check: SQLQualityCheck, writers: Optional[dict[str, list[str]]] = None
+) -> QualityCheckInfo:
+    """A check's definition as the page shows it. A timing check watches one
+    pipeline; a structural check guards a table, so its pipelines are that
+    table's writers."""
+    writers = table_writers() if writers is None else writers
+    pipelines = [check.pipeline] if check.pipeline else writers.get(check.table, [])
+    return QualityCheckInfo(
+        name=check.name,
+        severity=check.severity,
+        group=check.group,
+        table=check.table,
+        pipelines=list(pipelines),
+        failure_message=check.failure_message,
+        sql=textwrap.dedent(check.sql).strip(),
+    )
+
+
+def quality_matrix(
+    checks: Iterable[SQLQualityCheck],
+    runs: list[QualityRunEntry],
+    results: dict[str, dict[str, str]],
+) -> list[QualityCheckRow]:
+    """One row per defined check, its results lined up with `runs`. Pure."""
+    writers = table_writers()
+    return [
+        QualityCheckRow(
+            **quality_check_info(check, writers).model_dump(),
+            results=[results.get(check.name, {}).get(run.run_id) for run in runs],
+        )
+        for check in checks
+    ]
+
+
+_OUTCOME_RANK = {"error": 0, "failed": 1}
+_SEVERITY_RANK = {"critical": 0, "warning": 1}
+
+
+def order_outcomes(outcomes: list[QualityCheckOutcome]) -> list[QualityCheckOutcome]:
+    """What needs a look first: checks that could not run, then failures
+    (critical before warning), then passes; the run's own order within each."""
+    return sorted(
+        outcomes,
+        key=lambda outcome: (
+            _OUTCOME_RANK.get(outcome.status, 2),
+            _SEVERITY_RANK.get(outcome.severity, 2) if outcome.status != "passed" else 0,
+        ),
+    )
+
+
+def _build_quality_overview(limit: int) -> QualityOverviewData:
+    """Runs synchronously — caller must wrap in run_in_db_thread."""
+    service = DataQualityService()
+    runs = [QualityRunEntry(**run) for run in service.list_runs(limit)]
+    results = service.results_for_runs([run.run_id for run in runs])
+    return QualityOverviewData(
+        runs=runs,
+        checks=quality_matrix(service.checks(), runs, results),
+        limit=limit,
+        fetched_at=datetime.now(timezone.utc),
+    )
+
+
+def _build_quality_run(run_id: str) -> Optional[QualityRunDetailData]:
+    """Runs synchronously — caller must wrap in run_in_db_thread."""
+    service = DataQualityService()
+    detail = service.get_run(run_id)
+    if detail is None:
+        return None
+    definitions = {check.name: check for check in service.checks()}
+    writers = table_writers()
+    outcomes = [
+        QualityCheckOutcome(
+            **check,
+            definition=(
+                quality_check_info(definitions[check["check_name"]], writers)
+                if check["check_name"] in definitions else None
+            ),
+        )
+        for check in detail["checks"]
+    ]
+    older, newer = service.neighbours(run_id)
+    return QualityRunDetailData(
+        run=QualityRunEntry(**{key: value for key, value in detail.items() if key != "checks"}),
+        checks=order_outcomes(outcomes),
+        older_run_id=older,
+        newer_run_id=newer,
         fetched_at=datetime.now(timezone.utc),
     )
 

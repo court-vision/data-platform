@@ -213,3 +213,69 @@ class PipelineRunsResponse(ApiModel):
     status: str
     message: str
     data: PipelineRunsData
+
+
+class QualityCheckInfo(ApiModel):
+    """A quality check as it is defined in code: what it asserts and what it guards."""
+
+    name: str
+    severity: str                # critical | warning
+    group: str                   # structural | timing
+    table: str                   # the table it reads, "schema.table"
+    # Timing checks: the pipeline whose runs they watch. Structural checks: the
+    # registered pipelines that write `table` (none for a framework table).
+    pipelines: list[str]
+    failure_message: str         # what a failure means
+    sql: str                     # the assertion: it counts the offending rows
+
+
+class QualityCheckRow(QualityCheckInfo):
+    """A check with its result in each run of the window."""
+
+    # Aligned with `QualityOverviewData.runs` (newest first): passed | failed |
+    # error, or None where that run did not include the check.
+    results: list[Optional[str]]
+
+
+class QualityOverviewData(ApiModel):
+    runs: list[QualityRunEntry]          # newest first
+    checks: list[QualityCheckRow]        # catalogue order: structural, then timing
+    limit: int
+    fetched_at: datetime
+
+
+class QualityOverviewResponse(ApiModel):
+    """Response for GET /v1/dashboard/quality."""
+
+    status: str
+    message: str
+    data: QualityOverviewData
+
+
+class QualityCheckOutcome(ApiModel):
+    """One check's result in one run, with its definition when it still exists."""
+
+    check_name: str
+    status: str                  # passed | failed | error
+    severity: str
+    failures: int = 0
+    message: Optional[str] = None
+    details: Optional[dict] = None
+    duration_ms: Optional[int] = None
+    definition: Optional[QualityCheckInfo] = None  # None: the check has since been removed
+
+
+class QualityRunDetailData(ApiModel):
+    run: QualityRunEntry
+    checks: list[QualityCheckOutcome]    # what needs a look first: errors, failures, then passes
+    older_run_id: Optional[str] = None   # the run before this one, by start time
+    newer_run_id: Optional[str] = None
+    fetched_at: datetime
+
+
+class QualityRunDetailResponse(ApiModel):
+    """Response for GET /v1/dashboard/quality/runs/{run_id}."""
+
+    status: str
+    message: str
+    data: QualityRunDetailData

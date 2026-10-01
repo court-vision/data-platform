@@ -65,6 +65,8 @@ class TestDashboardRoutesHaveConcreteSchemas:
         ("/v1/dashboard/services", "get", "ServicesResponse"),
         ("/v1/dashboard/freshness", "get", "FreshnessResponse"),
         ("/v1/dashboard/pipelines/{name}/runs", "get", "PipelineRunsResponse"),
+        ("/v1/dashboard/quality", "get", "QualityOverviewResponse"),
+        ("/v1/dashboard/quality/runs/{run_id}", "get", "QualityRunDetailResponse"),
         ("/v1/internal/quality/run", "post", "DataQualityRunResponse"),
         ("/v1/internal/quality/runs", "get", "DataQualityRunListResponse"),
         ("/v1/internal/quality/runs/{run_id}", "get", "DataQualityRunResponse"),
