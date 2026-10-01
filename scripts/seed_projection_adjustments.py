@@ -6,8 +6,10 @@ Load a reviewed seed of projection adjustments into nba.projection_adjustments.
 
 The seed is the first draft of the curated layer, reviewed as a file in a PR
 before it goes live; after that the dashboard's projections editor owns the
-table. Each row goes through `ProjectionAdjustment.record`, so re-running
-supersedes rather than duplicates, and every change keeps its history.
+table. A row that differs from the player's live adjustment goes through
+`ProjectionAdjustment.record` (the edit supersedes, and keeps its history); a
+row that is already live as written is left alone, so re-applying an edited
+seed versions only what changed.
 
 Players are matched by normalized name against nba.players. A name that
 matches nobody, or more than one player, is reported and skipped — never
@@ -63,6 +65,28 @@ def parse_row(row: dict) -> dict:
     return fields
 
 
+COMPARED = ("kind", "minutes", "games", "return_date", "usage", "rates", "note", "source_url")
+
+
+def same_as_live(live, fields: dict) -> bool:
+    """Whether the live adjustment already says exactly what the seed row says.
+
+    Re-applying a seed after editing three rows should version three rows, not
+    rewrite the history of all fifty.
+    """
+    if live is None:
+        return False
+
+    def norm(key, value):
+        if value is None or value == "" or value == {}:
+            return None
+        if key in ("minutes", "usage"):
+            return round(float(value), 3)
+        return value
+
+    return all(norm(k, getattr(live, k)) == norm(k, fields.get(k)) for k in COMPARED)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     parser.add_argument("seed")
@@ -94,13 +118,22 @@ def main() -> int:
                 continue
             planned.append((ids[0], row["player"], fields))
 
+    live = {a.player_id: a for a in ProjectionAdjustment.active_for(args.season)}
+    written = unchanged = 0
     for pid, name, fields in planned:
         shown = {k: v for k, v in fields.items() if k not in ("note", "source_url")}
+        if same_as_live(live.get(pid), fields):
+            unchanged += 1
+            continue
         print(f"{'WRITE' if args.apply else 'plan '} {name} ({pid}) {args.season}: {shown}")
+        written += 1
         if args.apply:
             ProjectionAdjustment.record(pid, args.season, author=args.author, **fields)
 
-    print(f"{len(planned)} adjustments {'written' if args.apply else 'planned (dry run)'}, {problems} skipped")
+    print(
+        f"{written} adjustments {'written' if args.apply else 'planned (dry run)'}, "
+        f"{unchanged} already live and unchanged, {problems} skipped"
+    )
     return 1 if problems else 0
 
 
