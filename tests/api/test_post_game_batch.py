@@ -16,6 +16,7 @@ from datetime import date, time
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 from freezegun import freeze_time
 
@@ -36,6 +37,10 @@ BEFORE_WINDOW = "2026-03-05T04:00:00Z"  # 23:00 ET on the 4th
 def client():
     app = FastAPI()
     app.include_router(pipelines_api.router, prefix="/v1/internal")
+    # FastAPI builds an included route's dependant on first use. Under
+    # freeze_time, datetime.date is freezegun's FakeDate, and pydantic cannot
+    # build a schema for the real `date` query parameters. Build them now.
+    list(iter_route_contexts(app.routes))
     return TestClient(app)
 
 

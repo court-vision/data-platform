@@ -9,6 +9,7 @@ contract without anything failing.
 """
 
 import pytest
+from fastapi.routing import iter_route_contexts
 
 from api.v1.dashboard import trigger_endpoint
 from main_public import app
@@ -41,7 +42,7 @@ def _response_ref(paths, path, method):
 @pytest.mark.api
 class TestPublicAppServesNoDocs:
     def test_no_schema_or_docs_routes(self):
-        served = {route.path for route in app.routes}
+        served = {route.path for route in iter_route_contexts(app.routes)}
         assert not served & {"/openapi.json", "/docs", "/redoc"}
 
     def test_schema_still_builds_offline(self, paths):
