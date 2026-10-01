@@ -1,8 +1,10 @@
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
+from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
 
 from api.v1 import dashboard
@@ -30,6 +32,17 @@ def _make_app() -> FastAPI:
     app = FastAPI()
     app.include_router(dashboard.router, prefix="/v1")
     return app
+
+
+@pytest.mark.api
+def test_dashboard_page_renders(monkeypatch) -> None:
+    # Starlette 1.0 removed TemplateResponse(name, context), and the old call
+    # turned this page into a 500.
+    templates = Path(dashboard.__file__).resolve().parents[2] / "templates"
+    monkeypatch.setattr(dashboard, "_templates", Jinja2Templates(directory=templates))
+    res = TestClient(_make_app()).get("/v1/dashboard")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/html")
 
 
 @pytest.mark.api
