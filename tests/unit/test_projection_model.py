@@ -138,11 +138,17 @@ class TestBlendAndAdjust:
         assert p.minutes == 25.0 and p.per_game["pts"] == 1.0
         assert p.components["espn_weight"] == 1.0
 
-    def test_rookie_games_are_pulled_toward_a_typical_season_like_everyone_elses(self):
+    def test_rookie_games_are_blended_with_what_lottery_rookies_actually_play(self):
         espn = EspnLine(per_game={k: 1.0 for k in LINE_KEYS}, minutes=25.0, games=72.0)
-        p = blend(None, espn, 9, 0.5, typical_games=59.0)
-        assert p.games == pytest.approx(65.5)
-        assert blend(None, EspnLine(per_game={}, minutes=25.0, games=None), 9, 0.5, typical_games=59.0).games == 59.0
+        p = blend(None, espn, 9, 0.5, rookie_games=64.0)
+        assert p.games == pytest.approx(68.0)
+        assert blend(None, EspnLine(per_game={}, minutes=25.0, games=None), 9, 0.5, rookie_games=64.0).games == 64.0
+
+    def test_project_uses_the_rookie_prior_not_the_veteran_one(self):
+        espn = {3: EspnLine(per_game={k: 1.0 for k in LINE_KEYS}, minutes=20.0, games=72.0)}
+        coeffs = Coefficients(curve={}, gp_beta=FLAT.gp_beta, gp_mean=0.60, rookie_gp_mean=0.80)
+        out = project(2026, {}, espn, {}, roster={3}, coeffs=coeffs)
+        assert out[0].games == pytest.approx(0.5 * 72.0 + 0.5 * 0.80 * 82)
 
     def test_neither_is_nothing(self):
         assert blend(None, None, 1, 0.5) is None

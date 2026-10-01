@@ -35,6 +35,7 @@ OUT = ROOT / "static" / "cv_projection_coefficients.json"
 WEIGHTS = (7.0, 2.0, 1.0)
 GP_SHRINK = 0.5
 ESPN_WEIGHT = 0.5
+ROOKIE_GP_MEAN = 0.77
 BACKTEST_SEASONS = 4
 FIRST_GAMES_TARGET = 2015
 
@@ -116,6 +117,9 @@ def main() -> int:
         "gp_mean": 0.72,
         "gp_shrink": GP_SHRINK,
         "espn_weight": ESPN_WEIGHT,
+        # Not refit here: measured from nba_api's DraftHistory, which this
+        # script does not read. See Coefficients.rookie_gp_mean.
+        "rookie_gp_mean": ROOKIE_GP_MEAN,
         "gp_beta": [round(b, 6) for b in beta],
         "backtest": {
             "held_out": [season_label(s) for s in held_out],

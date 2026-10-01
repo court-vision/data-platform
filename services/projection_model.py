@@ -123,6 +123,12 @@ class Coefficients:
     gp_mean: float = 0.72
     gp_shrink: float = 0.5
     espn_weight: float = 0.5
+    # Rookie-season games fraction of top-10 picks, drafts 2012-2025, a whole
+    # missed season counted as 0 (picks 1-5: 0.780, picks 6-10: 0.757; nba_api
+    # DraftHistory x season totals, measured 2026-10-01). Lottery picks play
+    # more than the typical player — 63 games against 59 — and the ones who
+    # earn 24+ minutes average 69.
+    rookie_gp_mean: float = 0.77
     version: str = "unversioned"
 
     @classmethod
@@ -136,6 +142,7 @@ class Coefficients:
             gp_mean=float(doc.get("gp_mean", 0.72)),
             gp_shrink=float(doc.get("gp_shrink", 0.5)),
             espn_weight=float(doc.get("espn_weight", 0.5)),
+            rookie_gp_mean=float(doc.get("rookie_gp_mean", 0.77)),
             version=str(doc.get("version", "unversioned")),
         )
 
@@ -320,15 +327,17 @@ def blend(
     espn: Optional[EspnLine],
     player_id: int,
     weight: float,
-    typical_games: float = SEASON_GAMES * 0.72,
+    rookie_games: float = SEASON_GAMES * 0.77,
 ) -> Optional[Projection]:
     """Combine the statistical line with ESPN's. Either may be missing.
 
     A player with no NBA minutes takes ESPN's per-game line as it is, but not
-    ESPN's games: every veteran's games are pulled toward a typical season by
-    the blend, and a rookie left at ESPN's 72 would be the most durable player
-    on the board for no reason but having no history. His games are blended
-    with `typical_games` at the same weight.
+    ESPN's games: every veteran's games are pulled toward the model's estimate
+    by the blend, and a rookie left at ESPN's 72 would be the most durable
+    player on the board for no reason but having no history. His games are
+    blended, at the same weight, with `rookie_games` — what lottery picks have
+    actually played as rookies (`Coefficients.rookie_gp_mean`), which is more
+    than the typical player's season, not less.
     """
     if stat is None and espn is None:
         return None
@@ -338,7 +347,7 @@ def blend(
         return stat
     espn_rates = {k: (espn.per_game.get(k, 0.0) / espn.minutes) for k in LINE_KEYS}
     if stat is None:
-        games = (weight * espn.games + (1 - weight) * typical_games) if espn.games else typical_games
+        games = (weight * espn.games + (1 - weight) * rookie_games) if espn.games else rookie_games
         return Projection(
             player_id=player_id, minutes=espn.minutes, games=games,
             per_game={k: espn.per_game.get(k, 0.0) for k in LINE_KEYS},
@@ -415,7 +424,7 @@ def project(
     for pid in sorted(set(roster)):
         rows = window.get(pid)
         stat = statistical_line(rows, target, coeffs, by_cell.get(cells.get(pid), league)) if rows else None
-        blended = blend(stat, espn.get(pid), pid, coeffs.espn_weight, coeffs.gp_mean * SEASON_GAMES)
+        blended = blend(stat, espn.get(pid), pid, coeffs.espn_weight, coeffs.rookie_gp_mean * SEASON_GAMES)
         if blended is None:
             continue
         final = adjust(blended, adjustments.get(pid))
