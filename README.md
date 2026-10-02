@@ -469,7 +469,7 @@ Rows are written when a **post-game** batch reaches its per-pipeline decisions, 
 
 - **Retries**: `@with_retry(max_attempts=3)` decorator using tenacity with exponential backoff on `RetryableError` subclasses (`RateLimitError`, `NetworkError`, `ServerError`)
 - **Circuit breakers**: `nba_api_circuit` and `espn_api_circuit` open after 5 consecutive failures, recover after 60s
-- **stats.nba.com 5xx / empty bodies**: `utils/patches.py` re-asks a stats.nba.com request up to 4 times (1 s, 2 s, 4 s apart) when the answer is a 5xx, empty, or not JSON, then raises `ServerError` / `NetworkError` with the status code so `@with_retry` retries the call. The re-asks sit below `nba_api_circuit`: the circuit counts a call that stayed bad after them, not each flaky response. 4xx is not retried; cdn.nba.com (live) responses are left alone
+- **stats.nba.com 5xx / empty bodies**: `utils/patches.py` re-asks a stats.nba.com request up to 4 times (1 s, 2 s, 4 s apart, and within 20 s in all — a re-ask's timeout is what is left of that) when the answer is a 5xx, empty, or not JSON, then raises `ServerError` / `NetworkError` with the status code so `@with_retry` retries the call. The re-asks sit below `nba_api_circuit`: the circuit counts a call that stayed bad after them, not each flaky response. 4xx is not retried; cdn.nba.com (live) responses are left alone
 - **HTTP client**: `ResilientHTTPClient` combines retry + circuit breaker with classified error types
 
 ### Extractors
