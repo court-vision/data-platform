@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 
+import { QUALITY_KEY } from "@/hooks/useQuality"
 import { apiFetch, type Schemas } from "@/lib/api"
 
 /** Run every data-quality check now. Synchronous like the triggers. */
@@ -17,6 +18,11 @@ export function useRunQualityChecks() {
       else toast.success("Data checks passed", { description: summary })
     },
     onError: (error) => toast.error("Data checks failed to run", { description: error.message }),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["dashboard", "status"] }),
+    // The Overview's panel and the quality pages both show the run that just landed.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["dashboard", "status"] }),
+        queryClient.invalidateQueries({ queryKey: QUALITY_KEY }),
+      ]),
   })
 }

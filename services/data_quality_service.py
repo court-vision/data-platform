@@ -35,6 +35,12 @@ class SQLQualityCheck:
     severity: str
     sql: str
     failure_message: str
+    # What the dashboard's quality pages say about a check beyond its result:
+    # the table it guards ("schema.table"), which group it belongs to, and for
+    # a timing check the pipeline whose runs it watches.
+    table: str = ""
+    group: str = "structural"  # structural | timing
+    pipeline: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +51,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_game_stats_required_fields_not_null",
         severity="critical",
+        table="nba.player_game_stats",
         sql="""
             SELECT COUNT(*)
             FROM nba.player_game_stats
@@ -55,6 +62,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_game_stats_non_negative_minutes",
         severity="critical",
+        table="nba.player_game_stats",
         sql="""
             SELECT COUNT(*)
             FROM nba.player_game_stats
@@ -65,6 +73,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="pipeline_runs_no_stale_running",
         severity="warning",
+        table="nba.pipeline_runs",
         sql="""
             SELECT COUNT(*)
             FROM nba.pipeline_runs
@@ -76,6 +85,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="pipeline_runs_recent_success_freshness",
         severity="warning",
+        table="nba.pipeline_runs",
         sql="""
             SELECT
               CASE
@@ -91,6 +101,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_game_stats_team_has_matching_game",
         severity="critical",
+        table="nba.player_game_stats",
         sql="""
             SELECT COUNT(*)
             FROM nba.player_game_stats pgs
@@ -104,6 +115,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_season_stats_no_orphan_players",
         severity="critical",
+        table="nba.player_season_stats",
         sql="""
             SELECT COUNT(*)
             FROM nba.player_season_stats pss
@@ -115,6 +127,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_rolling_stats_window_allowed_values",
         severity="critical",
+        table="nba.player_rolling_stats",
         sql="""
             SELECT COUNT(*)
             FROM nba.player_rolling_stats
@@ -126,6 +139,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_game_stats_stat_ranges_valid",
         severity="critical",
+        table="nba.player_game_stats",
         sql="""
             SELECT COUNT(*)
             FROM nba.player_game_stats
@@ -142,6 +156,7 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
     SQLQualityCheck(
         name="player_season_stats_totals_match_game_log",
         severity="warning",
+        table="nba.player_season_stats",
         sql="""
             SELECT COUNT(*) FROM (
                 WITH latest_season AS (
@@ -203,6 +218,9 @@ def _build_timing_checks() -> tuple[SQLQualityCheck, ...]:
         checks.append(SQLQualityCheck(
             name=f"{name}_ran_within_24h",
             severity="warning",
+            table="nba.pipeline_runs",
+            group="timing",
+            pipeline=name,
             sql=f"""
                 SELECT CASE
                     WHEN EXISTS (
@@ -238,6 +256,10 @@ class DataQualityService:
 
     def list_available_checks(self) -> list[str]:
         return sorted(self._checks.keys())
+
+    def checks(self) -> tuple[SQLQualityCheck, ...]:
+        """Every check as defined, in catalogue order: structural, then timing."""
+        return CORE_SQL_CHECKS
 
     def run_checks(
         self,
@@ -344,6 +366,40 @@ class DataQualityService:
             .limit(limit)
         )
         return [self._serialize_run(r) for r in rows]
+
+    def results_for_runs(self, run_ids: list[str]) -> dict[str, dict[str, str]]:
+        """check_name -> {run_id: status} across the given runs, in one query."""
+        if not run_ids:
+            return {}
+        rows = (
+            DataQualityCheck
+            .select(DataQualityCheck.check_name, DataQualityCheck.run_id, DataQualityCheck.status)
+            .where(DataQualityCheck.run_id.in_(run_ids))
+            .tuples()
+        )
+        results: dict[str, dict[str, str]] = {}
+        for check_name, run_id, status in rows:
+            results.setdefault(check_name, {})[str(run_id)] = status
+        return results
+
+    def neighbours(self, run_id: str) -> tuple[str | None, str | None]:
+        """(the run before, the run after) by start time: for stepping through runs."""
+        run = DataQualityRun.get_or_none(DataQualityRun.id == run_id)
+        if run is None:
+            return None, None
+        older = (
+            DataQualityRun.select(DataQualityRun.id)
+            .where(DataQualityRun.started_at < run.started_at)
+            .order_by(DataQualityRun.started_at.desc())
+            .first()
+        )
+        newer = (
+            DataQualityRun.select(DataQualityRun.id)
+            .where(DataQualityRun.started_at > run.started_at)
+            .order_by(DataQualityRun.started_at.asc())
+            .first()
+        )
+        return (str(older.id) if older else None, str(newer.id) if newer else None)
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         run = (

@@ -177,6 +177,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quality
+         * @description The quality page: every check as it is defined (what it asserts, the table
+         *     and pipelines it guards, its SQL) with its result in each of the newest
+         *     runs, so a failure can be read as "new tonight" or "failing for a week".
+         */
+        get: operations["get_quality_v1_dashboard_quality_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/quality/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quality Run
+         * @description One run: every check's outcome, not only the failures, each with its definition.
+         */
+        get: operations["get_quality_run_v1_dashboard_quality_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/services": {
         parameters: {
             query?: never;
@@ -366,8 +408,9 @@ export interface paths {
          *
          *     Builds Court Vision's projection — three seasons of history, ESPN's line,
          *     the curated adjustments — into nba.player_projections with source 'cv'.
-         *     Called daily by the 'cv-projection' cron job after preseason-market, and
-         *     by the projections editor after an adjustment is saved.
+         *     It has no cron job of its own: the preseason-market trigger runs it daily
+         *     as the last link of its chain, and the projections editor runs it after an
+         *     adjustment is saved.
          */
         post: operations["trigger_cv_projection_v1_internal_pipelines_cv_projection_post"];
         delete?: never;
@@ -859,11 +902,14 @@ export interface paths {
          *     rolled to the target season. Called daily by the 'preseason-market' cron
          *     job in cron-runner during draft season.
          *
-         *     Two pipelines follow it on the same trigger, in order: player-profiles, so
-         *     every player's current team is today's (it had no schedule of its own, and
-         *     a whole offseason of trades went unrecorded), then cv-projection, which is
-         *     built on the day's ESPN line and those rosters. Both run whatever the
-         *     market run did; cv-projection gates itself on the same window.
+         *     The trigger runs three pipelines in order, each whatever the one before
+         *     it did: player-profiles first, so every player's current team is today's
+         *     and a new player (a rookie, a new signing) has his nba.players row before
+         *     the snapshot — the snapshot can only attach ESPN's rank and line to a
+         *     player that row exists for; then preseason-market; then cv-projection,
+         *     which is built on the day's ESPN line and those rosters and gates itself
+         *     on the same window. When player-profiles fails, the other two still run on
+         *     the roster of its last good run. The response is the market run's.
          */
         post: operations["trigger_preseason_market_v1_internal_pipelines_preseason_market_post"];
         delete?: never;
@@ -1976,6 +2022,125 @@ export interface components {
             status: string;
         };
         /**
+         * QualityCheckInfo
+         * @description A quality check as it is defined in code: what it asserts and what it guards.
+         */
+        QualityCheckInfo: {
+            /** Failure Message */
+            failure_message: string;
+            /** Group */
+            group: string;
+            /** Name */
+            name: string;
+            /** Pipelines */
+            pipelines: string[];
+            /** Severity */
+            severity: string;
+            /** Sql */
+            sql: string;
+            /** Table */
+            table: string;
+        };
+        /**
+         * QualityCheckOutcome
+         * @description One check's result in one run, with its definition when it still exists.
+         */
+        QualityCheckOutcome: {
+            /** Check Name */
+            check_name: string;
+            definition: components["schemas"]["QualityCheckInfo"] | null;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            } | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /**
+             * Failures
+             * @default 0
+             */
+            failures: number;
+            /** Message */
+            message: string | null;
+            /** Severity */
+            severity: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * QualityCheckRow
+         * @description A check with its result in each run of the window.
+         */
+        QualityCheckRow: {
+            /** Failure Message */
+            failure_message: string;
+            /** Group */
+            group: string;
+            /** Name */
+            name: string;
+            /** Pipelines */
+            pipelines: string[];
+            /** Results */
+            results: (string | null)[];
+            /** Severity */
+            severity: string;
+            /** Sql */
+            sql: string;
+            /** Table */
+            table: string;
+        };
+        /** QualityOverviewData */
+        QualityOverviewData: {
+            /** Checks */
+            checks: components["schemas"]["QualityCheckRow"][];
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Limit */
+            limit: number;
+            /** Runs */
+            runs: components["schemas"]["QualityRunEntry"][];
+        };
+        /**
+         * QualityOverviewResponse
+         * @description Response for GET /v1/dashboard/quality.
+         */
+        QualityOverviewResponse: {
+            data: components["schemas"]["QualityOverviewData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /** QualityRunDetailData */
+        QualityRunDetailData: {
+            /** Checks */
+            checks: components["schemas"]["QualityCheckOutcome"][];
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Newer Run Id */
+            newer_run_id: string | null;
+            /** Older Run Id */
+            older_run_id: string | null;
+            run: components["schemas"]["QualityRunEntry"];
+        };
+        /**
+         * QualityRunDetailResponse
+         * @description Response for GET /v1/dashboard/quality/runs/{run_id}.
+         */
+        QualityRunDetailResponse: {
+            data: components["schemas"]["QualityRunDetailData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * QualityRunEntry
          * @description Summary of a data quality run.
          */
@@ -2406,6 +2571,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdjustmentHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quality_v1_dashboard_quality_get: {
+        parameters: {
+            query?: {
+                /** @description Newest runs to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quality_run_v1_dashboard_quality_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityRunDetailResponse"];
                 };
             };
             /** @description Validation Error */

@@ -14,6 +14,7 @@ from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
 from pipelines.transformers import normalize_name, calculate_fantasy_points, minutes_to_int
+from pipelines.transformers.minutes import seconds_played
 
 
 class PlayerGameStatsPipeline(BasePipeline):
@@ -106,9 +107,14 @@ class PlayerGameStatsPipeline(BasePipeline):
             if pd.isna(minutes_value) or minutes_value == "" or minutes_value is None:
                 continue
 
-            minutes_int = minutes_to_int(minutes_value)
-            if minutes_int == 0:
+            # Skip only a player who did not play. MIN is minutes as a float
+            # (0.67 for forty seconds), so someone who took the floor for less
+            # than a minute truncates to 0 below. The NBA counts that game and
+            # whatever he did in it, so the row is stored, with `min` 0.
+            if seconds_played(minutes_value) <= 0:
                 continue
+
+            minutes_int = minutes_to_int(minutes_value)
 
             player_id = int(row["PLAYER_ID"])
             player_name = row["PLAYER_NAME"]
