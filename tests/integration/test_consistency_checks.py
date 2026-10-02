@@ -409,6 +409,15 @@ class TestLiveAgainstSettled:
         PlayerGameStats.delete().execute()
         assert LIVE not in failing(NIGHT - timedelta(days=1))
 
+    def test_a_live_row_older_than_the_window_is_let_be(self, world):
+        # Cleanup only runs with the live pipeline, so a stray row can outlast
+        # a long stretch without games; a fact about one night ages out in 7 days.
+        Player.create(id=ROOKIE, name="New Guy", name_normalized="new guy")
+        LivePlayerStats.create(
+            player_id=ROOKIE, game_id=GAME, game_date=NIGHT - timedelta(days=7), game_status=3, min=2,
+        )
+        assert LIVE not in failing()
+
     def test_a_playoff_game_is_not_expected_in_the_game_log(self, world):
         Player.create(id=ROOKIE, name="New Guy", name_normalized="new guy")
         LivePlayerStats.create(

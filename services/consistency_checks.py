@@ -524,7 +524,7 @@ def build_consistency_checks(
                 FROM nba.live_player_stats l
                 CROSS JOIN win
                 JOIN nba.players p ON p.id = l.player_id
-                WHERE l.game_date <= win.through
+                WHERE l.game_date BETWEEN win.since AND win.through
                   AND LEFT(l.game_id, 3) = {regular}
                   AND NOT EXISTS (
                       SELECT 1

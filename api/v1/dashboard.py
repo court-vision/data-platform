@@ -436,8 +436,9 @@ async def get_scheduler_runs(
             message=f"{counted} cron runs in the last {hours} hours",
             data=data,
         )
-    # One over the cap is how a full page is told from a cut one.
-    runs = await run_in_db_thread(_build_cron_runs, hours, SCHEDULER_MAX_RUNS + 1, False)
+    # One over the cap is how a full page is told from a cut one. The raising
+    # read: a query that failed must not answer as a window with no runs in it.
+    runs = await run_in_db_thread(_query_cron_runs, hours, SCHEDULER_MAX_RUNS + 1, False)
     truncated = len(runs) > SCHEDULER_MAX_RUNS
     return SchedulerRunsResponse(
         status="success",
@@ -614,21 +615,29 @@ def _build_cron_runs(
     `limit` caps the rows; `snippets=False` leaves each run's response body
     out, which is most of a row's weight over a day of 30-second polls.
 
+    A failed query is an empty list here, so one broken section does not cost
+    the status payload its others. `_query_cron_runs` is the same read that
+    raises, for a caller whose whole answer this is.
+
     Runs synchronously — caller must wrap in asyncio.to_thread.
     """
     try:
-        window_start = datetime.now(timezone.utc) - timedelta(hours=hours)
-        query = (
-            CronJobRun.select()
-            .where(CronJobRun.triggered_at >= window_start)
-            .order_by(CronJobRun.triggered_at.desc())
-        )
-        if limit is not None:
-            query = query.limit(limit)
-        return [_cron_run_entry(r, snippets) for r in query]
+        return _query_cron_runs(hours, limit, snippets)
     except Exception as exc:
         log.warning("dashboard_cron_runs_failed", error=str(exc))
         return []
+
+
+def _query_cron_runs(hours: int, limit: Optional[int], snippets: bool) -> list[CronJobRunEntry]:
+    window_start = datetime.now(timezone.utc) - timedelta(hours=hours)
+    query = (
+        CronJobRun.select()
+        .where(CronJobRun.triggered_at >= window_start)
+        .order_by(CronJobRun.triggered_at.desc())
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    return [_cron_run_entry(r, snippets) for r in query]
 
 
 def _cron_run_entry(r: CronJobRun, snippets: bool) -> CronJobRunEntry:

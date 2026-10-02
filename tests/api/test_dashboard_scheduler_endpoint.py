@@ -137,6 +137,21 @@ def test_the_status_payload_still_carries_six_hours_with_bodies(cron_rows) -> No
     assert timedelta(hours=6) <= age < timedelta(hours=6, minutes=1)
 
 
+@pytest.mark.api
+def test_a_query_that_fails_is_an_error_not_an_empty_window(cron_rows, monkeypatch) -> None:
+    def broken():
+        raise RuntimeError("relation nba.cron_job_runs does not exist")
+
+    monkeypatch.setattr(dashboard.CronJobRun, "select", staticmethod(broken))
+    response = TestClient(_make_app(), raise_server_exceptions=False).get(
+        "/v1/dashboard/scheduler", headers=_AUTH,
+    )
+    assert response.status_code == 500
+    assert response.json()["status"] != "success"
+    # The status payload's section stays best-effort: one broken read is an empty list there.
+    assert dashboard._build_cron_runs() == []
+
+
 @pytest.fixture
 def counted(monkeypatch):
     """Stub the counting query; returns the hours it was asked for."""
