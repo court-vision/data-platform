@@ -2,7 +2,9 @@
 Partial success: `increment_failed` makes a successful run `partial`, the
 result carries the counters, and `pipeline_partial` alerts only when nothing
 succeeded or more than 20 % of attempts failed. A raising pipeline goes
-through `BasePipeline._run_sync` to `mark_failed` -> Sentry + `pipeline_failed`.
+through `BasePipeline._run_sync` to `mark_failed` -> Sentry + `pipeline_failed`,
+unless what it raised is `DataNotReady`: a failed run still, but a warning
+under its own key and nothing to Sentry.
 """
 
 import threading
@@ -10,10 +12,11 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from structlog.testing import capture_logs
 
 from pipelines import base as base_module
 from pipelines import context as context_module
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
 
@@ -191,6 +194,70 @@ def test_repeated_failures_alert_once_per_window(alerts, lifecycle, monkeypatch)
 
     assert alerts.keys() == ["pipeline_failed:live_game_stats"]
     assert len(FakePipelineRun.instances) == 5  # every run is still recorded
+
+
+@pytest.mark.unit
+def test_a_pipeline_waiting_on_its_data_is_a_failed_run_but_not_a_crash(alerts, lifecycle, monkeypatch):
+    captured = []
+    monkeypatch.setattr(context_module.sentry_sdk, "is_initialized", lambda: True)
+    monkeypatch.setattr(context_module.sentry_sdk, "capture_exception", lambda exc: captured.append(exc))
+
+    class Waiting(BasePipeline):
+        config = _config()
+
+        def execute(self, ctx):
+            raise DataNotReady("2 team(s) that played are missing a game. Data not ready yet — will retry.")
+
+    with capture_logs() as logs:
+        result = Waiting()._run_sync()
+
+    # To the batch and to cron-runner it is the failure it always was: the
+    # run is recorded failed, so it has no success and the next poll retries.
+    assert result.status == "error"
+    assert "Data not ready yet — will retry" in result.error
+    assert FakePipelineRun.instances[0].status == "failed"
+    assert "Data not ready yet" in FakePipelineRun.instances[0].error_message
+
+    # One poll in a dozen like it a night: nothing to Sentry, a warning in the log.
+    assert captured == []
+    by_event = {entry["event"]: entry for entry in logs}
+    assert by_event["pipeline_not_ready"]["log_level"] == "warning"
+    assert "pipeline_failed" not in by_event
+
+    assert alerts.keys() == ["pipeline_waiting:demo"]
+    event = alerts.events[0]
+    assert event.severity == "warning"
+    assert event.title == "Pipeline waiting: Demo Pipeline"
+    assert event.body.endswith("Data not ready yet — will retry.")
+    assert event.dedupe == timedelta(hours=6)
+    assert event.fields["run_id"] == str(FakePipelineRun.instances[0].id)
+
+
+@pytest.mark.unit
+def test_a_night_of_waiting_does_not_mask_a_real_failure(alerts, lifecycle, monkeypatch):
+    """The crash after three not-ready polls still alerts as critical.
+
+    On one key, the first not-ready poll took `pipeline_failed`'s six-hour
+    dedupe window with it, and the real failure later that night was dropped.
+    """
+    captured = []
+    monkeypatch.setattr(context_module.sentry_sdk, "is_initialized", lambda: True)
+    monkeypatch.setattr(context_module.sentry_sdk, "capture_exception", lambda exc: captured.append(exc))
+    polls = iter([DataNotReady("not yet"), DataNotReady("not yet"), DataNotReady("not yet"), KeyError("GP")])
+
+    class Season(BasePipeline):
+        config = _config()
+
+        def execute(self, ctx):
+            raise next(polls)
+
+    for _ in range(4):
+        assert Season()._run_sync().status == "error"
+
+    assert alerts.keys() == ["pipeline_waiting:demo", "pipeline_failed:demo"]
+    assert [event.severity for event in alerts.events] == ["warning", "critical"]
+    assert [type(exc).__name__ for exc in captured] == ["KeyError"]
+    assert [run.status for run in FakePipelineRun.instances] == ["failed"] * 4
 
 
 @pytest.mark.unit

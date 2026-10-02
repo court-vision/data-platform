@@ -20,6 +20,7 @@ import pytest
 
 from db.models.nba import Player, PlayerSeasonStats
 from db.models.nba.team_stats import TeamStats
+from pipelines.base import DataNotReady
 from pipelines.context import PipelineContext
 from pipelines.player_season_stats import PlayerSeasonStatsPipeline
 from pipelines.team_stats import TeamStatsPipeline
@@ -87,7 +88,8 @@ class TestSeasonStatsWaitForTheNight:
         """The early game is in, the late one is not: the case that used to pass."""
         _leaders(season, {EARLY: 64, LATE: 63})
 
-        with pytest.raises(RuntimeError) as raised:
+        # DataNotReady, so the run alerts as waiting rather than as a crash.
+        with pytest.raises(DataNotReady) as raised:
             season.execute(_ctx("player_season_stats"))
 
         assert "Data not ready yet — will retry" in str(raised.value)
@@ -265,7 +267,7 @@ class TestTeamStatsWaitForTheNight:
     def test_a_team_missing_its_late_game_is_not_ready(self, teams):
         _dashboard(teams, CAUGHT_UP | {"PHX": 79, "LAL": 78})
 
-        with pytest.raises(RuntimeError) as raised:
+        with pytest.raises(DataNotReady) as raised:
             teams.execute(_ctx("team_stats"))
 
         message = str(raised.value)

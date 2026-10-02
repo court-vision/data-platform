@@ -17,7 +17,7 @@ from core.settings import settings
 from db.models.nba import Player, PlayerSeasonStats
 from db.models.nba.games import Game
 from db.models.nba.player_game_stats import PlayerGameStats
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
@@ -285,7 +285,7 @@ class PlayerSeasonStatsPipeline(BasePipeline):
                     behind_count=len(behind),
                     behind_player_ids=sorted(behind)[:10],
                 )
-                raise RuntimeError(
+                raise DataNotReady(
                     f"NBA API season stats not yet updated for {game_date}: "
                     f"{len(behind)} of {len(played)} players with a game that night "
                     "show no new game played. Data not ready yet — will retry."

@@ -9,7 +9,7 @@ from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerGameStats
 from db.models.nba.games import Game
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
@@ -66,7 +66,7 @@ class PlayerGameStatsPipeline(BasePipeline):
             # NBA API returned nothing, the player game log API hasn't updated yet.
             expected_games = Game.get_games_on_date(game_date)
             if expected_games:
-                raise RuntimeError(
+                raise DataNotReady(
                     f"NBA API returned no stats for {date_str} but "
                     f"{len(expected_games)} game(s) were expected. "
                     "Data not ready yet — will retry."
@@ -94,7 +94,7 @@ class PlayerGameStatsPipeline(BasePipeline):
                     received_count=len(api_game_ids),
                     missing_game_ids=list(missing_games),
                 )
-                raise RuntimeError(
+                raise DataNotReady(
                     f"NBA API returned stats for {len(api_game_ids)} of "
                     f"{len(expected_game_ids)} games on {date_str}. "
                     f"Missing: {missing_games}. Data not ready yet — will retry."

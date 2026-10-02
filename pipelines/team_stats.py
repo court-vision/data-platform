@@ -16,7 +16,7 @@ from core.season import season_for_date
 from db.models.nba.games import Game
 from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.team_stats import TeamStats
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
@@ -160,7 +160,7 @@ class TeamStatsPipeline(BasePipeline):
                     behind_count=len(behind),
                     behind=behind,
                 )
-                raise RuntimeError(
+                raise DataNotReady(
                     f"NBA API team stats not yet updated for {as_of_date}: "
                     f"{len(behind)} team(s) that played are missing a game "
                     f"({', '.join(behind)}). Data not ready yet — will retry."

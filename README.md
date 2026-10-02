@@ -450,7 +450,7 @@ Four things that were wrong here before the 2026 hardening, kept as a record bec
 - `ctx.date_override` — backfill date (None = not a backfill). Pipelines key data-readiness checks off this, so it must not be set for ordinary runs
 - `ctx.nba_date` — the triggering batch's game date, computed once and shared by every pipeline in the batch
 - `ctx.options` — free-form per-run options from the trigger (e.g. `{"source": "cdn"}`)
-- Auto-creates a `pipeline_run` audit record on start; marks success/failure on completion; a failure is reported to Sentry and posts a `pipeline_failed` alert
+- Auto-creates a `pipeline_run` audit record on start; marks success/failure on completion; a failure is reported to Sentry and posts a `pipeline_failed` alert. A readiness check that finds the upstream data not there yet raises `DataNotReady` (`pipelines/base.py`): still a `failed` run, so the next poll retries it, but it posts `pipeline_waiting` instead and is not sent to Sentry
 
 ### Audit Trail
 
@@ -497,7 +497,8 @@ The `/v1/internal/pipelines/all` endpoint returns immediately with a `job_id`. P
 
 | `key` | Severity | Fires when | Dedupe | Hook |
 |---|---|---|---|---|
-| `pipeline_failed:<pipeline>` | critical | `execute()` raised; the run is recorded as `failed` and the exception is captured by Sentry. Live-stats failing all night is one message | 6 h | `pipelines/base.py` `_run_sync` |
+| `pipeline_failed:<pipeline>` | critical | `execute()` raised (anything but `DataNotReady`, next row); the run is recorded as `failed` and the exception is captured by Sentry. Live-stats failing all night is one message | 6 h | `pipelines/base.py` `_run_sync` |
+| `pipeline_waiting:<pipeline>` | warning | `execute()` raised `DataNotReady`: a readiness check found the NBA API without the night's games yet (`player_game_stats`, `player_season_stats`, `team_stats`). The run is recorded as `failed` so the next poll retries it; nothing goes to Sentry. Its own key, so a night of waiting does not use up `pipeline_failed`'s window. A night that never completes still ends in `post_game_incomplete` | 6 h | `pipelines/base.py` `_run_sync` |
 | `pipeline_partial:<pipeline>` | warning | A *successful* run with `records_failed > 0` where nothing succeeded (`records_processed == 0`) or more than 20 % of attempted records (processed + failed) failed | 24 h | `PipelineContext.mark_success` |
 | `cron_failure_streak:<job>` | critical | A cron-runner failure report brings the job's consecutive failures (counted over its last 10 rows) to **exactly** its threshold: `live-stats` 3, `pre-game` / `post-game` / `playoffs` 2, `schedule-sync` / `deploy` 1, unknown jobs 2 (`ALERT_CRON_STREAK_THRESHOLDS`) | 6 h | `POST /v1/internal/cron/job-runs` |
 | `cron_failure_streak:<job>:recovered` | info | A success report follows a streak ≥ threshold; also clears the streak key's dedupe | — | same |
