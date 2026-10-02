@@ -44,17 +44,23 @@ def season(monkeypatch):
 
     `stored` is each player's GP on his newest season row, `played` who has a
     game row for the night, `written` who already has a season row dated it.
+    `before_tip_off` is his GP on the rows written before the night began:
+    the same as `stored` unless a test says a backfill ran during the slate.
     """
     pipeline = PlayerSeasonStatsPipeline()
     pipeline.stored = {EARLY: 63, LATE: 63}
     pipeline.played = {EARLY, LATE}
     pipeline.written = set()
+    pipeline.before_tip_off = None
     pipeline.upserts = []
 
     pipeline.espn_extractor.get_player_data = lambda: {}
     pipeline._latest_gp = lambda season: dict(pipeline.stored)
     pipeline._played_on = lambda game_date: set(pipeline.played)
     pipeline._written_for = lambda game_date, season: set(pipeline.written)
+    pipeline._gp_before_tip_off = lambda game_date, season, player_ids: dict(
+        pipeline.stored if pipeline.before_tip_off is None else pipeline.before_tip_off
+    )
 
     monkeypatch.setattr(Player, "upsert_player", classmethod(lambda cls, **kw: None))
     monkeypatch.setattr(
@@ -146,6 +152,52 @@ class TestSeasonStatsWaitForTheNight:
         season.execute(_ctx("player_season_stats", date_override=NIGHT))
 
         assert {u["player_id"] for u in season.upserts} == {EARLY}
+
+    def test_a_backfill_during_the_slate_does_not_hold_the_night(self, season):
+        """`?date=` for an earlier night, run while tonight's games were landing.
+
+        The backfill wrote the early player's totals, tonight's game included,
+        under the old date. He never changes again and has no row dated
+        tonight, so "no change since his newest row" held the run on every
+        poll with the API fully caught up, and nothing was written for anyone.
+        """
+        season.stored = {EARLY: 65, LATE: 64}          # what the backfill wrote
+        season.before_tip_off = {EARLY: 63, LATE: 63}  # what was there before the slate
+        _leaders(season, {EARLY: 65, LATE: 65})
+
+        season.execute(_ctx("player_season_stats"))
+
+        assert {u["player_id"] for u in season.upserts} == {LATE}
+
+    def test_a_backfill_during_the_slate_does_not_excuse_a_player_who_has_not_moved(self, season):
+        """Judged against the rows from before the slate, he still has to show a game."""
+        season.stored = {EARLY: 65, LATE: 63}
+        season.before_tip_off = {EARLY: 63, LATE: 63}
+        _leaders(season, {EARLY: 65, LATE: 63})
+
+        with pytest.raises(RuntimeError, match="1 of 2 players"):
+            season.execute(_ctx("player_season_stats"))
+
+        assert season.upserts == []
+
+    def test_a_player_the_backfill_wrote_for_the_first_time_has_caught_up(self, season):
+        """No row from before the slate at all: his being in the response is the new game."""
+        season.stored = {EARLY: 1, LATE: 0}
+        season.before_tip_off = {LATE: 0}
+        _leaders(season, {EARLY: 1, LATE: 1})
+
+        season.execute(_ctx("player_season_stats"))
+
+        assert {u["player_id"] for u in season.upserts} == {LATE}
+
+    def test_without_a_tip_off_time_the_newest_row_is_the_last_word(self, season):
+        """The schedule has no start time for the night: nothing to date "before" from."""
+        season.stored = {EARLY: 65, LATE: 64}
+        season._gp_before_tip_off = lambda game_date, season, player_ids: None
+        _leaders(season, {EARLY: 65, LATE: 65})
+
+        with pytest.raises(RuntimeError, match="1 of 2 players"):
+            season.execute(_ctx("player_season_stats"))
 
     def test_without_a_game_log_there_is_nothing_to_hold_against(self, season):
         """Why the batch must not run this before the night's game log.

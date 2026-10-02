@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
@@ -531,3 +531,57 @@ def test_a_regular_season_game_the_schedule_does_not_have_is_still_waited_for(in
     result = teams._run_sync(nba_date=NIGHT)
     assert result.status == ApiStatus.ERROR
     assert "1 team(s)" in result.error and "PHX" in result.error
+
+
+@pytest.mark.integration
+def test_a_backfill_run_during_the_slate_does_not_hold_the_nights_run(integration_db) -> None:
+    """`?date=` for an earlier night, run after tonight's early game reached the API.
+
+    The backfill writes today's totals under the old date, so the early
+    player's newest row already holds tonight's game. He never changes again
+    and has no row dated tonight: judged against that row, the night's run
+    failed on every poll with the API fully caught up, and the late player's
+    totals were never written.
+    """
+    earlier = NIGHT - timedelta(days=2)
+    for game_id, home, away, tip_off in (
+        ("0022501180", "BOS", "NYK", time(19, 0)),
+        ("0022501185", "PHX", "LAL", time(22, 0)),
+    ):
+        Game.create(
+            game_id=game_id, game_date=NIGHT, season=SEASON,
+            home_team_id=home, away_team_id=away, status="final",
+            home_score=110, away_score=104, start_time_et=tip_off,
+        )
+    _played(1, "BOS", "0022501180")   # early game
+    _played(2, "PHX", "0022501185")   # late game
+    _season_row(1, "BOS", 63, earlier - timedelta(days=2))
+    _season_row(2, "PHX", 63, earlier - timedelta(days=2))
+    # Written days before the night, not when this test ran.
+    PlayerSeasonStats.update(updated_at=datetime(2026, 4, 5, 6, 0)).execute()
+
+    pipeline = PlayerSeasonStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+
+    # The backfill, at 20:30 ET: both played the earlier night too, and
+    # tonight's early game is already in the dashboard.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 65), _leader(2, "PHX", 64),
+    ]
+    assert pipeline._run_sync(date_override=earlier).status == ApiStatus.SUCCESS
+    PlayerSeasonStats.update(updated_at=datetime(2026, 4, 9, 0, 30)).where(
+        PlayerSeasonStats.as_of_date == earlier
+    ).execute()
+
+    # Tonight's run, with the dashboard fully caught up.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 65), _leader(2, "PHX", 65),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.SUCCESS
+    newest = {
+        row.player_id: (row.as_of_date, row.gp)
+        for row in PlayerSeasonStats.latest_per_player(SEASON)
+    }
+    assert newest == {1: (earlier, 65), 2: (NIGHT, 65)}

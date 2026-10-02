@@ -1071,7 +1071,10 @@ async def _sweep_closed_post_game_window(
                 f"The post-game window has closed and {len(missing)} of {len(survey)} "
                 f"pipelines have no successful run for this NBA date: {', '.join(missing)}. "
                 "That data is not coming back on its own — a manual "
-                "`?force=true&date=` trigger is the only way to fill it."
+                "`?force=true&date=` trigger is the only way to fill it. "
+                "Run it before the next slate tips off: season totals have no "
+                "as-of date, so a backfill during the games writes tonight's "
+                "under the old date."
             ),
             fields={
                 "nba_date": str(nba_date),

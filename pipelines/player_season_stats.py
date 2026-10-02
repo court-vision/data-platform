@@ -5,14 +5,17 @@ Updates cumulative season stats for players who played, then refreshes the
 materialized rankings copy the public API reads.
 """
 
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
+import pytz
 from peewee import fn
 
+from core.nba_calendar import EASTERN
 from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerSeasonStats
+from db.models.nba.games import Game
 from db.models.nba.player_game_stats import PlayerGameStats
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -119,8 +122,40 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         )
         return {row.player_id for row in rows}
 
+    def _gp_before_tip_off(
+        self, game_date: date, season: str, player_ids: set[int]
+    ) -> Optional[dict[int, int]]:
+        """Each player's highest games played on a season row written before the night began.
+
+        "Written" is `updated_at`, not `as_of_date`: a backfill run during the
+        slate writes totals that already hold some of tonight's games under an
+        older date. None when the schedule has no tip-off time for the night.
+        """
+        first_tip = Game.get_earliest_game_time_on_date(game_date)
+        if first_tip is None:
+            return None
+        # start_time_et is Eastern; updated_at is UTC, naive.
+        tip_off_utc = (
+            EASTERN.localize(datetime.combine(game_date, first_tip))
+            .astimezone(pytz.utc)
+            .replace(tzinfo=None)
+        )
+        rows = (
+            PlayerSeasonStats.select(
+                PlayerSeasonStats.player_id,
+                fn.MAX(PlayerSeasonStats.gp).alias("gp"),
+            )
+            .where(
+                (PlayerSeasonStats.season == season)
+                & PlayerSeasonStats.player_id.in_(list(player_ids))
+                & (PlayerSeasonStats.updated_at < tip_off_utc)
+            )
+            .group_by(PlayerSeasonStats.player_id)
+        )
+        return {row.player_id: row.gp for row in rows}
+
     def _players_behind(
-        self, game_date: date, season: str, incremented: set[int]
+        self, game_date: date, season: str, incremented: set[int], api_gp: dict[int, int]
     ) -> tuple[set[int], set[int]]:
         """Who played that night, and which of them the API has not caught up on.
 
@@ -137,11 +172,30 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         and passes on it. Counting games since his last season row would close
         that, but a backfill writes today's totals under an old date, and from
         then on the count would never add up.
+
+        The same backfill is why "no change since his newest row" is not the
+        last word. Run during the slate, it writes a row under the old date
+        that already holds tonight's early games, and from then on those
+        players never change again and have no row dated tonight: the run
+        would be held on every poll with the API fully caught up. So a player
+        still behind is judged against the rows written before the night's
+        first tip-off, which no run during the slate can have touched. On an
+        ordinary night those are his newest rows and nothing changes. It is
+        still a new game and not the right number: where the backfilled night
+        was itself a game he played, he passes on that one, as above.
         """
         played = self._played_on(game_date)
         behind = played - incremented
         if behind:
             behind -= self._written_for(game_date, season)
+        if behind:
+            before_tip_off = self._gp_before_tip_off(game_date, season, behind)
+            if before_tip_off is not None:
+                behind = {
+                    player_id
+                    for player_id in behind
+                    if api_gp.get(player_id, 0) <= before_tip_off.get(player_id, 0)
+                }
         return played, behind
 
     def execute(self, ctx: PipelineContext) -> None:
@@ -164,9 +218,11 @@ class PlayerSeasonStatsPipeline(BasePipeline):
 
         # Find players who played (GP changed) and prepare entries
         entries = {}
+        api_gp: dict[int, int] = {}
         for player in api_data:
             player_id = player["PLAYER_ID"]
             current_gp = player["GP"]
+            api_gp[player_id] = max(current_gp, api_gp.get(player_id, 0))
 
             # Skip if player hasn't played new games
             if player_id in db_gp_map and current_gp == db_gp_map[player_id]:
@@ -218,7 +274,9 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         # Data readiness check, against the night's game log. Not on a backfill:
         # the API has no as-of date, so its totals say nothing about that night.
         if not ctx.date_override:
-            played, behind = self._players_behind(game_date, season, set(entries))
+            played, behind = self._players_behind(
+                game_date, season, set(entries), api_gp
+            )
             if behind:
                 ctx.log.warning(
                     "season_stats_behind_game_log",

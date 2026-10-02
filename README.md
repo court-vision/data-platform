@@ -308,7 +308,7 @@ All `/v1/internal/*` endpoints require the `Authorization: Bearer <PIPELINE_API_
 | `POST` | `/v1/internal/pipelines/cv-projection` | Court Vision's own projection (`nba.player_projections`, `source='cv'`): three seasons of history, ESPN's line, the curated adjustments. Same window as preseason-market; `?force=true` runs outside it. Also run by the projections editor after every save |
 | `POST` | `/v1/internal/pipelines/season-history` | One row per player per season in `nba.player_history`, what the projection is built from. Manual: repeat `?seasons=2012-13&seasons=2013-14…` to backfill; with none, the season just finished |
 
-All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query param for backfills.
+All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query param for backfills. The season dashboards (`cumulative-player-stats`, `team-stats`, and the post-game batch that runs them) have no as-of date: a backfill writes the API's totals as they stand under the date given. Run one before the day's first tip-off, not while games are being played, or the old date's rows carry tonight's early games.
 
 | Method | Path | Description |
 |---|---|---|
