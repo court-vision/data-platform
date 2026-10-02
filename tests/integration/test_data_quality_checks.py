@@ -1,9 +1,11 @@
 """
 Data Quality Check Integration Tests
 
-Exercises the 7 SQL-based quality checks from DataQualityService against
-controlled data states in the CI Postgres container. Verifies that each
-check correctly detects violations and passes on clean data.
+Exercises the structural and timing quality checks from DataQualityService
+against controlled data states in the CI Postgres container. Verifies that
+each check correctly detects violations and passes on clean data. The
+consistency checks have their own file (test_consistency_checks.py); here
+they only have to run clean.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from db.models.nba.player_season_stats import PlayerSeasonStats
 from db.models.nba.players import Player
 from db.models.pipeline_run import PipelineRun
 from pipelines import PIPELINE_REGISTRY
+from services.consistency_checks import CONSISTENCY_CHECKS
 from services.data_quality_service import DataQualityService, _MANUAL_PIPELINES
 
 
@@ -53,8 +56,13 @@ def clean_quality_tables(quality_tables):
 
 NOW = "NOW()"
 
-# 9 structural checks + one timing check per non-manual registered pipeline
-EXPECTED_CHECK_COUNT = 9 + sum(1 for name in PIPELINE_REGISTRY if name not in _MANUAL_PIPELINES)
+# 9 structural checks + the consistency checks + one timing check per
+# non-manual registered pipeline
+EXPECTED_CHECK_COUNT = (
+    9
+    + len(CONSISTENCY_CHECKS)
+    + sum(1 for name in PIPELINE_REGISTRY if name not in _MANUAL_PIPELINES)
+)
 
 
 def _seed_clean_data(game_date: date = date(2026, 2, 14)) -> None:
@@ -135,7 +143,7 @@ def _run_single_check(service: DataQualityService, check_name: str) -> dict:
 
 @pytest.mark.integration
 class TestQualityChecksHappyPath:
-    """All 7 checks pass when data is valid."""
+    """Every check passes when data is valid."""
 
     def test_all_checks_pass_on_clean_data(self, integration_db, quality_tables):
         _seed_clean_data()

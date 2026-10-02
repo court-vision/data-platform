@@ -2491,6 +2491,13 @@
       "QualityCheckInfo": {
         "description": "A quality check as it is defined in code: what it asserts and what it guards.",
         "properties": {
+          "against": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Against",
+            "type": "array"
+          },
           "failure_message": {
             "title": "Failure Message",
             "type": "string"
@@ -2528,6 +2535,7 @@
           "severity",
           "group",
           "table",
+          "against",
           "pipelines",
           "failure_message",
           "sql"
@@ -2616,6 +2624,13 @@
       "QualityCheckRow": {
         "description": "A check with its result in each run of the window.",
         "properties": {
+          "against": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Against",
+            "type": "array"
+          },
           "failure_message": {
             "title": "Failure Message",
             "type": "string"
@@ -2667,6 +2682,7 @@
           "severity",
           "group",
           "table",
+          "against",
           "pipelines",
           "failure_message",
           "sql",
@@ -2990,6 +3006,136 @@
           "oldest_started_at"
         ],
         "title": "RunsSummary",
+        "type": "object"
+      },
+      "SchedulerBucket": {
+        "description": "One job's runs in one column of the scheduler timeline, counted.",
+        "properties": {
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "first_triggered_at": {
+            "format": "date-time",
+            "title": "First Triggered At",
+            "type": "string"
+          },
+          "job_name": {
+            "title": "Job Name",
+            "type": "string"
+          },
+          "last_triggered_at": {
+            "format": "date-time",
+            "title": "Last Triggered At",
+            "type": "string"
+          },
+          "retried": {
+            "title": "Retried",
+            "type": "integer"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_name",
+          "start",
+          "runs",
+          "failed",
+          "retried",
+          "first_triggered_at",
+          "last_triggered_at"
+        ],
+        "title": "SchedulerBucket",
+        "type": "object"
+      },
+      "SchedulerRunsData": {
+        "description": "Cron-runner job runs over a chosen window, for the scheduler timeline.",
+        "properties": {
+          "bucket_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket Seconds"
+          },
+          "buckets": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SchedulerBucket"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buckets"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/CronJobRunEntry"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hours",
+          "runs",
+          "buckets",
+          "bucket_seconds",
+          "truncated",
+          "fetched_at"
+        ],
+        "title": "SchedulerRunsData",
+        "type": "object"
+      },
+      "SchedulerRunsResponse": {
+        "description": "Response for GET /v1/dashboard/scheduler.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SchedulerRunsData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "SchedulerRunsResponse",
         "type": "object"
       },
       "ServiceInfo": {
@@ -3834,6 +3980,59 @@
           }
         ],
         "summary": "Get Quality Run",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/scheduler": {
+      "get": {
+        "description": "The cron-runner's job runs over a longer window than the status payload's\nsix hours, for the Overview's range selector. Newest first, without the\nresponse bodies.\n\nUp to 24 hours: every run, and `truncated` says the window held more than\nthe cap. Past that: `buckets` counts every run per job and column of the\ntimeline, and `runs` carries only the ones a mark can open (each column's\nnewest run, and its newest few that failed or were retried).",
+        "operationId": "get_scheduler_runs_v1_dashboard_scheduler_get",
+        "parameters": [
+          {
+            "description": "How far back to look, in hours (up to a week)",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "How far back to look, in hours (up to a week)",
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerRunsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Scheduler Runs",
         "tags": [
           "dashboard"
         ]

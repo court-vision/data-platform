@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  checksForPipeline,
   countOutcomes,
   extraDetails,
   failedThroughout,
@@ -9,6 +10,8 @@ import {
   latestResult,
   parseQualityLimit,
   resultLabel,
+  sampleCell,
+  sampleRows,
   summarizeLatest,
   type QualityCheckRow,
   type QualityOutcome,
@@ -20,6 +23,7 @@ function check(overrides: Partial<QualityCheckRow> = {}): QualityCheckRow {
     severity: "critical",
     group: "structural",
     table: "nba.player_game_stats",
+    against: [],
     pipelines: ["player_game_stats"],
     failure_message: "out-of-range values",
     sql: "SELECT COUNT(*) FROM nba.player_game_stats WHERE pts < 0",
@@ -87,10 +91,11 @@ test("resultLabel says it in words", () => {
 })
 
 describe("groupChecks", () => {
-  test("structural, then timing, dropping an empty group", () => {
-    const groups = groupChecks([check({ name: "t", group: "timing" }), check({ name: "s" })])
+  test("structural, consistency, then timing, dropping an empty group", () => {
+    const groups = groupChecks([check({ name: "t", group: "timing" }), check({ name: "c", group: "consistency" }), check({ name: "s" })])
     expect(groups.map((group) => [group.label, group.checks.map((c) => c.name)])).toEqual([
       ["Structural", ["s"]],
+      ["Consistency", ["c"]],
       ["Timing", ["t"]],
     ])
     expect(groupChecks([check()]).map((group) => group.key)).toEqual(["structural"])
@@ -123,6 +128,47 @@ test("extraDetails drops what the row already shows", () => {
   expect(extraDetails(outcome({ details: { failures: 37 } }))).toBeNull()
   expect(extraDetails(outcome({ details: { error: "relation does not exist" } }))).toEqual({ error: "relation does not exist" })
   expect(extraDetails(outcome())).toBeNull()
+})
+
+describe("sampleRows", () => {
+  const SAMPLE = [
+    { player: "Devin Booker", season_row: "2026-04-08", season_gp: 63, games_logged: 64, gap: -1 },
+    { player: "New Guy", season_row: null, season_gp: 0, games_logged: 1, gap: -1 },
+  ]
+
+  test("the offending rows a failed check kept, columns in the query's order", () => {
+    const sample = sampleRows(outcome({ details: { failures: 24, sample: SAMPLE } }))
+    expect(sample?.columns).toEqual(["player", "season_row", "season_gp", "games_logged", "gap"])
+    expect(sample?.rows).toHaveLength(2)
+  })
+
+  test("nothing when there is no sample, or it is not a list of records", () => {
+    expect(sampleRows(outcome({ details: { failures: 3 } }))).toBeNull()
+    expect(sampleRows(outcome({ details: { failures: 3, sample: [] } }))).toBeNull()
+    expect(sampleRows(outcome({ details: { failures: 3, sample: "oops" } }))).toBeNull()
+    expect(sampleRows(outcome({ details: { failures: 3, sample: [1, [2]] } }))).toBeNull()
+    expect(sampleRows(outcome())).toBeNull()
+  })
+
+  test("the sample is the table's to show, so the key/value details leave it out", () => {
+    expect(extraDetails(outcome({ details: { failures: 24, sample: SAMPLE } }))).toBeNull()
+    expect(extraDetails(outcome({ details: { failures: 24, sample_error: "timeout" } }))).toEqual({ sample_error: "timeout" })
+  })
+
+  test("a cell is shown as text, a missing one as a dash", () => {
+    expect([sampleCell("PHX"), sampleCell(-1), sampleCell(0), sampleCell(null), sampleCell(undefined)]).toEqual(["PHX", "-1", "0", "—", "—"])
+  })
+})
+
+test("checksForPipeline keeps the checks that judge that pipeline's output", () => {
+  const checks = [
+    check({ name: "season_vs_log", group: "consistency", pipelines: ["player_season_stats", "player_game_stats"] }),
+    check({ name: "ranges", pipelines: ["player_game_stats"] }),
+    check({ name: "team_ran", group: "timing", pipelines: ["team_stats"] }),
+  ]
+  expect(checksForPipeline(checks, "player_game_stats").map((c) => c.name)).toEqual(["season_vs_log", "ranges"])
+  expect(checksForPipeline(checks, "player_season_stats").map((c) => c.name)).toEqual(["season_vs_log"])
+  expect(checksForPipeline(checks, "breakout_detection")).toEqual([])
 })
 
 test("parseQualityLimit accepts only the offered sizes", () => {

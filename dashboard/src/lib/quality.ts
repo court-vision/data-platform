@@ -64,10 +64,11 @@ export interface CheckGroup {
 
 const GROUPS: ReadonlyArray<Omit<CheckGroup, "checks">> = [
   { key: "structural", label: "Structural", description: "Integrity of the rows: required fields, references, ranges" },
+  { key: "consistency", label: "Consistency", description: "One table held to account against another, over the last week of game nights that are due: season totals against the game log, team records and scores against the schedule, live against settled" },
   { key: "timing", label: "Timing", description: "Each scheduled pipeline has succeeded in the last 24 hours. Expected to fail on off-days" },
 ]
 
-/** Structural, then timing; a group this UI does not know goes last under its own name. */
+/** Structural, consistency, then timing; a group this UI does not know goes last under its own name. */
 export function groupChecks(checks: QualityCheckRow[]): CheckGroup[] {
   const known = new Set(GROUPS.map((group) => group.key))
   const groups: CheckGroup[] = GROUPS.map((group) => ({ ...group, checks: checks.filter((check) => check.group === group.key) }))
@@ -117,9 +118,36 @@ export function countOutcomes(outcomes: QualityOutcome[]): OutcomeCounts {
   return counts
 }
 
-/** `details` worth showing: anything beyond the failure count the row already has. */
+/** The offending rows a failed check kept: a few of them, each a flat record. */
+export interface Sample {
+  columns: string[]
+  rows: Record<string, unknown>[]
+}
+
+/** `details.sample` when it is what the API promises (a list of records), else null. */
+export function sampleRows(outcome: Pick<QualityOutcome, "details">): Sample | null {
+  const sample = outcome.details?.sample
+  if (!Array.isArray(sample) || sample.length === 0) return null
+  const rows = sample.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null && !Array.isArray(row))
+  if (rows.length === 0) return null
+  // Column order is the query's: the first row carries every column.
+  return { columns: Object.keys(rows[0]), rows }
+}
+
+/** A sampled cell as text; null is a blank the reader can see. */
+export function sampleCell(value: unknown): string {
+  if (value === null || value === undefined) return "—"
+  return typeof value === "string" ? value : String(value)
+}
+
+/** `details` worth showing as key/value: not the count the row has, not the sample the table shows. */
 export function extraDetails(outcome: Pick<QualityOutcome, "details">): Record<string, unknown> | null {
   if (!outcome.details) return null
-  const rest = Object.fromEntries(Object.entries(outcome.details).filter(([key]) => key !== "failures"))
+  const rest = Object.fromEntries(Object.entries(outcome.details).filter(([key]) => key !== "failures" && key !== "sample"))
   return Object.keys(rest).length > 0 ? rest : null
+}
+
+/** The checks that judge a pipeline's output (or, for a timing check, its runs). */
+export function checksForPipeline(checks: QualityCheckRow[], pipeline: string): QualityCheckRow[] {
+  return checks.filter((check) => check.pipelines.includes(pipeline))
 }

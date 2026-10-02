@@ -2,6 +2,7 @@ import { ArrowLeft, TriangleAlert } from "lucide-react"
 import { Link, useParams, useSearchParams } from "react-router"
 
 import { DurationChart } from "@/components/DurationChart"
+import { PipelineChecks } from "@/components/PipelineChecks"
 import { RefreshNote } from "@/components/RefreshNote"
 import { RunPipelineButton } from "@/components/RunPipelineButton"
 import { StateBadge, StatusBadge } from "@/components/StateBadge"
@@ -97,6 +98,8 @@ export function PipelineDetail() {
               <DurationChart runs={data.runs} now={now} />
             </CardContent>
           </Card>
+
+          <PipelineChecks pipeline={data.pipeline.name} />
 
           <RunsTable runs={data.runs} now={now} />
         </>

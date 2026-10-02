@@ -55,6 +55,9 @@ from schemas.dashboard import (
     QualityOverviewResponse,
     QualityRunDetailData,
     QualityRunDetailResponse,
+    SchedulerBucket,
+    SchedulerRunsData,
+    SchedulerRunsResponse,
     ServiceInfo,
     ServicesData,
     ServicesResponse,
@@ -389,8 +392,64 @@ def _build_runs(name: str, limit: int) -> PipelineRunsData:
     )
 
 
+# The scheduler timeline: the status payload carries the last 6 hours; a longer
+# look comes from /scheduler. Up to a day that is every run, capped. Past a day
+# the runs are counted instead: cron-runner reports about 2,000 a day (live-stats
+# fires every 30 seconds, 16 hours a day, all year), so a week is some 14,000
+# rows and megabytes of JSON, while the timeline draws one mark per column.
+SCHEDULER_DEFAULT_HOURS = 6
+SCHEDULER_MAX_HOURS = 7 * 24
+SCHEDULER_MAX_RUNS = 5000
+SCHEDULER_ROWS_MAX_HOURS = 24
+# Both mirror the timeline: SLOTS in dashboard/src/lib/timeline.ts, and LISTED
+# in SchedulerTimeline.tsx (the failed or retried runs one mark's popover lists).
+SCHEDULER_COLUMNS = 96
+SCHEDULER_LISTED = 5
+
 QUALITY_DEFAULT_LIMIT = 20
 QUALITY_MAX_LIMIT = 100
+
+
+@router.get("/scheduler", response_model=SchedulerRunsResponse)
+async def get_scheduler_runs(
+    hours: int = Query(
+        24, ge=1, le=SCHEDULER_MAX_HOURS,
+        description="How far back to look, in hours (up to a week)",
+    ),
+    _: str = Security(verify_pipeline_token),
+) -> SchedulerRunsResponse:
+    """
+    The cron-runner's job runs over a longer window than the status payload's
+    six hours, for the Overview's range selector. Newest first, without the
+    response bodies.
+
+    Up to 24 hours: every run, and `truncated` says the window held more than
+    the cap. Past that: `buckets` counts every run per job and column of the
+    timeline, and `runs` carries only the ones a mark can open (each column's
+    newest run, and its newest few that failed or were retried).
+    """
+    if hours > SCHEDULER_ROWS_MAX_HOURS:
+        data = await run_in_db_thread(_build_scheduler_counts, hours)
+        counted = sum(bucket.runs for bucket in data.buckets or [])
+        return SchedulerRunsResponse(
+            status="success",
+            message=f"{counted} cron runs in the last {hours} hours",
+            data=data,
+        )
+    # One over the cap is how a full page is told from a cut one. The raising
+    # read: a query that failed must not answer as a window with no runs in it.
+    runs = await run_in_db_thread(_query_cron_runs, hours, SCHEDULER_MAX_RUNS + 1, False)
+    truncated = len(runs) > SCHEDULER_MAX_RUNS
+    return SchedulerRunsResponse(
+        status="success",
+        message=f"{min(len(runs), SCHEDULER_MAX_RUNS)} cron runs in the last {hours} hours",
+        data=SchedulerRunsData(
+            hours=hours,
+            runs=runs[:SCHEDULER_MAX_RUNS],
+            truncated=truncated,
+            fetched_at=datetime.now(timezone.utc),
+        ),
+    )
 
 
 @router.get("/quality", response_model=QualityOverviewResponse)
@@ -446,16 +505,24 @@ def quality_check_info(
     check: SQLQualityCheck, writers: Optional[dict[str, list[str]]] = None
 ) -> QualityCheckInfo:
     """A check's definition as the page shows it. A timing check watches one
-    pipeline; a structural check guards a table, so its pipelines are that
-    table's writers."""
+    pipeline; any other check judges tables, so its pipelines are the writers
+    of the table it guards and of the tables it compares that one against."""
     writers = table_writers() if writers is None else writers
-    pipelines = [check.pipeline] if check.pipeline else writers.get(check.table, [])
+    if check.pipeline:
+        pipelines = [check.pipeline]
+    else:
+        pipelines = list(dict.fromkeys(
+            name
+            for table in (check.table, *check.against)
+            for name in writers.get(table, [])
+        ))
     return QualityCheckInfo(
         name=check.name,
         severity=check.severity,
         group=check.group,
         table=check.table,
-        pipelines=list(pipelines),
+        against=list(check.against),
+        pipelines=pipelines,
         failure_message=check.failure_message,
         sql=textwrap.dedent(check.sql).strip(),
     )
@@ -534,40 +601,142 @@ def _build_quality_run(run_id: str) -> Optional[QualityRunDetailData]:
     )
 
 
-def _build_cron_runs() -> list[CronJobRunEntry]:
+def _build_cron_runs(
+    hours: int = SCHEDULER_DEFAULT_HOURS,
+    limit: Optional[int] = None,
+    snippets: bool = True,
+) -> list[CronJobRunEntry]:
     """
-    Cron job runs for the dashboard's scheduler timeline: the last 6 hours,
-    newest first. (A 48-hour side query for the nightly `deploy` job used to
-    live here; that job went with the 2026-09-06 move to deploy-on-merge.)
+    Cron job runs for the dashboard's scheduler timeline: the last `hours`
+    hours (6 on the status payload), newest first. (A 48-hour side query for
+    the nightly `deploy` job used to live here; that job went with the
+    2026-09-06 move to deploy-on-merge.)
+
+    `limit` caps the rows; `snippets=False` leaves each run's response body
+    out, which is most of a row's weight over a day of 30-second polls.
+
+    A failed query is an empty list here, so one broken section does not cost
+    the status payload its others. `_query_cron_runs` is the same read that
+    raises, for a caller whose whole answer this is.
 
     Runs synchronously — caller must wrap in asyncio.to_thread.
     """
     try:
-        window_start = datetime.now(timezone.utc) - timedelta(hours=6)
-        rows = list(
-            CronJobRun.select()
-            .where(CronJobRun.triggered_at >= window_start)
-            .order_by(CronJobRun.triggered_at.desc())
-        )
-        return [
-            CronJobRunEntry(
-                id=str(r.id),
-                job_name=r.job_name,
-                triggered_at=r.triggered_at,
-                completed_at=r.completed_at,
-                duration_ms=r.duration_ms,
-                duration_seconds=r.duration_seconds,
-                result=r.result,
-                http_status=r.http_status,
-                attempts=r.attempts,
-                error_message=r.error_message,
-                response_snippet=r.response_snippet,
-            )
-            for r in rows
-        ]
+        return _query_cron_runs(hours, limit, snippets)
     except Exception as exc:
         log.warning("dashboard_cron_runs_failed", error=str(exc))
         return []
+
+
+def _query_cron_runs(hours: int, limit: Optional[int], snippets: bool) -> list[CronJobRunEntry]:
+    window_start = datetime.now(timezone.utc) - timedelta(hours=hours)
+    query = (
+        CronJobRun.select()
+        .where(CronJobRun.triggered_at >= window_start)
+        .order_by(CronJobRun.triggered_at.desc())
+    )
+    if limit is not None:
+        query = query.limit(limit)
+    return [_cron_run_entry(r, snippets) for r in query]
+
+
+def _cron_run_entry(r: CronJobRun, snippets: bool) -> CronJobRunEntry:
+    return CronJobRunEntry(
+        id=str(r.id),
+        job_name=r.job_name,
+        triggered_at=r.triggered_at,
+        completed_at=r.completed_at,
+        duration_ms=r.duration_ms,
+        duration_seconds=r.duration_seconds,
+        result=r.result,
+        http_status=r.http_status,
+        attempts=r.attempts,
+        error_message=r.error_message,
+        response_snippet=r.response_snippet if snippets else None,
+    )
+
+
+# Every run in the window, counted per job and column. `retried` is the
+# timeline's own word for a success that took more than one attempt.
+_SCHEDULER_COUNTS_SQL = """
+    SELECT job_name,
+           FLOOR(EXTRACT(EPOCH FROM triggered_at) / %s)::bigint AS col,
+           COUNT(*) AS runs,
+           COUNT(*) FILTER (WHERE result = 'failure') AS failed,
+           COUNT(*) FILTER (WHERE result <> 'failure' AND attempts > 1) AS retried,
+           MIN(triggered_at) AS first_triggered_at,
+           MAX(triggered_at) AS last_triggered_at
+    FROM nba.cron_job_runs
+    WHERE triggered_at >= %s
+    GROUP BY job_name, col
+    ORDER BY job_name, col
+"""
+
+# The rows a mark can open: each job-and-column's newest run, and its newest
+# few that failed or were retried. Bounded by the columns, not by the runs.
+_SCHEDULER_ROWS_SQL = """
+    SELECT id, job_name, triggered_at, completed_at, duration_ms, result,
+           http_status, attempts, error_message
+    FROM (
+        SELECT run.*,
+               ROW_NUMBER() OVER (
+                   PARTITION BY job_name, col ORDER BY triggered_at DESC
+               ) AS newest,
+               ROW_NUMBER() OVER (
+                   PARTITION BY job_name, col, troubled ORDER BY triggered_at DESC
+               ) AS newest_of_its_kind
+        FROM (
+            SELECT id, job_name, triggered_at, completed_at, duration_ms, result,
+                   http_status, attempts, error_message,
+                   FLOOR(EXTRACT(EPOCH FROM triggered_at) / %s) AS col,
+                   (result = 'failure' OR attempts > 1) AS troubled
+            FROM nba.cron_job_runs
+            WHERE triggered_at >= %s
+        ) run
+    ) ranked
+    WHERE newest = 1 OR (troubled AND newest_of_its_kind <= %s)
+    ORDER BY triggered_at DESC
+"""
+
+
+def _build_scheduler_counts(hours: int, now: Optional[datetime] = None) -> SchedulerRunsData:
+    """
+    The scheduler window past a day: every run counted per job and column, and
+    as rows only the runs a mark can open. A week at cron-runner's cadence is
+    a few hundred counts and rows, not fourteen thousand.
+
+    A column is the window cut in SCHEDULER_COLUMNS, measured from the epoch
+    rather than from the window's start, so a column holds the same runs from
+    one poll to the next. `now` pins the window's end, for tests.
+
+    Runs synchronously — caller must wrap in run_in_db_thread.
+    """
+    now = now or datetime.now(timezone.utc)
+    seconds = hours * 3600 // SCHEDULER_COLUMNS
+    # triggered_at is stored naive, in UTC: held to a naive value, the
+    # session's timezone has no say in the comparison.
+    since = _naive(now - timedelta(hours=hours))
+    buckets = [
+        SchedulerBucket(
+            job_name=row["job_name"],
+            start=datetime.fromtimestamp(row["col"] * seconds, timezone.utc).replace(tzinfo=None),
+            runs=row["runs"],
+            failed=row["failed"],
+            retried=row["retried"],
+            first_triggered_at=row["first_triggered_at"],
+            last_triggered_at=row["last_triggered_at"],
+        )
+        for row in CronJobRun.raw(_SCHEDULER_COUNTS_SQL, seconds, since).dicts()
+    ]
+    rows = CronJobRun.raw(_SCHEDULER_ROWS_SQL, seconds, since, SCHEDULER_LISTED)
+    return SchedulerRunsData(
+        hours=hours,
+        runs=[_cron_run_entry(r, snippets=False) for r in rows],
+        buckets=buckets,
+        bucket_seconds=seconds,
+        truncated=False,  # nothing is cut: what is not carried is counted
+        fetched_at=now,
+    )
 
 
 def _build_pipeline_health() -> list[PipelineHealthEntry]:

@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
 
-import { daysBetween, formatCentral, formatDay, formatDuration, parseUtc, relativeTime } from "@/lib/time"
+import {
+  daysBetween,
+  formatCentral,
+  formatDay,
+  formatDayClockCentral,
+  formatDuration,
+  parseUtc,
+  relativeTime,
+} from "@/lib/time"
 
 describe("parseUtc", () => {
   test("reads an offset-less timestamp as UTC, not local time", () => {
@@ -92,4 +100,11 @@ describe("daysBetween", () => {
     expect(daysBetween("2026-03-04", "2026-03-04")).toBe(0)
     expect(daysBetween("2026-03-04", "2026-03-01")).toBe(-3)
   })
+})
+
+test("formatDayClockCentral names the day and the hour, the same on every ICU", () => {
+  expect(formatDayClockCentral(Date.parse("2026-09-24T18:00:00Z"))).toBe("Thu 1 PM")
+  expect(formatDayClockCentral(Date.parse("2026-09-24T05:00:00Z"))).toBe("Thu 12 AM")
+  // Still Wednesday in Central when it is already Thursday in UTC.
+  expect(formatDayClockCentral(Date.parse("2026-09-24T03:00:00Z"))).toBe("Wed 10 PM")
 })

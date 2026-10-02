@@ -1,7 +1,22 @@
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { formatCentralLong, formatClockCentral, formatDuration } from "@/lib/time"
-import { axisTicks, buildLanes, markerPosition, runTone, type CronRun, type RunTone } from "@/lib/timeline"
+import { formatCentralLong, formatClockCentral, formatDayClockCentral, formatDuration } from "@/lib/time"
+import {
+  axisTicks,
+  buildLanes,
+  clusterBuckets,
+  clusterRuns,
+  DEFAULT_RANGE,
+  rangeMs,
+  RANGES,
+  runTone,
+  type Cluster,
+  type Counted,
+  type CronRun,
+  type RunTone,
+  type TimelineRange,
+} from "@/lib/timeline"
 import { cn } from "@/lib/utils"
 
 const TONE_CLASS: Record<RunTone, string> = {
@@ -10,23 +25,73 @@ const TONE_CLASS: Record<RunTone, string> = {
   failure: "bg-status-loss",
 }
 
-/** The last six hours of cron-runner activity, one lane per job. */
-export function SchedulerTimeline({ runs, now }: { runs: CronRun[]; now: number }) {
-  const lanes = buildLanes(runs, now)
-  const ticks = axisTicks(now)
-  const shown = lanes.reduce((count, lane) => count + lane.runs.length, 0)
+const TONE_TEXT: Record<RunTone, string> = {
+  success: "text-status-win",
+  retried: "text-status-projected",
+  failure: "text-status-loss",
+}
+
+/**
+ * How many of a group's troubled runs its popover lists before it says "and N
+ * more". A counted column comes with that many (SCHEDULER_LISTED in
+ * api/v1/dashboard.py).
+ */
+const LISTED = 5
+
+interface Props {
+  runs: CronRun[]
+  now: number
+  range?: TimelineRange
+  onRangeChange?: (range: TimelineRange) => void
+  /** The window's runs counted per job and column: `runs` are then only the ones a mark can open. */
+  counted?: Counted | null
+  /** A longer range was asked for and has not answered yet. */
+  loading?: boolean
+  /** The window held more runs than the reply carries: the oldest are missing. */
+  truncated?: boolean
+  error?: string | null
+}
+
+/** cron-runner activity over the chosen window, one lane per job. */
+export function SchedulerTimeline({ runs, now, range = DEFAULT_RANGE, onRangeChange, counted = null, loading = false, truncated = false, error = null }: Props) {
+  const windowMs = rangeMs(range)
+  const lanes = buildLanes(runs, now, windowMs, counted)
+  const ticks = axisTicks(now, windowMs, range.tickMs)
+  const shown = lanes.reduce((count, lane) => count + lane.count, 0)
 
   return (
     <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-baseline gap-2 text-base">
-          Scheduler
-          <span className="font-mono text-xs font-normal text-muted-foreground">{shown}</span>
-        </CardTitle>
-        <CardDescription>cron-runner job runs · last 6 hours · Central time · click a run for details</CardDescription>
+      <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 space-y-0 pb-3">
+        <div className="space-y-1.5">
+          <CardTitle className="flex items-baseline gap-2 text-base">
+            Scheduler
+            <span className="font-mono text-xs font-normal text-muted-foreground">{loading ? "…" : shown.toLocaleString()}</span>
+          </CardTitle>
+          <CardDescription>
+            cron-runner job runs · last {range.words} · Central time · click a mark for details
+            {truncated && " · the oldest runs in this window are not shown"}
+          </CardDescription>
+        </div>
+        {onRangeChange && (
+          <div className="flex gap-1" role="group" aria-label="How far back">
+            {RANGES.map((option) => (
+              <Button
+                key={option.key}
+                size="sm"
+                variant={option.key === range.key ? "secondary" : "ghost"}
+                className="h-7 px-2 font-mono text-xs"
+                aria-pressed={option.key === range.key}
+                onClick={() => onRangeChange(option)}
+              >
+                {option.key}
+              </Button>
+            ))}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="overflow-x-auto">
-        <div className="min-w-[40rem]">
+        {error && <p role="alert" className="mb-2 text-xs text-status-loss">Could not load this range: {error}</p>}
+        <div className="min-w-[40rem]" aria-busy={loading}>
           <div className="grid grid-cols-[8rem_1fr] items-end">
             <div />
             <div className="relative h-4 font-mono text-[10px] text-muted-foreground">
@@ -34,12 +99,15 @@ export function SchedulerTimeline({ runs, now }: { runs: CronRun[]; now: number 
                 <span
                   key={tick}
                   className={cn(
-                    "absolute -translate-x-1/2 whitespace-nowrap",
-                    index % 2 === 1 && "hidden lg:inline",
+                    "absolute whitespace-nowrap",
+                    // The end labels sit inside the lane; centred, a day-and-hour label runs past its edge.
+                    index === 0 ? "translate-x-0" : index === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2",
+                    // Every other label gives way on a narrow screen, counted from the right: "now" always stays.
+                    (ticks.length - 1 - index) % 2 === 1 && "hidden lg:inline",
                   )}
                   style={{ left: `${(index / (ticks.length - 1)) * 100}%` }}
                 >
-                  {formatClockCentral(tick)}
+                  {range.dayTicks ? formatDayClockCentral(tick) : formatClockCentral(tick)}
                 </span>
               ))}
             </div>
@@ -51,27 +119,36 @@ export function SchedulerTimeline({ runs, now }: { runs: CronRun[]; now: number 
                 <span className="truncate font-mono text-xs text-muted-foreground">{lane.job}</span>
                 <div className="relative h-7 rounded-sm bg-muted/40">
                   <div className="absolute inset-y-0 left-0 right-0 my-auto h-px bg-border" aria-hidden />
-                  {lane.runs.map((run) => (
-                    <RunMarker key={run.id} run={run} now={now} />
-                  ))}
-                  {lane.runs.length === 0 && (
+                  {(lane.counted ? clusterBuckets(lane.counted, lane.runs, now, windowMs) : clusterRuns(lane.runs, now, windowMs)).map((cluster) =>
+                    cluster.count === 1 && cluster.runs.length === 1 ? (
+                      <RunMarker key={cluster.runs[0].id} run={cluster.runs[0]} left={cluster.position} />
+                    ) : (
+                      <ClusterMarker key={cluster.slot} job={lane.job} cluster={cluster} />
+                    ),
+                  )}
+                  {lane.count === 0 && (
                     <span className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground/60">
-                      no runs in window
+                      {loading ? "loading…" : "no runs in window"}
                     </span>
                   )}
                 </div>
               </li>
             ))}
           </ol>
+
+          <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-status-win" aria-hidden /> succeeded</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-status-projected" aria-hidden /> succeeded after a retry</span>
+            <span className="flex items-center gap-1.5"><span className="size-2.5 rounded-full bg-status-loss" aria-hidden /> failed</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm bg-muted-foreground/50" aria-hidden /> several runs, in the worst colour among them</span>
+          </p>
         </div>
       </CardContent>
     </Card>
   )
 }
 
-function RunMarker({ run, now }: { run: CronRun; now: number }) {
-  const left = markerPosition(run.triggered_at, now)
-  if (left === null) return null
+function RunMarker({ run, left }: { run: CronRun; left: number }) {
   const tone = runTone(run)
 
   return (
@@ -91,11 +168,7 @@ function RunMarker({ run, now }: { run: CronRun; now: number }) {
         <dl className="grid grid-cols-[6rem_1fr] gap-y-1">
           <Row label="Job" value={run.job_name} />
           <Row label="Time" value={formatCentralLong(run.triggered_at)} />
-          <Row
-            label="Result"
-            value={run.result + (run.attempts > 1 ? ` after ${run.attempts} attempts` : "")}
-            className={tone === "failure" ? "text-status-loss" : tone === "retried" ? "text-status-projected" : "text-status-win"}
-          />
+          <Row label="Result" value={resultWords(run)} className={TONE_TEXT[tone]} />
           <Row label="Duration" value={formatDuration(run.duration_seconds)} />
           <Row label="HTTP" value={run.http_status?.toString() ?? "—"} />
           {run.error_message && <Row label="Error" value={run.error_message} className="text-status-loss" />}
@@ -107,6 +180,95 @@ function RunMarker({ run, now }: { run: CronRun; now: number }) {
         )}
       </PopoverContent>
     </Popover>
+  )
+}
+
+function resultWords(run: CronRun): string {
+  return run.result + (run.attempts > 1 ? ` after ${run.attempts} attempts` : "")
+}
+
+/** What a group holds, in words: the mark's colour is never the only way to know. */
+export function clusterSummary(cluster: Cluster): string {
+  const { failed, retried } = cluster
+  const parts = [cluster.count === 1 ? "1 run" : `${cluster.count} runs`]
+  if (failed > 0) parts.push(`${failed} failed`)
+  if (retried > 0) parts.push(`${retried} retried`)
+  if (failed === 0 && retried === 0) parts.push("all succeeded")
+  return parts.join(", ")
+}
+
+function ClusterMarker({ job, cluster }: { job: string; cluster: Cluster }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${job}: ${clusterSummary(cluster)}, from ${formatCentralLong(cluster.from)} to ${formatCentralLong(cluster.to)}`}
+          data-runs={cluster.count}
+          data-tone={cluster.tone}
+          className={cn(
+            "absolute top-1/2 h-3 min-w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm ring-1 ring-card transition-transform hover:scale-y-150 focus-visible:scale-y-150 focus-visible:outline-none",
+            TONE_CLASS[cluster.tone],
+          )}
+          style={{ left: `${cluster.position}%`, width: `${cluster.width}%` }}
+        />
+      </PopoverTrigger>
+      <PopoverContent align="center" className="w-80 p-3 text-xs">
+        <ClusterDetail job={job} cluster={cluster} />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/**
+ * What a group's popover says: what it holds, its newest run as a lone dot
+ * would show it (a poll that did nothing says why in its response body), and
+ * the troubled runs it came with.
+ */
+export function ClusterDetail({ job, cluster }: { job: string; cluster: Cluster }) {
+  const listed = cluster.runs.filter((run) => runTone(run) !== "success").slice(0, LISTED)
+  const unlisted = cluster.failed + cluster.retried - listed.length
+  const latest = cluster.runs.at(-1)
+
+  return (
+    <>
+      <dl className="grid grid-cols-[6rem_1fr] gap-y-1">
+        <Row label="Job" value={job} />
+        <Row label="Runs" value={clusterSummary(cluster)} className={TONE_TEXT[cluster.tone]} />
+        <Row label="From" value={formatCentralLong(cluster.from)} />
+        <Row label="To" value={formatCentralLong(cluster.to)} />
+      </dl>
+      {latest && (
+        <div className="mt-2 border-t border-border/60 pt-2">
+          <dl className="grid grid-cols-[6rem_1fr] gap-y-1">
+            <Row label="Latest run" value={formatCentralLong(latest.triggered_at)} />
+            <Row label="Result" value={resultWords(latest)} className={TONE_TEXT[runTone(latest)]} />
+            <Row label="Duration" value={formatDuration(latest.duration_seconds)} />
+            <Row label="HTTP" value={latest.http_status?.toString() ?? "—"} />
+          </dl>
+          {latest.response_snippet && (
+            <pre className="mt-2 max-h-32 overflow-auto rounded bg-muted/60 p-2 font-mono text-[10px] leading-snug text-muted-foreground">
+              {latest.response_snippet}
+            </pre>
+          )}
+        </div>
+      )}
+      {(listed.length > 0 || unlisted > 0) && (
+        <ul className="mt-2 flex flex-col gap-1 border-t border-border/60 pt-2">
+          {listed.map((run) => (
+            <li key={run.id} className="font-mono text-[11px]">
+              <span className="text-muted-foreground">{formatCentralLong(run.triggered_at)}</span>{" "}
+              <span className={TONE_TEXT[runTone(run)]}>{resultWords(run)}</span>{" "}
+              <span className="text-muted-foreground">
+                · {formatDuration(run.duration_seconds)} · HTTP {run.http_status ?? "—"}
+              </span>
+              {run.error_message && <span className="block break-words text-status-loss">{run.error_message}</span>}
+            </li>
+          ))}
+          {unlisted > 0 && <li className="text-muted-foreground">and {unlisted} more</li>}
+        </ul>
+      )}
+    </>
   )
 }
 

@@ -220,10 +220,13 @@ class QualityCheckInfo(ApiModel):
 
     name: str
     severity: str                # critical | warning
-    group: str                   # structural | timing
-    table: str                   # the table it reads, "schema.table"
-    # Timing checks: the pipeline whose runs they watch. Structural checks: the
-    # registered pipelines that write `table` (none for a framework table).
+    group: str                   # structural | consistency | timing
+    table: str                   # the table it guards, "schema.table"
+    # Consistency checks: the tables `table` is held to account against.
+    against: list[str]
+    # Timing checks: the pipeline whose runs they watch. Otherwise the
+    # registered pipelines that write `table` or a table in `against` (none
+    # for a framework table): the pipelines whose output the check judges.
     pipelines: list[str]
     failure_message: str         # what a failure means
     sql: str                     # the assertion: it counts the offending rows
@@ -279,3 +282,41 @@ class QualityRunDetailResponse(ApiModel):
     status: str
     message: str
     data: QualityRunDetailData
+
+
+class SchedulerBucket(ApiModel):
+    """One job's runs in one column of the scheduler timeline, counted."""
+
+    job_name: str
+    start: datetime              # the column's first moment (naive UTC, as the runs' own times)
+    runs: int
+    failed: int
+    retried: int                 # succeeded, but not on the first attempt
+    first_triggered_at: datetime
+    last_triggered_at: datetime
+
+
+class SchedulerRunsData(ApiModel):
+    """Cron-runner job runs over a chosen window, for the scheduler timeline."""
+
+    hours: int
+    # Newest first. `response_snippet` is always null here: the status
+    # payload's six-hour list is the one that carries response bodies.
+    # Up to a day: every run in the window. Past a day (`buckets` is set): only
+    # the runs a mark can open, which are each column's newest and its newest
+    # few that failed or were retried.
+    runs: list[CronJobRunEntry]
+    # Past a day: every run in the window, counted per job and column. A week
+    # of 30-second polls is too many rows to carry, and is drawn as columns.
+    buckets: Optional[list[SchedulerBucket]] = None
+    bucket_seconds: Optional[int] = None   # a column's width; set with `buckets`
+    truncated: bool              # `runs` was cut at the cap: the oldest are missing
+    fetched_at: datetime
+
+
+class SchedulerRunsResponse(ApiModel):
+    """Response for GET /v1/dashboard/scheduler."""
+
+    status: str
+    message: str
+    data: SchedulerRunsData

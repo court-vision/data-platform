@@ -60,6 +60,23 @@ export function formatClockCentral(ms: number): string {
   return centralClock.format(new Date(ms))
 }
 
+const centralDayClock = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  weekday: "short",
+  hour: "numeric",
+})
+
+/**
+ * "Wed 2 PM" in Central, for axis ticks on a window of several days. Built
+ * from the parts: what joins a weekday to an hour ("Wed 2 PM", "Wed, 2 PM")
+ * differs between ICU versions.
+ */
+export function formatDayClockCentral(ms: number): string {
+  const parts = centralDayClock.formatToParts(new Date(ms))
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? ""
+  return `${part("weekday")} ${part("hour")} ${part("dayPeriod")}`.trim()
+}
+
 const centralLong = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Chicago",
   month: "short",

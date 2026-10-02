@@ -219,6 +219,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/scheduler": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scheduler Runs
+         * @description The cron-runner's job runs over a longer window than the status payload's
+         *     six hours, for the Overview's range selector. Newest first, without the
+         *     response bodies.
+         *
+         *     Up to 24 hours: every run, and `truncated` says the window held more than
+         *     the cap. Past that: `buckets` counts every run per job and column of the
+         *     timeline, and `runs` carries only the ones a mark can open (each column's
+         *     newest run, and its newest few that failed or were retried).
+         */
+        get: operations["get_scheduler_runs_v1_dashboard_scheduler_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/services": {
         parameters: {
             query?: never;
@@ -2026,6 +2053,8 @@ export interface components {
          * @description A quality check as it is defined in code: what it asserts and what it guards.
          */
         QualityCheckInfo: {
+            /** Against */
+            against: string[];
             /** Failure Message */
             failure_message: string;
             /** Group */
@@ -2072,6 +2101,8 @@ export interface components {
          * @description A check with its result in each run of the window.
          */
         QualityCheckRow: {
+            /** Against */
+            against: string[];
             /** Failure Message */
             failure_message: string;
             /** Group */
@@ -2200,6 +2231,67 @@ export interface components {
             success_rate: number | null;
             /** Total */
             total: number;
+        };
+        /**
+         * SchedulerBucket
+         * @description One job's runs in one column of the scheduler timeline, counted.
+         */
+        SchedulerBucket: {
+            /** Failed */
+            failed: number;
+            /**
+             * First Triggered At
+             * Format: date-time
+             */
+            first_triggered_at: string;
+            /** Job Name */
+            job_name: string;
+            /**
+             * Last Triggered At
+             * Format: date-time
+             */
+            last_triggered_at: string;
+            /** Retried */
+            retried: number;
+            /** Runs */
+            runs: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /**
+         * SchedulerRunsData
+         * @description Cron-runner job runs over a chosen window, for the scheduler timeline.
+         */
+        SchedulerRunsData: {
+            /** Bucket Seconds */
+            bucket_seconds: number | null;
+            /** Buckets */
+            buckets: components["schemas"]["SchedulerBucket"][] | null;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Hours */
+            hours: number;
+            /** Runs */
+            runs: components["schemas"]["CronJobRunEntry"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * SchedulerRunsResponse
+         * @description Response for GET /v1/dashboard/scheduler.
+         */
+        SchedulerRunsResponse: {
+            data: components["schemas"]["SchedulerRunsData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
         };
         /**
          * ServiceInfo
@@ -2634,6 +2726,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QualityRunDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scheduler_runs_v1_dashboard_scheduler_get: {
+        parameters: {
+            query?: {
+                /** @description How far back to look, in hours (up to a week) */
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulerRunsResponse"];
                 };
             };
             /** @description Validation Error */

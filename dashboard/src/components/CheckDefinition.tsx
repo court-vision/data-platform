@@ -2,7 +2,7 @@ import { Link } from "react-router"
 
 import type { QualityCheckInfo } from "@/lib/quality"
 
-/** What a check asserts: the table it guards, the pipelines behind it, and the SQL itself. */
+/** What a check asserts: the table it guards (and what it is compared against), the pipelines behind it, and the SQL itself. */
 export function CheckDefinition({ definition }: { definition: QualityCheckInfo }) {
   return (
     <div className="flex flex-col gap-2 text-xs">
@@ -10,6 +10,9 @@ export function CheckDefinition({ definition }: { definition: QualityCheckInfo }
         <div>
           <dt className="text-muted-foreground">Guards</dt>
           <dd className="break-all font-mono">{definition.table}</dd>
+          {definition.against.length > 0 && (
+            <dd className="break-all font-mono text-muted-foreground">against {definition.against.join(", ")}</dd>
+          )}
         </div>
         <div>
           <dt className="text-muted-foreground">{definition.group === "timing" ? "Watches" : "Written by"}</dt>

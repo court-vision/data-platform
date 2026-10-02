@@ -1,4 +1,5 @@
 import { TriangleAlert } from "lucide-react"
+import { useSearchParams } from "react-router"
 
 import { JobsTable } from "@/components/JobsTable"
 import { PipelineSection } from "@/components/PipelineSection"
@@ -10,13 +11,21 @@ import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { STATUS_REFETCH_MS, useDashboardStatus, type PipelineHealth } from "@/hooks/useDashboardStatus"
 import { useNow } from "@/hooks/useNow"
+import { schedulerWindow, useSchedulerRuns } from "@/hooks/useSchedulerRuns"
 import { groupByCategory, summarize } from "@/lib/pipelines"
+import { DEFAULT_RANGE, parseRange } from "@/lib/timeline"
 import { cn } from "@/lib/utils"
 
 export function Overview() {
   const status = useDashboardStatus()
   const now = useNow()
   const data = status.data
+  // The scheduler's range lives in the URL. Six hours rides on the status
+  // payload; a longer look is its own, slower query.
+  const [params, setParams] = useSearchParams()
+  const range = parseRange(params.get("scheduler"))
+  const longer = useSchedulerRuns(range.hours)
+  const defaultRange = range.key === DEFAULT_RANGE.key
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 p-4 md:p-8">
@@ -54,7 +63,12 @@ export function Overview() {
           {groupByCategory(data.pipelines).map((group) => (
             <PipelineSection key={group.label} group={group} now={now} />
           ))}
-          <SchedulerTimeline runs={data.cron_job_runs} now={now} />
+          <SchedulerTimeline
+            now={now}
+            range={range}
+            onRangeChange={(next) => setParams(next.key === DEFAULT_RANGE.key ? {} : { scheduler: next.key }, { replace: true })}
+            {...(defaultRange ? { runs: data.cron_job_runs } : schedulerWindow(range, longer))}
+          />
           <QualityPanel
             quality_latest={data.quality_latest}
             recent_quality_runs={data.recent_quality_runs}
