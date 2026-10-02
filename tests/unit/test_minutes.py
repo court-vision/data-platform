@@ -43,6 +43,40 @@ def test_seconds_played_reads_every_minutes_format(raw, expected: float) -> None
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # float() reads these as numbers
+        "nan",
+        "NaN",
+        "inf",
+        "-inf",
+        "infinity",
+        "0:nan",
+        "0:inf",
+        "1e400",
+        float("inf"),
+        float("-inf"),
+        # Too many digits to be a finite float
+        pytest.param("PT" + "9" * 400 + "M", id="PT<400 digits>M"),
+        pytest.param("9" * 400 + ":00", id="<400 digits>:00"),
+        # Negative, including the sign int("-0") loses
+        "-0:30",
+        "-1:30",
+        "0:-30",
+        "-0.5",
+        -0.5,
+    ],
+)
+def test_a_value_that_is_not_a_finite_positive_time_is_no_time_played(raw) -> None:
+    """Both pipelines skip a row on `seconds_played(...) <= 0`, which NaN and infinity fail."""
+    seconds = seconds_played(raw)
+
+    assert seconds == 0.0
+    assert seconds <= 0, "the test the pipelines apply"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("raw", [0.67, "PT00M40.00S", "0:40"])
 def test_a_sub_minute_appearance_is_played_time_that_truncates_to_zero(raw) -> None:
     """The case the pipelines used to drop: whole minutes say 0, the clock does not."""

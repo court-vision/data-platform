@@ -29,6 +29,7 @@ def seconds_played(raw: Union[str, int, float, None]) -> float:
     - ISO 8601 duration "PT00M40.00S" -> 40.0  (live BoxScore `minutes`)
     - String "0:40" -> 40.0
     - None, NaN, "" and anything unreadable -> 0.0
+    - Anything that is not a finite, positive time ("nan", "inf", "-0:30") -> 0.0
 
     Examples:
         >>> seconds_played("PT00M40.00S")
@@ -42,11 +43,12 @@ def seconds_played(raw: Union[str, int, float, None]) -> float:
         return 0.0
 
     if isinstance(raw, Real):
-        minutes = float(raw)
-        return 0.0 if math.isnan(minutes) else minutes * 60
+        return _played(float(raw) * 60)
 
     s = str(raw).strip()
-    if not s:
+    # A minus sign is never time on the floor, and has to be read off the
+    # string: int("-0") is 0, so "-0:30" would come out as thirty seconds.
+    if not s or s.startswith("-"):
         return 0.0
 
     if s.startswith("PT"):
@@ -54,12 +56,23 @@ def seconds_played(raw: Union[str, int, float, None]) -> float:
         if not match:
             return 0.0
         hours, minutes, seconds = (float(part) if part else 0.0 for part in match.groups())
-        return hours * 3600 + minutes * 60 + seconds
+        return _played(hours * 3600 + minutes * 60 + seconds)
 
     try:
         if ":" in s:
             minutes, seconds = s.split(":", 1)
-            return int(minutes) * 60 + float(seconds)
-        return float(s) * 60
-    except ValueError:
+            return _played(int(minutes) * 60 + float(seconds))
+        return _played(float(s) * 60)
+    except (ValueError, OverflowError):
         return 0.0
+
+
+def _played(seconds: float) -> float:
+    """
+    Only a finite, positive number of seconds is time played.
+
+    float() reads "nan" and "inf" as numbers, and the callers skip a row on
+    `seconds_played(...) <= 0`, which NaN and infinity both fail: without this
+    a non-appearance would get a row.
+    """
+    return seconds if math.isfinite(seconds) and seconds > 0 else 0.0
