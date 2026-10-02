@@ -26,6 +26,18 @@ from services.alert_service import AlertEvent, get_alert_service
 PIPELINE_FAILED_DEDUPE = timedelta(hours=6)
 
 
+class DataNotReady(RuntimeError):
+    """The upstream data a pipeline needs has not landed yet; a later poll will retry.
+
+    Raised by a pipeline's own readiness check. The run is recorded as failed
+    like any other, which is what makes the next poll retry it, but it is not
+    a crash: it is not sent to Sentry, and it alerts as `pipeline_waiting`
+    (warning) under its own key. A post-game pipeline can wait through a
+    dozen polls a night, and on `pipeline_failed`'s key the first of them
+    used up the dedupe window a real failure later that night would need.
+    """
+
+
 class BasePipeline(ABC):
     """
     Abstract base class for all data pipelines.
@@ -146,6 +158,10 @@ class BasePipeline(ABC):
             self.execute(ctx)
             self.after_execute(ctx)
             return ctx.mark_success()
+        except DataNotReady as e:
+            result = ctx.mark_failed(e, waiting=True)
+            self._notify_waiting(ctx, e)
+            return result
         except Exception as e:
             result = ctx.mark_failed(e)
             self._notify_failure(ctx, e)
@@ -179,6 +195,22 @@ class BasePipeline(ABC):
                 "run_id": str(ctx.run_id),
                 "date_override": str(ctx.date_override) if ctx.date_override else None,
                 "records_processed": ctx.records_processed,
+                "target_table": self.config.target_table,
+            },
+            dedupe=PIPELINE_FAILED_DEDUPE,
+        ))
+
+    def _notify_waiting(self, ctx: PipelineContext, error: DataNotReady) -> None:
+        """`pipeline_waiting` (warning) to the ops webhook; never raises."""
+        get_alert_service().notify(AlertEvent(
+            key=f"pipeline_waiting:{self.config.name}",
+            severity="warning",
+            title=f"Pipeline waiting: {self.config.display_name}",
+            body=str(error)[:500],
+            fields={
+                "pipeline": self.config.name,
+                "category": self.config.category.value,
+                "run_id": str(ctx.run_id),
                 "target_table": self.config.target_table,
             },
             dedupe=PIPELINE_FAILED_DEDUPE,

@@ -8,6 +8,8 @@ import pytest
 from db.models.nba.games import Game
 from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.players import Player
+from pipelines.base import DataNotReady
+from pipelines.context import PipelineContext
 from pipelines.player_game_stats import PlayerGameStatsPipeline
 from schemas.common import ApiStatus
 
@@ -67,6 +69,28 @@ def test_player_game_stats_pipeline_fails_on_incomplete_games(integration_db) ->
     assert result.error is not None
     assert "Data not ready yet" in result.error
     assert PlayerGameStats.select().count() == 0
+
+
+@pytest.mark.integration
+def test_a_game_log_that_has_not_landed_is_waiting_not_a_crash(integration_db, alerts) -> None:
+    """Both of its readiness checks: some of the night's games missing, and all of them."""
+    game_date = date(2026, 2, 14)
+    _seed_expected_game(game_date, "0022500001")
+    _seed_expected_game(game_date, "0022500002")
+
+    pipeline = PlayerGameStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+    pipeline.nba_extractor.get_game_logs = lambda *_: _stats_df(game_id="0022500001")
+
+    result = pipeline._run_sync(nba_date=game_date)
+
+    assert result.status == ApiStatus.ERROR
+    assert alerts.keys() == ["pipeline_waiting:player_game_stats"]
+    assert alerts.events[0].severity == "warning"
+
+    pipeline.nba_extractor.get_game_logs = lambda *_: pd.DataFrame()
+    with pytest.raises(DataNotReady, match="no stats"):
+        pipeline.execute(PipelineContext("player_game_stats", nba_date=game_date))
 
 
 @pytest.mark.integration

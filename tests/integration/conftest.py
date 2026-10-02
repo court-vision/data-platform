@@ -10,6 +10,7 @@ from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.player_season_stats import PlayerSeasonStats
 from db.models.nba.pipeline_batch import PipelineBatch
 from db.models.nba.players import Player
+from db.models.nba.team_stats import TeamStats
 from db.models.nba.teams import NBATeam
 from db.models.pipeline_run import PipelineRun
 
@@ -23,6 +24,7 @@ INTEGRATION_MODELS = [
     PlayerGameStats,
     PlayerSeasonStats,
     PlayerRollingStats,
+    TeamStats,
 ]
 
 
@@ -55,6 +57,7 @@ def clean_integration_tables(integration_db):
           nba.player_rolling_stats,
           nba.player_season_stats,
           nba.player_game_stats,
+          nba.team_stats,
           nba.games,
           nba.players,
           nba.pipeline_runs,
