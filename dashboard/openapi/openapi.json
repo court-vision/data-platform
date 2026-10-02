@@ -3737,7 +3737,7 @@
     },
     "/v1/internal/pipelines/cv-projection": {
       "post": {
-        "description": "Trigger the cv-projection pipeline.\n\nBuilds Court Vision's projection \u2014 three seasons of history, ESPN's line,\nthe curated adjustments \u2014 into nba.player_projections with source 'cv'.\nCalled daily by the 'cv-projection' cron job after preseason-market, and\nby the projections editor after an adjustment is saved.",
+        "description": "Trigger the cv-projection pipeline.\n\nBuilds Court Vision's projection \u2014 three seasons of history, ESPN's line,\nthe curated adjustments \u2014 into nba.player_projections with source 'cv'.\nIt has no cron job of its own: the preseason-market trigger runs it daily\nas the last link of its chain, and the projections editor runs it after an\nadjustment is saved.",
         "operationId": "trigger_cv_projection_v1_internal_pipelines_cv_projection_post",
         "parameters": [
           {
@@ -4756,7 +4756,7 @@
     },
     "/v1/internal/pipelines/preseason-market": {
       "post": {
-        "description": "Trigger the preseason-market pipeline.\n\nSnapshots ESPN draft ranks, auction values, and real-draft crowd averages\n(ADP, average auction price) into nba.draft_market \u2014 plus projected stat\nlines into nba.player_projections once ESPN publishes them. Self-gating:\nno-ops outside the Aug 15 \u2013 Oct 31 window and when the league has not\nrolled to the target season. Called daily by the 'preseason-market' cron\njob in cron-runner during draft season.\n\nTwo pipelines follow it on the same trigger, in order: player-profiles, so\nevery player's current team is today's (it had no schedule of its own, and\na whole offseason of trades went unrecorded), then cv-projection, which is\nbuilt on the day's ESPN line and those rosters. Both run whatever the\nmarket run did; cv-projection gates itself on the same window.",
+        "description": "Trigger the preseason-market pipeline.\n\nSnapshots ESPN draft ranks, auction values, and real-draft crowd averages\n(ADP, average auction price) into nba.draft_market \u2014 plus projected stat\nlines into nba.player_projections once ESPN publishes them. Self-gating:\nno-ops outside the Aug 15 \u2013 Oct 31 window and when the league has not\nrolled to the target season. Called daily by the 'preseason-market' cron\njob in cron-runner during draft season.\n\nThe trigger runs three pipelines in order, each whatever the one before\nit did: player-profiles first, so every player's current team is today's\nand a new player (a rookie, a new signing) has his nba.players row before\nthe snapshot \u2014 the snapshot can only attach ESPN's rank and line to a\nplayer that row exists for; then preseason-market; then cv-projection,\nwhich is built on the day's ESPN line and those rosters and gates itself\non the same window. When player-profiles fails, the other two still run on\nthe roster of its last good run. The response is the market run's.",
         "operationId": "trigger_preseason_market_v1_internal_pipelines_preseason_market_post",
         "parameters": [
           {
