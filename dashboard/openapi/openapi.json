@@ -3008,6 +3008,62 @@
         "title": "RunsSummary",
         "type": "object"
       },
+      "SchedulerRunsData": {
+        "description": "Cron-runner job runs over a chosen window, for the scheduler timeline.",
+        "properties": {
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/CronJobRunEntry"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hours",
+          "runs",
+          "truncated",
+          "fetched_at"
+        ],
+        "title": "SchedulerRunsData",
+        "type": "object"
+      },
+      "SchedulerRunsResponse": {
+        "description": "Response for GET /v1/dashboard/scheduler.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SchedulerRunsData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "SchedulerRunsResponse",
+        "type": "object"
+      },
       "ServiceInfo": {
         "description": "One deployed service, as its own /health reports it.",
         "properties": {
@@ -3850,6 +3906,59 @@
           }
         ],
         "summary": "Get Quality Run",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/scheduler": {
+      "get": {
+        "description": "The cron-runner's job runs over a longer window than the status payload's\nsix hours, for the Overview's range selector. Newest first, without the\nresponse bodies; `truncated` says the window held more than the cap.",
+        "operationId": "get_scheduler_runs_v1_dashboard_scheduler_get",
+        "parameters": [
+          {
+            "description": "How far back to look, in hours (up to a week)",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "How far back to look, in hours (up to a week)",
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerRunsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Scheduler Runs",
         "tags": [
           "dashboard"
         ]

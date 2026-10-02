@@ -55,6 +55,8 @@ from schemas.dashboard import (
     QualityOverviewResponse,
     QualityRunDetailData,
     QualityRunDetailResponse,
+    SchedulerRunsData,
+    SchedulerRunsResponse,
     ServiceInfo,
     ServicesData,
     ServicesResponse,
@@ -389,8 +391,42 @@ def _build_runs(name: str, limit: int) -> PipelineRunsData:
     )
 
 
+# The scheduler timeline: the status payload carries the last 6 hours; a longer
+# look comes from /scheduler, capped so a week of live polls stays a bounded reply.
+SCHEDULER_DEFAULT_HOURS = 6
+SCHEDULER_MAX_HOURS = 7 * 24
+SCHEDULER_MAX_RUNS = 5000
+
 QUALITY_DEFAULT_LIMIT = 20
 QUALITY_MAX_LIMIT = 100
+
+
+@router.get("/scheduler", response_model=SchedulerRunsResponse)
+async def get_scheduler_runs(
+    hours: int = Query(
+        24, ge=1, le=SCHEDULER_MAX_HOURS,
+        description="How far back to look, in hours (up to a week)",
+    ),
+    _: str = Security(verify_pipeline_token),
+) -> SchedulerRunsResponse:
+    """
+    The cron-runner's job runs over a longer window than the status payload's
+    six hours, for the Overview's range selector. Newest first, without the
+    response bodies; `truncated` says the window held more than the cap.
+    """
+    # One over the cap is how a full page is told from a cut one.
+    runs = await run_in_db_thread(_build_cron_runs, hours, SCHEDULER_MAX_RUNS + 1, False)
+    truncated = len(runs) > SCHEDULER_MAX_RUNS
+    return SchedulerRunsResponse(
+        status="success",
+        message=f"{min(len(runs), SCHEDULER_MAX_RUNS)} cron runs in the last {hours} hours",
+        data=SchedulerRunsData(
+            hours=hours,
+            runs=runs[:SCHEDULER_MAX_RUNS],
+            truncated=truncated,
+            fetched_at=datetime.now(timezone.utc),
+        ),
+    )
 
 
 @router.get("/quality", response_model=QualityOverviewResponse)
@@ -540,21 +576,32 @@ def _build_quality_run(run_id: str) -> Optional[QualityRunDetailData]:
     )
 
 
-def _build_cron_runs() -> list[CronJobRunEntry]:
+def _build_cron_runs(
+    hours: int = SCHEDULER_DEFAULT_HOURS,
+    limit: Optional[int] = None,
+    snippets: bool = True,
+) -> list[CronJobRunEntry]:
     """
-    Cron job runs for the dashboard's scheduler timeline: the last 6 hours,
-    newest first. (A 48-hour side query for the nightly `deploy` job used to
-    live here; that job went with the 2026-09-06 move to deploy-on-merge.)
+    Cron job runs for the dashboard's scheduler timeline: the last `hours`
+    hours (6 on the status payload), newest first. (A 48-hour side query for
+    the nightly `deploy` job used to live here; that job went with the
+    2026-09-06 move to deploy-on-merge.)
+
+    `limit` caps the rows; `snippets=False` leaves each run's response body
+    out, which is most of a row's weight over a week of 60-second polls.
 
     Runs synchronously — caller must wrap in asyncio.to_thread.
     """
     try:
-        window_start = datetime.now(timezone.utc) - timedelta(hours=6)
-        rows = list(
+        window_start = datetime.now(timezone.utc) - timedelta(hours=hours)
+        query = (
             CronJobRun.select()
             .where(CronJobRun.triggered_at >= window_start)
             .order_by(CronJobRun.triggered_at.desc())
         )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = list(query)
         return [
             CronJobRunEntry(
                 id=str(r.id),
@@ -567,7 +614,7 @@ def _build_cron_runs() -> list[CronJobRunEntry]:
                 http_status=r.http_status,
                 attempts=r.attempts,
                 error_message=r.error_message,
-                response_snippet=r.response_snippet,
+                response_snippet=r.response_snippet if snippets else None,
             )
             for r in rows
         ]

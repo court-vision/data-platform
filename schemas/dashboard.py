@@ -282,3 +282,22 @@ class QualityRunDetailResponse(ApiModel):
     status: str
     message: str
     data: QualityRunDetailData
+
+
+class SchedulerRunsData(ApiModel):
+    """Cron-runner job runs over a chosen window, for the scheduler timeline."""
+
+    hours: int
+    # Newest first. `response_snippet` is always null here: the status
+    # payload's six-hour list is the one that carries response bodies.
+    runs: list[CronJobRunEntry]
+    truncated: bool              # the window held more runs than the reply carries
+    fetched_at: datetime
+
+
+class SchedulerRunsResponse(ApiModel):
+    """Response for GET /v1/dashboard/scheduler."""
+
+    status: str
+    message: str
+    data: SchedulerRunsData

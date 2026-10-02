@@ -219,6 +219,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/scheduler": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scheduler Runs
+         * @description The cron-runner's job runs over a longer window than the status payload's
+         *     six hours, for the Overview's range selector. Newest first, without the
+         *     response bodies; `truncated` says the window held more than the cap.
+         */
+        get: operations["get_scheduler_runs_v1_dashboard_scheduler_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/services": {
         parameters: {
             query?: never;
@@ -2188,6 +2210,34 @@ export interface components {
             total: number;
         };
         /**
+         * SchedulerRunsData
+         * @description Cron-runner job runs over a chosen window, for the scheduler timeline.
+         */
+        SchedulerRunsData: {
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /** Hours */
+            hours: number;
+            /** Runs */
+            runs: components["schemas"]["CronJobRunEntry"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * SchedulerRunsResponse
+         * @description Response for GET /v1/dashboard/scheduler.
+         */
+        SchedulerRunsResponse: {
+            data: components["schemas"]["SchedulerRunsData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * ServiceInfo
          * @description One deployed service, as its own /health reports it.
          */
@@ -2620,6 +2670,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QualityRunDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scheduler_runs_v1_dashboard_scheduler_get: {
+        parameters: {
+            query?: {
+                /** @description How far back to look, in hours (up to a week) */
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulerRunsResponse"];
                 };
             };
             /** @description Validation Error */

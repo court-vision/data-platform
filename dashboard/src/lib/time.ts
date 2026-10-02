@@ -60,6 +60,17 @@ export function formatClockCentral(ms: number): string {
   return centralClock.format(new Date(ms))
 }
 
+const centralDayClock = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  weekday: "short",
+  hour: "numeric",
+})
+
+/** "Wed 2 PM" in Central, for axis ticks on a window of several days. */
+export function formatDayClockCentral(ms: number): string {
+  return centralDayClock.format(new Date(ms))
+}
+
 const centralLong = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Chicago",
   month: "short",

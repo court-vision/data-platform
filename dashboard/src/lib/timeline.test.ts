@@ -1,6 +1,19 @@
 import { describe, expect, test } from "bun:test"
 
-import { axisTicks, buildLanes, markerPosition, runTone, WINDOW_MS, type CronRun, type RunTone } from "@/lib/timeline"
+import {
+  axisTicks,
+  buildLanes,
+  clusterRuns,
+  markerPosition,
+  parseRange,
+  rangeMs,
+  RANGES,
+  runTone,
+  WINDOW_MS,
+  worstTone,
+  type CronRun,
+  type RunTone,
+} from "@/lib/timeline"
 
 const now = Date.parse("2026-09-24T18:00:00Z")
 
@@ -77,4 +90,75 @@ test("axisTicks spans the window in 30-minute steps, inclusive", () => {
   expect(ticks).toHaveLength(13)
   expect(ticks[0]).toBe(now - WINDOW_MS)
   expect(ticks.at(-1)).toBe(now)
+})
+
+describe("ranges", () => {
+  test("six hours unless the URL names another offered range", () => {
+    expect([parseRange(null), parseRange("12h"), parseRange("")].map((range) => range.key)).toEqual(["6h", "6h", "6h"])
+    expect(RANGES.map((range) => parseRange(range.key).hours)).toEqual([6, 24, 72, 168])
+  })
+
+  test("the default range is the window the status payload carries", () => {
+    expect(rangeMs(parseRange(null))).toBe(WINDOW_MS)
+  })
+
+  test("every range draws a readable number of ticks", () => {
+    for (const range of RANGES) {
+      const ticks = axisTicks(now, rangeMs(range), range.tickMs)
+      // Clock labels fit thirteen across; the wider day-and-hour labels get fewer.
+      expect(ticks.length).toBe(range.dayTicks ? (range.key === "3d" ? 7 : 8) : 13)
+      expect(ticks.at(-1)).toBe(now)
+    }
+  })
+
+  test("a run from yesterday is inside a longer window and outside the default", () => {
+    const yesterday = "2026-09-23T20:00:00"
+    expect(markerPosition(yesterday, now)).toBeNull()
+    expect(markerPosition(yesterday, now, rangeMs(parseRange("24h")))).toBeCloseTo((2 / 24) * 100)
+  })
+})
+
+describe("clusterRuns", () => {
+  const minute = (m: number, overrides: Partial<CronRun> = {}) =>
+    run({ id: `m${m}`, triggered_at: `2026-09-24T17:${String(m).padStart(2, "0")}:00`, ...overrides })
+
+  test("a lone run keeps its own moment", () => {
+    const [only] = clusterRuns([run()], now)
+    expect(only.runs).toHaveLength(1)
+    expect(only.position).toBe(50)
+  })
+
+  test("runs sharing a column become one mark at the column's centre, oldest first", () => {
+    // 96 columns over 6 hours are 3.75 minutes each: 17:00, 17:01 and 17:02 share one.
+    const clusters = clusterRuns([minute(2), minute(0), minute(1)], now)
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0].runs.map((r) => r.id)).toEqual(["m0", "m1", "m2"])
+    expect(clusters[0].position).toBeCloseTo(((clusters[0].slot + 0.5) / 96) * 100)
+  })
+
+  test("a group is drawn in its worst tone, so one failure among many still shows", () => {
+    expect(clusterRuns([minute(0), minute(1, { result: "failure" }), minute(2)], now)[0].tone).toBe("failure")
+    expect(clusterRuns([minute(0), minute(1, { attempts: 3 })], now)[0].tone).toBe("retried")
+    expect(worstTone([minute(0), minute(1)])).toBe("success")
+  })
+
+  test("marks come left to right, and runs outside the window are dropped", () => {
+    const clusters = clusterRuns([minute(30), run({ id: "old", triggered_at: "2026-09-24T11:00:00" }), minute(0)], now)
+    expect(clusters.map((c) => c.runs[0].id)).toEqual(["m0", "m30"])
+  })
+
+  test("the run at this very moment falls in the last column, not past it", () => {
+    const [last] = clusterRuns([run({ triggered_at: "2026-09-24T18:00:00" })], now)
+    expect(last.slot).toBe(95)
+  })
+
+  test("a week of minute-by-minute polls is at most one mark per column", () => {
+    const week = rangeMs(parseRange("7d"))
+    const polls = Array.from({ length: 2000 }, (_, i) =>
+      run({ id: `p${i}`, triggered_at: new Date(now - i * 60_000).toISOString().slice(0, 19) }),
+    )
+    const clusters = clusterRuns(polls, now, week)
+    expect(clusters.length).toBeLessThanOrEqual(96)
+    expect(clusters.reduce((count, c) => count + c.runs.length, 0)).toBe(2000)
+  })
 })
