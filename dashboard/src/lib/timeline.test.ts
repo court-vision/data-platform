@@ -240,6 +240,27 @@ describe("counted columns", () => {
     }
   })
 
+  test("an edge column is drawn as the part of it inside the window, beside its neighbour and not over it", () => {
+    // Columns are cut from the epoch, the window from now: here now is thirty
+    // minutes into its column. Moved inside the lane whole, the newest column
+    // covered most of the one before it, and a failure there with it.
+    const newest = column(naive(now))
+    const [before, last] = clusterBuckets(
+      { buckets: [bucket(naive(newest - bucketMs), { failed: 1 }), bucket(naive(newest))], bucketMs }, [], now, week,
+    )
+    expect(before.width).toBeCloseTo(100 / 96)
+    expect(last.width).toBeCloseTo(((now - newest) / week) * 100)
+    expect(before.position + before.width / 2).toBeCloseTo(last.position - last.width / 2)
+    expect(last.position + last.width / 2).toBeCloseTo(100)
+
+    const oldest = column(naive(now - week))
+    const [first, second] = clusterBuckets(
+      { buckets: [bucket(naive(oldest)), bucket(naive(oldest + bucketMs))], bucketMs }, [], now, week,
+    )
+    expect(first.position - first.width / 2).toBeCloseTo(0)
+    expect(first.position + first.width / 2).toBeCloseTo(second.position - second.width / 2)
+  })
+
   test("a wider range's columns are drawn as wide as they are in a narrower window", () => {
     // The 7d reply kept on screen while 3d loads: each column still spans 105 minutes.
     const threeDays = rangeMs(parseRange("3d"))

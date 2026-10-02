@@ -92,7 +92,7 @@ export function buildLanes(runs: CronRun[], now: number, windowMs = WINDOW_MS, c
   }
   if (counted) {
     for (const bucket of counted.buckets) {
-      if (columnPosition(bucket, now, windowMs, counted.bucketMs) === null) continue
+      if (columnSpan(bucket, now, windowMs, counted.bucketMs) === null) continue
       const lane = laneFor(bucket.job_name)
       lane.counted?.buckets.push(bucket)
       lane.count += bucket.runs
@@ -145,7 +145,7 @@ export interface Cluster {
   slot: number
   /** Percent along the window: a lone run's own moment, a group's column centre. */
   position: number
-  /** Percent of the window a group's mark spans: its column. */
+  /** Percent of the window a group's mark spans: its column, or the part of it inside the window. */
   width: number
   /**
    * Oldest first. Every run of the group, or of a counted column the ones
@@ -199,14 +199,23 @@ export function clusterRuns(runs: CronRun[], now: number, windowMs = WINDOW_MS, 
     })
 }
 
-/** Percent along the window of a counted column's centre, held inside the lane; null when the column is outside it. */
-function columnPosition(bucket: RunBucket, now: number, windowMs: number, bucketMs: number): number | null {
+/**
+ * The part of a counted column that is inside the window, in percent along it:
+ * its centre and its width. Null when the column is outside the window.
+ *
+ * Columns are cut from the epoch and the window from now, so the first and the
+ * last column reach past the lane. Each is drawn as the part inside it: moved
+ * in whole instead, the newest column would sit on top of the one before it
+ * and hide that one's failures.
+ */
+function columnSpan(bucket: RunBucket, now: number, windowMs: number, bucketMs: number): { position: number; width: number } | null {
   const from = parseUtc(bucket.start)?.getTime()
   if (from == null) return null
   const start = now - windowMs
   if (from + bucketMs <= start || from > now) return null
-  const half = (bucketMs / windowMs) * 50
-  return Math.min(100 - half, Math.max(half, ((from + bucketMs / 2 - start) / windowMs) * 100))
+  const left = Math.max(from, start)
+  const right = Math.min(from + bucketMs, now)
+  return { position: ((left + right) / 2 - start) / windowMs * 100, width: ((right - left) / windowMs) * 100 }
 }
 
 /**
@@ -230,17 +239,17 @@ export function clusterBuckets(counted: Counted, runs: CronRun[], now: number, w
   const clusters: Cluster[] = []
   for (const bucket of buckets) {
     const from = parseUtc(bucket.start)?.getTime()
-    const centre = columnPosition(bucket, now, windowMs, bucketMs)
-    if (from == null || centre === null) continue
+    const span = columnSpan(bucket, now, windowMs, bucketMs)
+    if (from == null || span === null) continue
     const slot = Math.round(from / bucketMs)
     const mine = (inHand.get(slot) ?? []).sort((a, b) => a.at - b.at).map((member) => member.run)
     const alone = bucket.runs === 1 && mine.length === 1
-    const position = alone ? markerPosition(mine[0].triggered_at, now, windowMs) : centre
+    const position = alone ? markerPosition(mine[0].triggered_at, now, windowMs) : span.position
     if (position === null) continue
     clusters.push({
       slot,
       position,
-      width: (bucketMs / windowMs) * 100,
+      width: span.width,
       runs: mine,
       tone: bucket.failed > 0 ? "failure" : bucket.retried > 0 ? "retried" : "success",
       count: bucket.runs,
