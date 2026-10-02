@@ -48,7 +48,7 @@ describe("SchedulerTimeline", () => {
     expect(long).toMatch(/aria-pressed="true"[^>]*>3d</)
     expect(long).toContain("last 3 days")
     expect(long).toContain("post-game success at Sep 23, 3:00:00 PM")
-    expect(long).toMatch(/>(Mon|Tue|Wed|Thu) \d+ [AP]M</) // day-and-hour ticks
+    expect(long).toContain(">Thu 1 PM<") // day-and-hour ticks, ending at now
   })
 
   test("without a handler there is nothing to press", () => {
