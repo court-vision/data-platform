@@ -15,6 +15,7 @@ const DEFINITION: QualityCheckInfo = {
   severity: "critical",
   group: "structural",
   table: "nba.player_game_stats",
+  against: [],
   pipelines: ["player_game_stats"],
   failure_message: "player_game_stats contains out-of-range values",
   sql: "SELECT COUNT(*)\nFROM nba.player_game_stats\nWHERE pts < 0",
@@ -111,6 +112,49 @@ describe("QualityRun", () => {
     const html = render(loaded(detail([FAILED, BROKEN])))
     expect(row(html, "stale_running")).toContain("relation &quot;nba.pipeline_runs&quot; does not exist")
     expect(row(html, "ranges_valid")).not.toContain("&quot;failures&quot;")
+  })
+
+  test("a failed consistency check shows the rows it kept, and what it compares", () => {
+    const lagging = outcome({
+      check_name: "season_keeps_pace",
+      status: "failed",
+      severity: "warning",
+      failures: 24,
+      message: "season games played and the game log have moved apart this week",
+      details: {
+        failures: 24,
+        sample: [
+          { player: "Devin Booker", season_row: "2026-04-08", season_gp: 63, games_logged: 64, gap: -1 },
+          { player: "New Guy", season_row: null, season_gp: 0, games_logged: 1, gap: -1 },
+        ],
+      },
+      definition: {
+        ...DEFINITION,
+        name: "season_keeps_pace",
+        severity: "warning",
+        group: "consistency",
+        table: "nba.player_season_stats",
+        against: ["nba.player_game_stats"],
+        pipelines: ["player_season_stats", "player_game_stats"],
+      },
+    })
+    const html = row(render(loaded(detail([lagging]))), "season_keeps_pace")
+    expect(html).toContain("The first 2 of 24 offending rows")
+    expect(html).toMatch(/<th[^>]*>player<\/th><th[^>]*>season_row<\/th>/)
+    expect(html).toMatch(/<td[^>]*>Devin Booker<\/td><td[^>]*>2026-04-08<\/td><td[^>]*>63<\/td><td[^>]*>64<\/td><td[^>]*>-1<\/td>/)
+    expect(html).toMatch(/<td[^>]*>New Guy<\/td><td[^>]*>—<\/td>/) // a null cell is a visible blank
+    // The sample is a table, not a JSON blob beside it.
+    expect(html).not.toContain("&quot;player&quot;")
+    expect(html).toContain("against nba.player_game_stats")
+    expect(html).toContain('href="/pipelines/player_season_stats"')
+    expect(html).toContain('href="/pipelines/player_game_stats"')
+  })
+
+  test("a sample that is the whole failure says so", () => {
+    const one = outcome({ status: "failed", failures: 1, details: { failures: 1, sample: [{ team: "GSW", score: 44 }] } })
+    expect(row(render(loaded(detail([one]))), "ranges_valid")).toContain("The offending row")
+    const two = outcome({ status: "failed", failures: 2, details: { failures: 2, sample: [{ team: "GSW" }, { team: "LAL" }] } })
+    expect(row(render(loaded(detail([two]))), "ranges_valid")).toContain("All 2 offending rows")
   })
 
   test("a check removed from the code since keeps its result and says so", () => {

@@ -444,16 +444,24 @@ def quality_check_info(
     check: SQLQualityCheck, writers: Optional[dict[str, list[str]]] = None
 ) -> QualityCheckInfo:
     """A check's definition as the page shows it. A timing check watches one
-    pipeline; a structural check guards a table, so its pipelines are that
-    table's writers."""
+    pipeline; any other check judges tables, so its pipelines are the writers
+    of the table it guards and of the tables it compares that one against."""
     writers = table_writers() if writers is None else writers
-    pipelines = [check.pipeline] if check.pipeline else writers.get(check.table, [])
+    if check.pipeline:
+        pipelines = [check.pipeline]
+    else:
+        pipelines = list(dict.fromkeys(
+            name
+            for table in (check.table, *check.against)
+            for name in writers.get(table, [])
+        ))
     return QualityCheckInfo(
         name=check.name,
         severity=check.severity,
         group=check.group,
         table=check.table,
-        pipelines=list(pipelines),
+        against=list(check.against),
+        pipelines=pipelines,
         failure_message=check.failure_message,
         sql=textwrap.dedent(check.sql).strip(),
     )

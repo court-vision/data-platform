@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/hooks/useNow"
 import { useQualityRun } from "@/hooks/useQuality"
 import { ApiError } from "@/lib/api"
-import { countOutcomes, extraDetails, type QualityOutcome, type QualityRunDetail } from "@/lib/quality"
+import { countOutcomes, extraDetails, sampleCell, sampleRows, type QualityOutcome, type QualityRunDetail, type Sample } from "@/lib/quality"
 import { formatCentralLong, formatDuration, relativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
@@ -164,6 +164,7 @@ function Outcomes({ outcomes }: { outcomes: QualityOutcome[] }) {
 function Outcome({ outcome }: { outcome: QualityOutcome }) {
   const failing = outcome.status !== "passed"
   const extra = extraDetails(outcome)
+  const sample = sampleRows(outcome)
   return (
     <li className="border-b border-border/50 last:border-0" data-check={outcome.check_name} data-status={outcome.status}>
       <details open={failing} className="group">
@@ -180,6 +181,7 @@ function Outcome({ outcome }: { outcome: QualityOutcome }) {
         </summary>
         <div className="flex flex-col gap-3 px-6 pb-4 pl-10">
           {outcome.message && <p className="text-sm text-status-loss">{outcome.message}</p>}
+          {sample && <OffendingRows sample={sample} failures={outcome.failures} />}
           {extra && (
             <dl className="rounded bg-muted/60 p-3 font-mono text-[11px] text-muted-foreground">
               {Object.entries(extra).map(([key, value]) => (
@@ -201,5 +203,37 @@ function Outcome({ outcome }: { outcome: QualityOutcome }) {
         </div>
       </details>
     </li>
+  )
+}
+
+/** The rows a failed check kept: which player, which night, not just how many. */
+function OffendingRows({ sample, failures }: { sample: Sample; failures: number }) {
+  const shown = sample.rows.length
+  return (
+    <figure className="flex flex-col gap-1">
+      <figcaption className="text-xs text-muted-foreground">
+        {shown < failures ? `The first ${shown} of ${failures.toLocaleString()} offending rows` : shown === 1 ? "The offending row" : `All ${shown} offending rows`}
+      </figcaption>
+      <div className="overflow-x-auto rounded border border-border/60">
+        <table className="w-full text-left font-mono text-[11px]">
+          <thead className="bg-muted/60 text-muted-foreground">
+            <tr>
+              {sample.columns.map((column) => (
+                <th key={column} scope="col" className="whitespace-nowrap px-2.5 py-1.5 font-normal">{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sample.rows.map((row, i) => (
+              <tr key={i} className="border-t border-border/50">
+                {sample.columns.map((column) => (
+                  <td key={column} className="whitespace-nowrap px-2.5 py-1.5 tabular-nums">{sampleCell(row[column])}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </figure>
   )
 }

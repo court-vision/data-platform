@@ -220,10 +220,13 @@ class QualityCheckInfo(ApiModel):
 
     name: str
     severity: str                # critical | warning
-    group: str                   # structural | timing
-    table: str                   # the table it reads, "schema.table"
-    # Timing checks: the pipeline whose runs they watch. Structural checks: the
-    # registered pipelines that write `table` (none for a framework table).
+    group: str                   # structural | consistency | timing
+    table: str                   # the table it guards, "schema.table"
+    # Consistency checks: the tables `table` is held to account against.
+    against: list[str]
+    # Timing checks: the pipeline whose runs they watch. Otherwise the
+    # registered pipelines that write `table` or a table in `against` (none
+    # for a framework table): the pipelines whose output the check judges.
     pipelines: list[str]
     failure_message: str         # what a failure means
     sql: str                     # the assertion: it counts the offending rows

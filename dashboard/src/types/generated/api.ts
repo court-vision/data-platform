@@ -2008,6 +2008,8 @@ export interface components {
          * @description A quality check as it is defined in code: what it asserts and what it guards.
          */
         QualityCheckInfo: {
+            /** Against */
+            against: string[];
             /** Failure Message */
             failure_message: string;
             /** Group */
@@ -2054,6 +2056,8 @@ export interface components {
          * @description A check with its result in each run of the window.
          */
         QualityCheckRow: {
+            /** Against */
+            against: string[];
             /** Failure Message */
             failure_message: string;
             /** Group */

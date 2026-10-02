@@ -4,8 +4,13 @@ Data Quality Service
 Runs SQL-based data quality checks and stores run/check history.
 
 Check groups:
-  STRUCTURAL_CHECKS  — schema integrity, referential consistency, field validity
-  TIMING_CHECKS      — per-pipeline execution recency (generated from registry)
+  STRUCTURAL_CHECKS   — schema integrity, referential consistency, field validity
+  CONSISTENCY_CHECKS  — one table held to account against another, on the nights
+                        already due (services/consistency_checks.py)
+  TIMING_CHECKS       — per-pipeline execution recency (generated from registry)
+
+A failed check that knows how (`sample_sql`) keeps its first few offending rows
+in `details`, beside the count.
 
 Alerting (`quality_critical`): once a run is recorded, every critical check that
 failed (or could not execute) posts one critical alert to the ops webhook,
@@ -17,30 +22,18 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from db.base import db
 from db.models.data_quality_check import DataQualityCheck
 from db.models.data_quality_run import DataQualityRun
 from services.alert_service import AlertEvent, get_alert_service
+from services.consistency_checks import CONSISTENCY_CHECKS
+from services.quality_check import SQLQualityCheck
 
 QUALITY_ALERT_DEDUPE = timedelta(hours=24)
-
-
-@dataclass(frozen=True)
-class SQLQualityCheck:
-    name: str
-    severity: str
-    sql: str
-    failure_message: str
-    # What the dashboard's quality pages say about a check beyond its result:
-    # the table it guards ("schema.table"), which group it belongs to, and for
-    # a timing check the pipeline whose runs it watches.
-    table: str = ""
-    group: str = "structural"  # structural | timing
-    pipeline: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +238,20 @@ TIMING_CHECKS: tuple[SQLQualityCheck, ...] = _build_timing_checks()
 # Combined check set — used by default when no check_names filter is applied
 # ---------------------------------------------------------------------------
 
-CORE_SQL_CHECKS: tuple[SQLQualityCheck, ...] = STRUCTURAL_CHECKS + TIMING_CHECKS
+CORE_SQL_CHECKS: tuple[SQLQualityCheck, ...] = (
+    STRUCTURAL_CHECKS + CONSISTENCY_CHECKS + TIMING_CHECKS
+)
+
+
+def _json_safe(value: Any) -> Any:
+    """A sampled cell as something `json.dumps` takes."""
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
 
 
 class DataQualityService:
@@ -258,7 +264,7 @@ class DataQualityService:
         return sorted(self._checks.keys())
 
     def checks(self) -> tuple[SQLQualityCheck, ...]:
-        """Every check as defined, in catalogue order: structural, then timing."""
+        """Every check as defined, in catalogue order: structural, consistency, timing."""
         return CORE_SQL_CHECKS
 
     def run_checks(
@@ -291,7 +297,7 @@ class DataQualityService:
                     if failures > 0:
                         check_status = "failed"
                         message = check.failure_message
-                        details = {"failures": failures}
+                        details = {"failures": failures, **self._sample(check)}
                 except Exception as exc:
                     check_status = "error"
                     failures = 1
@@ -338,6 +344,26 @@ class DataQualityService:
 
         self._alert_critical(run, critical_failures)
         return run
+
+    @staticmethod
+    def _sample(check: SQLQualityCheck) -> dict[str, Any]:
+        """The first offending rows of a failed check, for its `details`.
+
+        Never changes the verdict: the count already failed the check, so a
+        sample that cannot be fetched is recorded as such and nothing more.
+        """
+        if not check.sample_sql:
+            return {}
+        try:
+            cursor = db.execute_sql(check.sample_sql)
+            columns = [column[0] for column in cursor.description]
+            rows = [
+                {name: _json_safe(value) for name, value in zip(columns, row)}
+                for row in cursor.fetchall()
+            ]
+            return {"sample": rows}
+        except Exception as exc:
+            return {"sample_error": str(exc)}
 
     @staticmethod
     def _alert_critical(run: DataQualityRun, critical_failures: list[dict[str, Any]]) -> None:

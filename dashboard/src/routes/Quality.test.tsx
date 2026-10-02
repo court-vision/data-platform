@@ -32,6 +32,7 @@ function check(name: string, results: Array<string | null>, overrides: Partial<Q
     severity: "critical",
     group: "structural",
     table: "nba.player_game_stats",
+    against: [],
     pipelines: ["player_game_stats"],
     failure_message: "player_game_stats contains out-of-range values",
     sql: "SELECT COUNT(*)\nFROM nba.player_game_stats\nWHERE pts < 0",
