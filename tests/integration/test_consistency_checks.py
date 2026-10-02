@@ -225,6 +225,20 @@ class TestSeasonTotalsAgainstTheGameLog:
         PlayerGameStats.delete().where(PlayerGameStats.game_date == NIGHT).execute()
         assert GAMES not in failing(eve) and TOTALS not in failing(eve)
 
+    def test_the_cup_final_does_not_bring_back_a_gap_that_has_aged_out(self, world):
+        PlayerSeasonStats.delete().where(
+            PlayerSeasonStats.player_id == CURRY, PlayerSeasonStats.as_of_date == NIGHT
+        ).execute()
+        later = NIGHT + timedelta(days=8)
+        assert GAMES not in failing(later)
+        # His only game row in the window: not a game the season totals moved for.
+        Game.create(
+            game_id=CUP_FINAL, game_date=later, season=SEASON,
+            home_team_id="GSW", away_team_id="LAL", status="final", home_score=30, away_score=28,
+        )
+        _played(CURRY, "GSW", pts=30, night=later, game_id=CUP_FINAL)
+        assert GAMES not in failing(later) and TOTALS not in failing(later)
+
     def test_a_season_row_written_a_game_short_is_not_a_failure_a_week_later(self, integration_db):
         # A back-to-back whose games both arrive late. A season row is written
         # when the games played move: the 14th's row exists because the 13th's
