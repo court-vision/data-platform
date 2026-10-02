@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { STATUS_REFETCH_MS, useDashboardStatus, type PipelineHealth } from "@/hooks/useDashboardStatus"
 import { useNow } from "@/hooks/useNow"
-import { useSchedulerRuns } from "@/hooks/useSchedulerRuns"
+import { schedulerWindow, useSchedulerRuns } from "@/hooks/useSchedulerRuns"
 import { groupByCategory, summarize } from "@/lib/pipelines"
 import { DEFAULT_RANGE, parseRange } from "@/lib/timeline"
 import { cn } from "@/lib/utils"
@@ -64,18 +64,10 @@ export function Overview() {
             <PipelineSection key={group.label} group={group} now={now} />
           ))}
           <SchedulerTimeline
-            runs={defaultRange ? data.cron_job_runs : (longer.data?.runs ?? [])}
             now={now}
             range={range}
             onRangeChange={(next) => setParams(next.key === DEFAULT_RANGE.key ? {} : { scheduler: next.key }, { replace: true })}
-            loading={!defaultRange && !longer.data && !longer.error}
-            truncated={!defaultRange && (longer.data?.truncated ?? false)}
-            counted={
-              !defaultRange && longer.data?.buckets && longer.data.bucket_seconds
-                ? { buckets: longer.data.buckets, bucketMs: longer.data.bucket_seconds * 1000 }
-                : null
-            }
-            error={!defaultRange && longer.error ? longer.error.message : null}
+            {...(defaultRange ? { runs: data.cron_job_runs } : schedulerWindow(range, longer))}
           />
           <QualityPanel
             quality_latest={data.quality_latest}
