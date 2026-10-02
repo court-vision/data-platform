@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { ClusterDetail, clusterSummary, SchedulerTimeline } from "@/components/SchedulerTimeline"
-import { clusterBuckets, clusterRuns, parseRange, rangeMs, type CronRun, type RunBucket } from "@/lib/timeline"
+import { clusterBuckets, clusterRuns, parseRange, rangeMs, RANGES, type CronRun, type RunBucket } from "@/lib/timeline"
 
 const now = Date.parse("2026-09-24T18:00:00Z")
 
@@ -63,6 +63,59 @@ describe("SchedulerTimeline", () => {
     expect(cut).toContain("the oldest runs in this window are not shown")
     const failed = renderToStaticMarkup(<SchedulerTimeline runs={[]} now={now} range={parseRange("24h")} error="HTTP 500" />)
     expect(failed).toContain("Could not load this range: HTTP 500")
+  })
+
+  test("on a narrow screen every range keeps its right-end label, and drops every other one before it", () => {
+    for (const range of RANGES) {
+      const html = renderToStaticMarkup(<SchedulerTimeline runs={[]} now={now} range={range} />)
+      // No DOM here, so this reads the classes: a label that waits for lg is "hidden lg:inline".
+      const labels = [...html.matchAll(/<span class="(absolute whitespace-nowrap[^"]*)" style="left:([\d.]+)%"/g)]
+      const waits = labels.map(([, classes]) => classes.split(" ").includes("hidden"))
+      expect(labels.at(-1)?.[2]).toBe("100")
+      // 7d has eight labels: counted from the left, the one at "now" was hidden.
+      expect(waits.slice(-3)).toEqual([false, true, false])
+    }
+  })
+})
+
+describe("a group's popover", () => {
+  const BODY = '{"status": "skipped", "message": "No games scheduled"}'
+
+  test("opens onto its newest run as a lone dot would: duration, HTTP status and response body", () => {
+    // At 6h every 30-second poll shares a column, so no live-stats run is a dot of its own.
+    const polls = [0, 1, 2].map((m) =>
+      run({ id: `m${m}`, triggered_at: `2026-09-24T17:0${m}:00`, duration_seconds: 0.2 + m / 10, response_snippet: m === 2 ? BODY : "older" }),
+    )
+    const [mark] = clusterRuns(polls, now)
+    const html = renderToStaticMarkup(<ClusterDetail job="live-stats" cluster={mark} />)
+    const latest = html.slice(html.indexOf("Latest run"))
+    expect(latest).toContain("Sep 24, 12:02:00 PM CT")
+    expect(latest).toContain(">400ms<")
+    expect(latest).toMatch(/HTTP<\/dt><dd[^>]*>200</)
+    expect(latest).toContain("No games scheduled")
+    expect(html).not.toContain("older")
+  })
+
+  test("says how long each troubled run took and what status came back", () => {
+    const [mark] = clusterRuns(
+      [POLLS[0], run({ id: "bad", triggered_at: "2026-09-24T17:01:00", result: "failure", http_status: 503, duration_seconds: 31 }), POLLS[2]],
+      now,
+    )
+    const html = renderToStaticMarkup(<ClusterDetail job="live-stats" cluster={mark} />)
+    expect(html).toContain("· 31.0s · HTTP 503")
+  })
+
+  test("of a counted column opens onto the newest run the column came with", () => {
+    const bucketMs = rangeMs(parseRange("7d")) / 96
+    const at = "2026-09-22T03:59:30"
+    const column: RunBucket = {
+      job_name: "live-stats", start: new Date(Math.floor(Date.parse(`${at}Z`) / bucketMs) * bucketMs).toISOString().slice(0, 19),
+      runs: 210, failed: 0, retried: 0, first_triggered_at: "2026-09-22T02:15:00", last_triggered_at: at,
+    }
+    const [mark] = clusterBuckets({ buckets: [column], bucketMs }, [run({ id: "latest", triggered_at: at, duration_seconds: 0.4 })], now, rangeMs(parseRange("7d")))
+    const html = renderToStaticMarkup(<ClusterDetail job="live-stats" cluster={mark} />)
+    expect(html.slice(html.indexOf("Latest run"))).toContain("Sep 21, 10:59:30 PM CT")
+    expect(html).toContain(">400ms<")
   })
 })
 

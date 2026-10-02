@@ -102,7 +102,8 @@ export function SchedulerTimeline({ runs, now, range = DEFAULT_RANGE, onRangeCha
                     "absolute whitespace-nowrap",
                     // The end labels sit inside the lane; centred, a day-and-hour label runs past its edge.
                     index === 0 ? "translate-x-0" : index === ticks.length - 1 ? "-translate-x-full" : "-translate-x-1/2",
-                    index % 2 === 1 && "hidden lg:inline",
+                    // Every other label gives way on a narrow screen, counted from the right: "now" always stays.
+                    (ticks.length - 1 - index) % 2 === 1 && "hidden lg:inline",
                   )}
                   style={{ left: `${(index / (ticks.length - 1)) * 100}%` }}
                 >
@@ -219,10 +220,15 @@ function ClusterMarker({ job, cluster }: { job: string; cluster: Cluster }) {
   )
 }
 
-/** What a group's popover says: what it holds, and the troubled runs it came with. */
+/**
+ * What a group's popover says: what it holds, its newest run as a lone dot
+ * would show it (a poll that did nothing says why in its response body), and
+ * the troubled runs it came with.
+ */
 export function ClusterDetail({ job, cluster }: { job: string; cluster: Cluster }) {
   const listed = cluster.runs.filter((run) => runTone(run) !== "success").slice(0, LISTED)
   const unlisted = cluster.failed + cluster.retried - listed.length
+  const latest = cluster.runs.at(-1)
 
   return (
     <>
@@ -232,12 +238,30 @@ export function ClusterDetail({ job, cluster }: { job: string; cluster: Cluster 
         <Row label="From" value={formatCentralLong(cluster.from)} />
         <Row label="To" value={formatCentralLong(cluster.to)} />
       </dl>
+      {latest && (
+        <div className="mt-2 border-t border-border/60 pt-2">
+          <dl className="grid grid-cols-[6rem_1fr] gap-y-1">
+            <Row label="Latest run" value={formatCentralLong(latest.triggered_at)} />
+            <Row label="Result" value={resultWords(latest)} className={TONE_TEXT[runTone(latest)]} />
+            <Row label="Duration" value={formatDuration(latest.duration_seconds)} />
+            <Row label="HTTP" value={latest.http_status?.toString() ?? "—"} />
+          </dl>
+          {latest.response_snippet && (
+            <pre className="mt-2 max-h-32 overflow-auto rounded bg-muted/60 p-2 font-mono text-[10px] leading-snug text-muted-foreground">
+              {latest.response_snippet}
+            </pre>
+          )}
+        </div>
+      )}
       {(listed.length > 0 || unlisted > 0) && (
         <ul className="mt-2 flex flex-col gap-1 border-t border-border/60 pt-2">
           {listed.map((run) => (
             <li key={run.id} className="font-mono text-[11px]">
               <span className="text-muted-foreground">{formatCentralLong(run.triggered_at)}</span>{" "}
-              <span className={TONE_TEXT[runTone(run)]}>{resultWords(run)}</span>
+              <span className={TONE_TEXT[runTone(run)]}>{resultWords(run)}</span>{" "}
+              <span className="text-muted-foreground">
+                · {formatDuration(run.duration_seconds)} · HTTP {run.http_status ?? "—"}
+              </span>
               {run.error_message && <span className="block break-words text-status-loss">{run.error_message}</span>}
             </li>
           ))}
