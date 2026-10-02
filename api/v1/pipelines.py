@@ -729,6 +729,9 @@ async def trigger_post_game(
 
     Per-pipeline dedup enables partial batch retries — if one pipeline fails, the
     next cron invocation will retry only the failed pipeline, not the whole batch.
+    A pipeline skipped for an unmet dependency has no successful run either, so
+    it is retried on the same terms, and a dependency counts as met only by a
+    success since the window opened.
 
     Once the window has **closed**, one last poll sweeps the night: any pipeline
     with no successful run for the date is recorded and alerted
@@ -944,6 +947,9 @@ async def trigger_post_game(
             pipeline_names=pipelines_to_run,
             nba_date=target_date,
             batch_id=batch,
+            # The same cutoff the dedup above uses for "tonight". None when
+            # forced, which keeps the date-based rule for backfills.
+            dependencies_since=window_open_utc,
         )
     )
 
@@ -1433,12 +1439,23 @@ def _check_unmet_dependencies(
     pipeline_cls,
     succeeded_in_batch: set[str],
     date_override: Optional[date] = None,
+    since: Optional[datetime] = None,
 ) -> list[str]:
     """
     Check if a pipeline's depends_on requirements are met.
 
     A dependency is met if it either succeeded earlier in this batch OR has a
-    successful PipelineRun for today's NBA date.
+    successful PipelineRun since `since` (UTC naive). Without `since` the
+    cutoff is midnight UTC of the NBA date.
+
+    The post-game batch has to pass `since`. Its runs start after midnight UTC
+    (the evening in the US), so last night's runs sit on the right side of
+    tonight's midnight cutoff: on any day after a game day, every dependency
+    was "met" by the previous night's success. That is how season totals came
+    to be written ahead of the night's game log on 38 nights of 2025-26, and
+    why their own readiness check had no game rows to check against. The
+    pre-game batch wants exactly the loose reading (last night's post-game
+    runs are its dependencies) and passes nothing.
 
     Returns:
         List of unmet dependency names (empty if all met).
@@ -1455,7 +1472,7 @@ def _check_unmet_dependencies(
     for dep_name in deps:
         if dep_name in succeeded_in_batch:
             continue
-        if not PRModel.was_successful_on_date(dep_name, target_date):
+        if not PRModel.was_successful_on_date(dep_name, target_date, after=since):
             unmet.append(dep_name)
 
     return unmet
@@ -1467,6 +1484,7 @@ async def _run_pipelines_background(
     pipeline_names: Optional[list[str]] = None,
     nba_date: Optional[date] = None,
     batch_id=None,
+    dependencies_since: Optional[datetime] = None,
 ) -> None:
     """
     Run pipelines in the background and update job status.
@@ -1476,6 +1494,9 @@ async def _run_pipelines_background(
     nba_date: the batch's game date, shared by every pipeline in it.
     batch_id: `nba.pipeline_batches` row to fold the outcomes back into, so the
         durable record says what happened rather than only what was intended.
+    dependencies_since: a dependency that is not in this batch counts as met
+        only if it succeeded at or after this moment (UTC naive). See
+        `_check_unmet_dependencies`.
     """
     job_manager = get_job_manager()
     outcomes: dict[str, dict] = {}
@@ -1503,7 +1524,7 @@ async def _run_pipelines_background(
             # Dependency enforcement: skip if depends_on pipelines haven't succeeded.
             pipeline_cls = PIPELINE_REGISTRY[name]
             unmet_deps = _check_unmet_dependencies(
-                pipeline_cls, succeeded_in_batch, date_override
+                pipeline_cls, succeeded_in_batch, date_override, dependencies_since
             )
 
             if unmet_deps:
