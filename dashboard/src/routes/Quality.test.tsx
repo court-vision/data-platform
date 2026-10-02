@@ -115,6 +115,33 @@ describe("Quality", () => {
     expect(warning).toContain("text-status-projected")
   })
 
+  test("a streak that fills a full window is at least that long, and says so", () => {
+    const runs = Array.from({ length: 20 }, (_, i) => run(`r${i}`, { status: "failed", passed_checks: 0, failed_checks: 2 }))
+    const full: QualityOverview = {
+      ...DATA,
+      runs,
+      checks: [
+        check("ranges_valid", runs.map(() => "failed")),
+        check("minutes_valid", ["failed", "failed", ...runs.slice(2).map(() => "passed")]),
+      ],
+    }
+    const html = render(full)
+    expect(matrixRow(html, "ranges_valid")).toContain("critical · 20+ runs")
+    // A pass ends a streak where it is, however full the window.
+    expect(matrixRow(html, "minutes_valid")).toContain("critical · 2 runs")
+    // Fewer runs than were asked for is the whole history, so that count is exact.
+    expect(matrixRow(render({ ...full, limit: 50 }, "?limit=50"), "ranges_valid")).toContain("critical · 20 runs")
+  })
+
+  test("on a narrow screen a name wraps in full with its streak beneath, not cut short to fit beside it", () => {
+    const row = matrixRow(render(DATA), "ranges_valid")
+    // No DOM here, so this reads the classes: stacked and wrapping until md, one truncated line from there.
+    const label = row.match(/<span class="([^"]*)"><span class="([^"]*)" title="ranges_valid"/)
+    expect(label?.[1].split(" ")).toEqual(expect.arrayContaining(["flex-col", "md:flex-row"]))
+    expect(label?.[2].split(" ")).toEqual(expect.arrayContaining(["break-all", "md:truncate"]))
+    expect(label?.[2].split(" ")).not.toContain("truncate")
+  })
+
   test("the tiles read the newest run, split by severity", () => {
     const html = render(DATA)
     expect(html).toContain(">0/2<") // passing

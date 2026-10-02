@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "react"
 import { Link } from "react-router"
 
-import { failingStreak, groupChecks, resultLabel, type CheckResult, type QualityCheckRow, type QualityRun } from "@/lib/quality"
+import { failedThroughout, failingStreak, groupChecks, resultLabel, type CheckResult, type QualityCheckRow, type QualityRun } from "@/lib/quality"
 import { formatCentral } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
@@ -12,9 +12,12 @@ import { cn } from "@/lib/utils"
  * cell carries its meaning as text, and the runs table below is the same data
  * for a keyboard or a screen reader, so the cells are not tab stops.
  */
-export function QualityMatrix({ checks, runs }: { checks: QualityCheckRow[]; runs: QualityRun[] }) {
+export function QualityMatrix({ checks, runs, limit }: { checks: QualityCheckRow[]; runs: QualityRun[]; limit: number }) {
   // The API sends runs (and each check's results) newest first.
   const columns = runs.map((run, index) => ({ run, index })).reverse()
+  // As many runs as were asked for: there are likely older ones this page does
+  // not have, so a streak that fills the window is a floor ("20+ runs").
+  const windowFull = runs.length >= limit
   // Wide enough for the longest check name beside its streak, and it stays put
   // while the runs scroll under it — so on a narrow screen it is capped at
   // under half the viewport, or it would cover every cell.
@@ -40,10 +43,13 @@ export function QualityMatrix({ checks, runs }: { checks: QualityCheckRow[]; run
             <ul className="flex flex-col gap-[2px]">
               {group.checks.map((check) => {
                 const streak = failingStreak(check.results)
+                const orMore = windowFull && failedThroughout(check.results)
                 return (
                   <li key={check.name} className="grid items-center gap-x-[2px]" style={template}>
-                    <span className="sticky left-0 z-10 flex min-w-0 items-baseline gap-2 bg-card pr-3">
-                      <span className="truncate font-mono text-xs" title={check.name}>
+                    {/* Under md the column is too narrow for both on one line: the name wraps
+                        in full and the streak sits beneath it, so neither is cut to fit the other. */}
+                    <span className="sticky left-0 z-10 flex min-w-0 flex-col bg-card pr-3 md:flex-row md:items-baseline md:gap-2">
+                      <span className="break-all font-mono text-xs md:truncate" title={check.name}>
                         {check.name}
                       </span>
                       {streak > 0 && (
@@ -52,8 +58,10 @@ export function QualityMatrix({ checks, runs }: { checks: QualityCheckRow[]; run
                             "shrink-0 font-mono text-[10px]",
                             check.severity === "critical" ? "text-status-loss" : "text-status-projected",
                           )}
+                          title={orMore ? "Not passed in any run shown; older runs are not on this page" : undefined}
                         >
-                          {check.severity === "critical" ? "critical" : "warning"} · {streak} {streak === 1 ? "run" : "runs"}
+                          {check.severity === "critical" ? "critical" : "warning"} · {streak}
+                          {orMore ? "+ runs" : streak === 1 ? " run" : " runs"}
                         </span>
                       )}
                     </span>

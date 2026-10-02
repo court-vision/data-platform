@@ -82,7 +82,7 @@ export function Quality() {
                 </p>
               ) : (
                 <>
-                  <QualityMatrix checks={data.checks} runs={data.runs} />
+                  <QualityMatrix checks={data.checks} runs={data.runs} limit={data.limit} />
                   <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                     <p className="font-mono text-xs text-muted-foreground">
                       {formatCentral(data.runs[data.runs.length - 1].started_at)} → {formatCentral(data.runs[0].started_at)}

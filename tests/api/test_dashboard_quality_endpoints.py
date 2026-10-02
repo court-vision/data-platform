@@ -5,6 +5,7 @@ against real rows in tests/integration/test_quality_dashboard_queries.py.
 """
 
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -100,6 +101,23 @@ def test_a_run_id_that_is_not_an_id_is_a_404_without_asking_the_database(monkeyp
     res = TestClient(_make_app()).get(f"/v1/dashboard/quality/runs/{run_id}", headers=_AUTH)
     assert res.status_code == 404
     assert res.headers["content-type"].startswith("application/json")
+
+
+@pytest.mark.api
+@pytest.mark.parametrize("run_id", [
+    "0x111111111111111111111111111111",    # a hex literal
+    "+1111111111111111111111111111111",    # a sign
+    "1_111111111111111111111111111111",    # a digit separator
+    "%0A1111111111111111111111111111111",  # whitespace in front
+    "1111111111111111111111111111111%20",  # whitespace behind
+])
+def test_an_id_only_python_reads_as_a_uuid_is_asked_for_in_its_canonical_form(monkeypatch, run_id) -> None:
+    # uuid.UUID reads these 32 characters as a number; Postgres would refuse to cast them.
+    asked = []
+    monkeypatch.setattr(dashboard, "_build_quality_run", lambda run_id: asked.append(run_id))
+    res = TestClient(_make_app()).get(f"/v1/dashboard/quality/runs/{run_id}", headers=_AUTH)
+    assert res.status_code == 404
+    assert len(asked) == 1 and re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", asked[0])
 
 
 @pytest.mark.api

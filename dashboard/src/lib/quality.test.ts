@@ -4,6 +4,7 @@ import {
   checksForPipeline,
   countOutcomes,
   extraDetails,
+  failedThroughout,
   failingStreak,
   groupChecks,
   latestResult,
@@ -55,6 +56,28 @@ describe("failingStreak", () => {
   test("a run that left the check out neither counts nor breaks the streak", () => {
     expect(failingStreak([null, "failed", null, "failed", "passed"])).toBe(2)
     expect(failingStreak([null, null])).toBe(0)
+  })
+})
+
+describe("failedThroughout", () => {
+  test("a streak that reaches the oldest result has no pass to end it", () => {
+    expect(failedThroughout(["failed", "error", "failed"])).toBe(true)
+    expect(failedThroughout(["failed"])).toBe(true)
+  })
+
+  test("runs that left the check out do not end it either", () => {
+    expect(failedThroughout([null, "failed", null, "failed", null])).toBe(true)
+  })
+
+  test("a pass anywhere in the window ends the streak there, or means there is none", () => {
+    expect(failedThroughout(["failed", "failed", "passed"])).toBe(false)
+    expect(failedThroughout(["failed", "passed", "failed"])).toBe(false)
+    expect(failedThroughout(["passed", "failed"])).toBe(false)
+  })
+
+  test("a check with no results is not failing", () => {
+    expect(failedThroughout([null, null])).toBe(false)
+    expect(failedThroughout([])).toBe(false)
   })
 })
 
