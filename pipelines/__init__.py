@@ -44,8 +44,8 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "player_season_stats": PlayerSeasonStatsPipeline,
     "player_rolling_stats": PlayerRollingStatsPipeline,
     "player_advanced_stats": PlayerAdvancedStatsPipeline,
-    "team_stats": TeamStatsPipeline,
     "game_schedule": GameSchedulePipeline,
+    "team_stats": TeamStatsPipeline,
     "daily_matchup_scores": DailyMatchupScoresPipeline,
     # PRE_GAME — run before games start (timed relative to first tip-off)
     "espn_injury_status": ESPNInjuryStatusPipeline,

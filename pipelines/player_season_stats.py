@@ -5,6 +5,7 @@ Updates cumulative season stats for players who played, then refreshes the
 materialized rankings copy the public API reads.
 """
 
+from datetime import date
 from typing import Optional
 
 from peewee import fn
@@ -18,6 +19,7 @@ from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
 from pipelines.rankings_view import refresh_rankings
+from pipelines.readiness import regular_season_game_rows
 from pipelines.transformers import normalize_name, calculate_fantasy_points
 
 
@@ -73,25 +75,12 @@ class PlayerSeasonStatsPipeline(BasePipeline):
             )
             return None
 
-    def execute(self, ctx: PipelineContext) -> None:
-        """Execute the cumulative player stats pipeline."""
-        game_date = ctx.game_date()
+    def _latest_gp(self, season: str) -> dict[int, int]:
+        """Each player's games played on his newest season row this season.
 
-        season = season_for_date(game_date)
-
-        ctx.log.info("fetching_data", date=str(game_date), season=season)
-
-        # Roster percentages are enrichment; season totals come from the NBA API
-        # below. None when ESPN could not be reached -- see _roster_percentages.
-        espn_data = self._roster_percentages(ctx)
-
-        # Fetch NBA league leaders
-        api_data = self.nba_extractor.get_league_leaders(season)
-        ctx.log.info("nba_data_fetched", player_count=len(api_data))
-
-        # Latest GP per player *this season* — without the season filter the
-        # first runs after rollover would compare against last season's totals
-        # and never detect new games.
+        Without the season filter the first runs after rollover would compare
+        against last season's totals and never detect new games.
+        """
         subquery = (
             PlayerSeasonStats.select(
                 PlayerSeasonStats.player_id,
@@ -112,7 +101,65 @@ class PlayerSeasonStatsPipeline(BasePipeline):
             )
             .where(PlayerSeasonStats.season == season)
         )
-        db_gp_map = {record.player_id: record.gp for record in latest_records}
+        return {record.player_id: record.gp for record in latest_records}
+
+    def _played_on(self, game_date: date) -> set[int]:
+        """Players with a regular-season game row that night."""
+        rows = PlayerGameStats.select(PlayerGameStats.player_id).where(
+            (PlayerGameStats.game_date == game_date) & regular_season_game_rows()
+        )
+        return {row.player_id for row in rows}
+
+    def _written_for(self, game_date: date, season: str) -> set[int]:
+        """Players who already have a season row dated that night."""
+        rows = PlayerSeasonStats.select(PlayerSeasonStats.player_id).where(
+            (PlayerSeasonStats.as_of_date == game_date)
+            & (PlayerSeasonStats.season == season)
+        )
+        return {row.player_id for row in rows}
+
+    def _players_behind(
+        self, game_date: date, season: str, incremented: set[int]
+    ) -> tuple[set[int], set[int]]:
+        """Who played that night, and which of them the API has not caught up on.
+
+        The league leaders feed is a season dashboard and trails the game log:
+        PlayerGameLogs can hold every game of the night while this feed is still
+        missing the late ones, and the early games' increments made the run look
+        like it had found the night's work. So the night's game log is the
+        yardstick. Every player in it must show a new game played, either in
+        this response (`incremented`) or on a season row an earlier run already
+        wrote for the night.
+
+        A new game, not the right number of them: after a night that never
+        completed, a player on a back-to-back carries last night's increment
+        and passes on it. Counting games since his last season row would close
+        that, but a backfill writes today's totals under an old date, and from
+        then on the count would never add up.
+        """
+        played = self._played_on(game_date)
+        behind = played - incremented
+        if behind:
+            behind -= self._written_for(game_date, season)
+        return played, behind
+
+    def execute(self, ctx: PipelineContext) -> None:
+        """Execute the cumulative player stats pipeline."""
+        game_date = ctx.game_date()
+
+        season = season_for_date(game_date)
+
+        ctx.log.info("fetching_data", date=str(game_date), season=season)
+
+        # Roster percentages are enrichment; season totals come from the NBA API
+        # below. None when ESPN could not be reached -- see _roster_percentages.
+        espn_data = self._roster_percentages(ctx)
+
+        # Fetch NBA league leaders
+        api_data = self.nba_extractor.get_league_leaders(season)
+        ctx.log.info("nba_data_fetched", player_count=len(api_data))
+
+        db_gp_map = self._latest_gp(season)
 
         # Find players who played (GP changed) and prepare entries
         entries = {}
@@ -167,20 +214,22 @@ class PlayerSeasonStatsPipeline(BasePipeline):
                     **player_stats,
                 }
 
-        # Data readiness check: if player_game_stats already wrote records for
-        # game_date but we found zero GP increments, the NBA league leaders API
-        # hasn't processed tonight's games yet — raise so the pipeline retries.
-        if not entries and not ctx.date_override:
-            played_count = (
-                PlayerGameStats.select()
-                .where(PlayerGameStats.game_date == game_date)
-                .count()
-            )
-            if played_count > 0:
+        # Data readiness check, against the night's game log. Not on a backfill:
+        # the API has no as-of date, so its totals say nothing about that night.
+        if not ctx.date_override:
+            played, behind = self._players_behind(game_date, season, set(entries))
+            if behind:
+                ctx.log.warning(
+                    "season_stats_behind_game_log",
+                    date=str(game_date),
+                    played_count=len(played),
+                    behind_count=len(behind),
+                    behind_player_ids=sorted(behind)[:10],
+                )
                 raise RuntimeError(
                     f"NBA API season stats not yet updated for {game_date}: "
-                    f"0 GP increments detected but {played_count} player-game "
-                    "records already exist in the DB. Data not ready yet — will retry."
+                    f"{len(behind)} of {len(played)} players with a game that night "
+                    "show no new game played. Data not ready yet — will retry."
                 )
 
         if entries:
