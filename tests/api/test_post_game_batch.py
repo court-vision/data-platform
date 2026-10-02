@@ -384,6 +384,86 @@ class TestDependenciesMeanTonight:
 
         assert dispatched[0]["dependencies_since"] is None
 
+    def test_a_forced_run_on_a_day_without_games_keeps_the_date_cutoff(
+        self, client, batches, alerts, monkeypatch
+    ):
+        """No games, no window to count "tonight" from."""
+        dispatched = []
+
+        def fake_background(job_id, **kwargs):
+            dispatched.append(kwargs)
+            return asyncio.sleep(0)
+
+        monkeypatch.setattr(
+            Game, "get_latest_game_time_on_date", classmethod(lambda cls, d: None)
+        )
+        monkeypatch.setattr(pipelines_api, "_run_pipelines_background", fake_background)
+
+        with freeze_time(IN_WINDOW):
+            client.post(PATH, headers=_headers(), params={"force": "true"})
+
+        assert dispatched[0]["dependencies_since"] is None
+
+    def test_a_forced_rerun_of_tonights_batch_still_holds_the_dependents(
+        self, client, batches, alerts, monkeypatch
+    ):
+        """`?force=true` skips the gates, not the dependency rule.
+
+        The night an operator reaches for it is a night things are being held.
+        On the date cutoff, a game log that failed in the forced batch left
+        season, rolling and team stats running on last night's success, and
+        that run then deduped them for the rest of the night.
+        """
+        from schemas.pipeline import PipelineResult
+
+        run_batch = pipelines_api._run_pipelines_background
+        dispatched = []
+
+        def fake_background(job_id, **kwargs):
+            dispatched.append(kwargs)
+            return asyncio.sleep(0)
+
+        _only_last_night_succeeded(monkeypatch)
+        monkeypatch.setattr(pipelines_api, "_run_pipelines_background", fake_background)
+
+        with freeze_time(IN_WINDOW):
+            client.post(PATH, headers=_headers(), params={"force": "true"})
+
+        assert len(dispatched) == 1
+        assert dispatched[0]["dependencies_since"] == WINDOW_OPEN_UTC
+        # Tonight's batch, not a backfill: the pipelines keep their own checks.
+        assert dispatched[0]["date_override"] is None
+
+        # The batch as the endpoint dispatched it, with the game log not ready.
+        ran: list[str] = []
+
+        async def fake_run_pipeline(name, date_override=None, nba_date=None):
+            ran.append(name)
+            failed = name == "player_game_stats"
+            return PipelineResult(
+                status="error" if failed else "success",
+                message=name,
+                started_at="2026-03-05T06:00:00",
+                error="Data not ready yet — will retry." if failed else None,
+            )
+
+        monkeypatch.setattr(pipelines_api, "run_pipeline", fake_run_pipeline)
+
+        async def forced_batch() -> dict:
+            manager = pipelines_api.get_job_manager()
+            job = await manager.create_job(len(dispatched[0]["pipeline_names"]))
+            await run_batch(job.job_id, **(dispatched[0] | {"batch_id": None}))
+            job = await manager.get_job(job.job_id)
+            return {name: result.status for name, result in job.results.items()}
+
+        with freeze_time(IN_WINDOW):
+            statuses = asyncio.run(forced_batch())
+
+        assert statuses["player_game_stats"] == "error"
+        for name in ("player_season_stats", "player_rolling_stats", "team_stats"):
+            assert statuses[name] == "skipped"
+            assert name not in ran
+
     def test_dependents_wait_for_the_game_log_and_run_once_it_lands(self, monkeypatch):
         """Two polls of one night, through the real batch runner.
 

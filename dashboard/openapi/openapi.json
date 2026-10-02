@@ -3679,7 +3679,7 @@
     },
     "/v1/internal/pipelines/cumulative-player-stats": {
       "post": {
-        "description": "Trigger the cumulative player stats pipeline.\n\nUpdates season totals and rankings for players who played on the given date.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "description": "Trigger the cumulative player stats pipeline.\n\nUpdates season totals and rankings for players who played on the given date.\nRuns on its own, outside the post-game batch: it does not wait for the\nnight's game log, and a success here after the post-game window opens\ncounts as the night's run, so the batch will not run it again.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
         "operationId": "trigger_cumulative_player_stats_v1_internal_pipelines_cumulative_player_stats_post",
         "parameters": [
           {
@@ -4531,7 +4531,7 @@
     },
     "/v1/internal/pipelines/player-rolling-stats": {
       "post": {
-        "description": "Trigger the player rolling stats pipeline.\n\nMaterializes L7, L14, and L30 rolling per-game averages from\nplayer_game_stats into nba.player_rolling_stats.\nDepends on player_game_stats having fresh data for the target date.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "description": "Trigger the player rolling stats pipeline.\n\nMaterializes L7, L14, and L30 rolling per-game averages from\nplayer_game_stats into nba.player_rolling_stats.\nDepends on player_game_stats having fresh data for the target date.\nRuns on its own, outside the post-game batch: it does not wait for the\nnight's game log, and a success here after the post-game window opens\ncounts as the night's run, so the batch will not run it again.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
         "operationId": "trigger_player_rolling_stats_v1_internal_pipelines_player_rolling_stats_post",
         "parameters": [
           {
@@ -4616,7 +4616,7 @@
     },
     "/v1/internal/pipelines/post-game": {
       "post": {
-        "description": "Post-game pipeline trigger with per-pipeline self-gating.\n\nCalled every 15 minutes by the cron-runner. Applies two batch-level gates\n(time window and data readiness) then per-pipeline dedup:\n1. Time window: only attempt within [estimated_last_game_end, estimated_last_game_end + window]\n2. Data readiness: all games on the NBA date are Final (live scoreboard check)\n3. Per-pipeline dedup: skip if the pipeline already ran successfully today\n4. Per-pipeline concurrency: skip if the pipeline is already running\n\nPer-pipeline dedup enables partial batch retries \u2014 if one pipeline fails, the\nnext cron invocation will retry only the failed pipeline, not the whole batch.\nA pipeline skipped for an unmet dependency has no successful run either, so\nit is retried on the same terms, and a dependency counts as met only by a\nsuccess since the window opened.\n\nOnce the window has **closed**, one last poll sweeps the night: any pipeline\nwith no successful run for the date is recorded and alerted\n(`post_game_incomplete`). That is the check that turns a silent skip into a\nmessage \u2014 a night where every poll decided \"nothing to do\" otherwise leaves\nno trace outside the logs.\n\nPass ?force=true to skip all gates (useful for manual re-triggers or backfills).\nPass ?date=YYYY-MM-DD to backfill a specific date (implies force=true).",
+        "description": "Post-game pipeline trigger with per-pipeline self-gating.\n\nCalled every 15 minutes by the cron-runner. Applies two batch-level gates\n(time window and data readiness) then per-pipeline dedup:\n1. Time window: only attempt within [estimated_last_game_end, estimated_last_game_end + window]\n2. Data readiness: all games on the NBA date are Final (live scoreboard check)\n3. Per-pipeline dedup: skip if the pipeline already ran successfully today\n4. Per-pipeline concurrency: skip if the pipeline is already running\n\nPer-pipeline dedup enables partial batch retries \u2014 if one pipeline fails, the\nnext cron invocation will retry only the failed pipeline, not the whole batch.\nA pipeline skipped for an unmet dependency has no successful run either, so\nit is retried on the same terms, and a dependency counts as met only by a\nsuccess since the window opened.\n\nOnce the window has **closed**, one last poll sweeps the night: any pipeline\nwith no successful run for the date is recorded and alerted\n(`post_game_incomplete`). That is the check that turns a silent skip into a\nmessage \u2014 a night where every poll decided \"nothing to do\" otherwise leaves\nno trace outside the logs.\n\nPass ?force=true to skip all gates (useful for manual re-triggers or backfills).\nThe dependency rule is not a gate: a forced run of tonight's batch still\nskips a pipeline whose dependency has not succeeded since the window opened.\nPass ?date=YYYY-MM-DD to backfill a specific date (implies force=true).",
         "operationId": "trigger_post_game_v1_internal_pipelines_post_game_post",
         "parameters": [
           {
@@ -4886,7 +4886,7 @@
     },
     "/v1/internal/pipelines/team-stats": {
       "post": {
-        "description": "Trigger the team stats pipeline.\n\nFetches season-to-date stats for all 30 NBA teams from NBA API\n(base counting stats + advanced efficiency metrics) and upserts\nto nba.team_stats.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
+        "description": "Trigger the team stats pipeline.\n\nFetches season-to-date stats for all 30 NBA teams from NBA API\n(base counting stats + advanced efficiency metrics) and upserts\nto nba.team_stats.\nRuns on its own, outside the post-game batch: it does not wait for the\nnight's game log, and a success here after the post-game window opens\ncounts as the night's run, so the batch will not run it again.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
         "operationId": "trigger_team_stats_v1_internal_pipelines_team_stats_post",
         "parameters": [
           {

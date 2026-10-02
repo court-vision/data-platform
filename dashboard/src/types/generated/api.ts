@@ -339,6 +339,9 @@ export interface paths {
          * @description Trigger the cumulative player stats pipeline.
          *
          *     Updates season totals and rankings for players who played on the given date.
+         *     Runs on its own, outside the post-game batch: it does not wait for the
+         *     night's game log, and a success here after the post-game window opens
+         *     counts as the night's run, so the batch will not run it again.
          *     Pass ?date=YYYY-MM-DD to backfill a specific date.
          */
         post: operations["trigger_cumulative_player_stats_v1_internal_pipelines_cumulative_player_stats_post"];
@@ -724,6 +727,9 @@ export interface paths {
          *     Materializes L7, L14, and L30 rolling per-game averages from
          *     player_game_stats into nba.player_rolling_stats.
          *     Depends on player_game_stats having fresh data for the target date.
+         *     Runs on its own, outside the post-game batch: it does not wait for the
+         *     night's game log, and a success here after the post-game window opens
+         *     counts as the night's run, so the batch will not run it again.
          *     Pass ?date=YYYY-MM-DD to backfill a specific date.
          */
         post: operations["trigger_player_rolling_stats_v1_internal_pipelines_player_rolling_stats_post"];
@@ -790,6 +796,8 @@ export interface paths {
          *     no trace outside the logs.
          *
          *     Pass ?force=true to skip all gates (useful for manual re-triggers or backfills).
+         *     The dependency rule is not a gate: a forced run of tonight's batch still
+         *     skips a pipeline whose dependency has not succeeded since the window opened.
          *     Pass ?date=YYYY-MM-DD to backfill a specific date (implies force=true).
          */
         post: operations["trigger_post_game_v1_internal_pipelines_post_game_post"];
@@ -905,6 +913,9 @@ export interface paths {
          *     Fetches season-to-date stats for all 30 NBA teams from NBA API
          *     (base counting stats + advanced efficiency metrics) and upserts
          *     to nba.team_stats.
+         *     Runs on its own, outside the post-game batch: it does not wait for the
+         *     night's game log, and a success here after the post-game window opens
+         *     counts as the night's run, so the batch will not run it again.
          *     Pass ?date=YYYY-MM-DD to backfill a specific date.
          */
         post: operations["trigger_team_stats_v1_internal_pipelines_team_stats_post"];
