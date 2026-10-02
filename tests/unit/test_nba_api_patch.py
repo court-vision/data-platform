@@ -155,6 +155,33 @@ def test_cdn_host_is_left_alone(stats):
     assert not data.valid_json()
 
 
+class TestTheReaskLog:
+    """A bad answer that came good on a re-ask would otherwise leave no trace."""
+
+    def test_each_reask_is_logged_with_what_was_wrong(self, stats):
+        stats.answers = [(500, ""), (200, "<html>blocked</html>"), (200, OK_BODY)]
+        with capture_logs() as logs:
+            _send("leaguedashplayerstats")
+        reasks = [entry for entry in logs if entry["event"] == "stats_reask"]
+        assert [(e["attempt"], e["status_code"], e["wait"]) for e in reasks] == [(1, 500, 1.0), (2, 200, 2.0)]
+        assert all(e["log_level"] == "warning" and e["endpoint"] == "leaguedashplayerstats" for e in reasks)
+        assert "HTTP 500 with an empty body" in reasks[0]["error"]
+        assert "non-JSON body" in reasks[1]["error"]
+
+    def test_a_good_answer_logs_nothing(self, stats):
+        stats.answers = [(200, OK_BODY)]
+        with capture_logs() as logs:
+            _send()
+        assert logs == []
+
+    def test_the_request_that_gives_up_is_not_logged_as_a_reask(self, stats):
+        """with_retry logs the error that is raised; a re-ask line would promise a request that is not made."""
+        stats.answers = [(500, "")]
+        with capture_logs() as logs, pytest.raises(ServerError):
+            _send()
+        assert [entry["attempt"] for entry in logs] == [1, 2, 3]
+
+
 class TestTheBudget:
     """One call's re-asks share STATS_BUDGET seconds, requests and pauses together."""
 

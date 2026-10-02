@@ -28,7 +28,8 @@ live extractor reads an empty box score body as "no data yet".
 The re-asks share one budget (``STATS_BUDGET``, requests and pauses together)
 rather than a fresh timeout each, so answers that are slow as well as bad are
 not multiplied by four: a call takes no longer than its first request or the
-budget, whichever is longer.
+budget, whichever is longer. Each re-ask is logged (``stats_reask``), so a
+night of flaky answers that all came good is still visible.
 
 This module must be imported early in application startup (see main.py) so the
 patch is applied before any nba_api call is made.
@@ -40,6 +41,7 @@ from urllib.parse import urlsplit
 from curl_cffi import requests
 from nba_api.library.http import NBAHTTP
 
+from core.logging import get_logger
 from core.resilience import NetworkError, ServerError
 from core.settings import settings
 from utils.nba_cdn import nba_cdn_headers
@@ -146,6 +148,14 @@ def browser_impersonation_request(
         left = STATS_BUDGET - (time.monotonic() - started) - delay
         if attempt == attempts or left < STATS_MIN_TIMEOUT:
             raise failure
+        get_logger("nba_api").warning(
+            "stats_reask",
+            endpoint=endpoint,
+            status_code=response.status_code,
+            attempt=attempt,
+            wait=delay,
+            error=str(failure),
+        )
         time.sleep(delay)
         request_timeout = min(timeout or 30, left)
 
