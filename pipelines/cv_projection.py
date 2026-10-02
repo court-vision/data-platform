@@ -8,8 +8,9 @@ services.projection_inputs (history, ESPN's line, the live adjustments, the
 current roster); this pipeline only runs the one over the other and writes
 the result.
 
-Runs daily after preseason-market (it wants the day's ESPN line), and on
-demand when an adjustment is saved. Same Aug 15 - Oct 31 window as
+Runs daily as the last link of the preseason-market trigger's chain, after
+player-profiles and preseason-market (it wants the day's rosters and ESPN
+line), and on demand when an adjustment is saved. Same Aug 15 - Oct 31 window as
 preseason-market: in-season projections are a different problem. Publishes
 the day's rows atomically, like preseason-market, so a reader resolving "the
 latest snapshot" never sees half of one.
@@ -41,7 +42,7 @@ class CVProjectionPipeline(BasePipeline):
         target_table="nba.player_projections",
         category=PipelineCategory.SCHEDULED,
         trigger_slug="cv-projection",
-        cron_job="preseason-market",    # chained after preseason-market and player-profiles
+        cron_job="preseason-market",    # last link of the chain: player-profiles, preseason-market, then this
         timeout_seconds=300,
     )
 
