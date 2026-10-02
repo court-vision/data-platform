@@ -145,9 +145,9 @@ describe("PipelineDetail", () => {
       }
     }
 
-    function withQuality(checks: QualityCheckRow[]): QueryClient {
+    function withQuality(checks: QualityCheckRow[], runIds = ["new", "old"]): QueryClient {
       const client = loaded(payload([run()]))
-      const runs = ["new", "old"].map((run_id) => ({
+      const runs = runIds.map((run_id) => ({
         run_id, status: "failed", started_at: "2026-03-05T08:00:00", completed_at: null, duration_seconds: 1,
         total_checks: 2, passed_checks: 1, failed_checks: 1, triggered_by: "schedule", error_message: null,
       }))
@@ -166,13 +166,27 @@ describe("PipelineDetail", () => {
       expect(html).toContain("1 of 2 failing")
       const failing = html.split("<li").find((item) => item.includes('data-check="alerts_match_schedule"'))!
       expect(failing).toContain("usr.notifications against nba.games")
-      expect(failing).toContain("2 runs")
+      // Two runs are the whole history here, fewer than were asked for: the count is exact.
+      expect(failing).toContain(">2 runs<")
       expect(failing).toContain('href="/quality/runs/new"')
       // Left out of the newest run: its result is the older run's.
       const timing = html.split("<li").find((item) => item.includes('data-check="alerts_ran"'))!
       expect(timing).toContain('href="/quality/runs/old"')
       expect(timing).toContain("ran in the last 24 hours")
       expect(html).not.toContain("someone_elses")
+    })
+
+    test("a streak that fills the window it is counted over is at least that long, and says so", () => {
+      const window = Array.from({ length: 20 }, (_, i) => `r${i}`)
+      const html = render(withQuality([
+        check("alerts_match_schedule", window.map(() => "failed")),
+        check("alerts_ran", ["failed", "failed", ...window.slice(2).map(() => "passed")]),
+      ], window))
+      const row = (name: string) => html.split("<li").find((item) => item.includes(`data-check="${name}"`))!
+      // Older runs are not on the page: "20 runs" would read as the streak's length.
+      expect(row("alerts_match_schedule")).toContain(">20+ runs<")
+      // A pass ends a streak where it is, however full the window.
+      expect(row("alerts_ran")).toContain(">2 runs<")
     })
 
     test("is absent while quality has not answered, and for a pipeline no check looks at", () => {

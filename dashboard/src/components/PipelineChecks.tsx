@@ -4,7 +4,10 @@ import { StatusBadge } from "@/components/StateBadge"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useQualityOverview } from "@/hooks/useQuality"
-import { checksForPipeline, failingStreak, latestResult, resultLabel, type QualityCheckRow } from "@/lib/quality"
+import { checksForPipeline, failedThroughout, failingStreak, latestResult, resultLabel, type QualityCheckRow } from "@/lib/quality"
+
+/** How many of the newest quality runs a check's streak is counted over. */
+const WINDOW = 20
 
 /**
  * The quality checks that judge what one pipeline writes, with each one's
@@ -12,11 +15,14 @@ import { checksForPipeline, failingStreak, latestResult, resultLabel, type Quali
  * absent for a pipeline no check looks at: the runs are this page's subject.
  */
 export function PipelineChecks({ pipeline }: { pipeline: string }) {
-  const { data } = useQualityOverview(20)
+  const { data } = useQualityOverview(WINDOW)
   if (!data) return null
   const checks = checksForPipeline(data.checks, pipeline)
   if (checks.length === 0) return null
   const failing = checks.filter((check) => failingStreak(check.results) > 0).length
+  // As many runs as were asked for: there are likely older ones, so a streak
+  // that fills the window is a floor ("20+ runs"), as on the quality page.
+  const windowFull = data.runs.length >= WINDOW
 
   return (
     <Card>
@@ -35,7 +41,12 @@ export function PipelineChecks({ pipeline }: { pipeline: string }) {
       <CardContent className="px-0 pb-2">
         <ul>
           {checks.map((check) => (
-            <CheckRow key={check.name} check={check} runId={newestRunWith(check, data.runs.map((run) => run.run_id))} />
+            <CheckRow
+              key={check.name}
+              check={check}
+              runId={newestRunWith(check, data.runs.map((run) => run.run_id))}
+              orMore={windowFull && failedThroughout(check.results)}
+            />
           ))}
         </ul>
       </CardContent>
@@ -49,7 +60,7 @@ function newestRunWith(check: QualityCheckRow, runIds: string[]): string | null 
   return index >= 0 ? (runIds[index] ?? null) : null
 }
 
-function CheckRow({ check, runId }: { check: QualityCheckRow; runId: string | null }) {
+function CheckRow({ check, runId, orMore }: { check: QualityCheckRow; runId: string | null; orMore: boolean }) {
   const result = latestResult(check.results)
   const streak = failingStreak(check.results)
   return (
@@ -63,7 +74,14 @@ function CheckRow({ check, runId }: { check: QualityCheckRow; runId: string | nu
       </div>
       <Badge variant="neutral">{check.group}</Badge>
       <Badge variant={check.severity === "critical" ? "outline" : "neutral"}>{check.severity}</Badge>
-      {streak > 1 && <span className="font-mono text-xs text-status-loss">{streak} runs</span>}
+      {streak > 1 && (
+        <span
+          className="font-mono text-xs text-status-loss"
+          title={orMore ? "Not passed in any run looked at; older runs are not counted here" : undefined}
+        >
+          {`${streak}${orMore ? "+" : ""} runs`}
+        </span>
+      )}
       {runId ? (
         <Link to={`/quality/runs/${runId}`} aria-label={`${check.name}: ${resultLabel(result)}. Open that run`}>
           <StatusBadge status={result} label={resultLabel(result)} />
