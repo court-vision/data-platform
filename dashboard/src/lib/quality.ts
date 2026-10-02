@@ -41,6 +41,15 @@ export function failingStreak(results: readonly CheckResult[]): number {
   return streak
 }
 
+/**
+ * Whether that streak reaches the oldest of `results` without meeting a pass.
+ * When those are a full window, the streak is at least what it shows and
+ * maybe longer: the runs before the window are not on the page.
+ */
+export function failedThroughout(results: readonly CheckResult[]): boolean {
+  return failingStreak(results) > 0 && !results.includes("passed")
+}
+
 /** The newest result a check actually has, skipping runs that left it out. */
 export function latestResult(results: readonly CheckResult[]): CheckResult {
   return results.find((result) => result !== null) ?? null
