@@ -26,9 +26,11 @@ rule the pipelines date their rows by, `cv_core.nba_calendar`). Two kinds:
 `build_consistency_checks(through=...)` pins the window to a date instead,
 which is how the checks are replayed over nights already played.
 
-Regular season only where it matters: the game log, the season totals and the
-team records are regular-season data, so the live table and the schedule are
-filtered to regular-season game ids (the `002` prefix) when compared to them.
+Regular season only where it matters: the season totals and the team records
+count regular-season games, so the live table and the schedule are filtered to
+regular-season game ids (the `002` prefix) when compared to them. The game log
+is fetched as regular season but also carries the Cup final (`006`), which no
+season total counts: it is left out when the log is held against the totals.
 
 No `%` anywhere in the SQL: the service runs it through psycopg2 with an empty
 parameter list, which would read one as a placeholder.
@@ -91,15 +93,30 @@ def _season_gaps() -> str:
     log. `_gap` is where the two stand at the end of the window. `_gap_before`
     is where they stood at the player's last season row before the window,
     measured on that row's own date: a season row is written when the games
-    played move, so that is a moment the two had just been brought together.
-    (Measured on the window's first morning instead, any player whose late game
-    was still missing that morning would carry the lag in as his baseline.)
+    played move, so that is usually a moment the two had just been brought
+    together. (Measured on the window's first morning instead, any player whose
+    late game was still missing that morning would carry the lag in as his
+    baseline.)
+
+    Usually, not always. On a back-to-back where both games arrive late, the
+    second night's row is written because the first night's game moved the
+    count, and still lacks its own night's game: a baseline one game short. A
+    week later the totals have caught up and the gap reads as new. The games
+    check therefore lets a gap of exactly zero be, whatever the baseline says.
+    What that gives up: a player with a standing surplus (a game the log never
+    got) whose season row then falls that many games behind reads as zero and
+    is missed.
 
     Comparing gaps rather than values is what lets old history be: a player
     whose totals have disagreed with his log since November (a stat correction,
     a game the log never got) carries the same gap all season, and only a gap
     that is new this week is a failure.
+
+    The game log is read as the season totals count it: without the Cup final.
+    A row with no game id is one the schedule did not have when it was written,
+    and counts.
     """
+    regular = f"(pgs.game_id IS NULL OR LEFT(pgs.game_id, 3) = {REGULAR_SEASON_PREFIX})"
     stats = ("gp", *COUNTING_STATS)
     columns = ", ".join(f"pss.{s}" for s in stats)
     before = "FILTER (WHERE pgs.game_date <= b.as_of_date)"
@@ -119,6 +136,7 @@ def _season_gaps() -> str:
         "active AS (",
         "    SELECT pgs.player_id FROM nba.player_game_stats pgs CROSS JOIN win",
         "    WHERE pgs.game_date BETWEEN win.since AND win.through",
+        f"      AND {regular}",
         "    UNION",
         "    SELECT pss.player_id FROM nba.player_season_stats pss CROSS JOIN win",
         "    WHERE pss.as_of_date BETWEEN win.since AND win.through",
@@ -147,6 +165,7 @@ def _season_gaps() -> str:
         "    JOIN active a ON a.player_id = pgs.player_id",
         "    LEFT JOIN season_before b ON b.player_id = pgs.player_id",
         "    WHERE pgs.game_date BETWEEN win.season_start AND win.through",
+        f"      AND {regular}",
         "    GROUP BY pgs.player_id",
         "),",
         "gaps AS (",
@@ -253,6 +272,7 @@ def build_consistency_checks(
                 FROM gaps g
                 JOIN nba.players p ON p.id = g.player_id
                 WHERE {new_games_gap}
+                  AND g.gp_gap <> 0
                 ORDER BY g.season_row DESC NULLS FIRST, g.player_id
             """,
             failure_message=(
@@ -413,12 +433,41 @@ def build_consistency_checks(
                 FROM nba.games g
                 CROSS JOIN win
                 WHERE g.game_date BETWEEN win.since AND win.through
+                  AND LEFT(g.game_id, 3) = {regular}
                   AND (g.status <> 'final' OR g.home_score IS NULL OR g.away_score IS NULL)
                 ORDER BY g.game_date DESC, g.game_id
             """,
             failure_message=(
-                "games on a night that is already due are not final with a score:"
-                " the schedule has not caught up, or a game was postponed"
+                "regular-season games on a night that is already due are not final"
+                " with a score: the schedule has not caught up, or a game was postponed"
+            ),
+        ),
+        # Apart from the check above, so a regular-season miss is not buried
+        # under this one: the nightly game_schedule pipeline fetches
+        # regular-season results only, and until it fetches the rest these rows
+        # wait for Monday's schedule-sync.
+        _check(
+            name="games_outside_regular_season_final_after_game_night",
+            table="nba.games",
+            against=(),
+            fragments=fragments,
+            rows="""
+                WITH {win}
+                SELECT g.game_id, g.game_date,
+                       g.away_team_id || ' @ ' || g.home_team_id AS game,
+                       g.status, g.away_score, g.home_score
+                FROM nba.games g
+                CROSS JOIN win
+                WHERE g.game_date BETWEEN win.since AND win.through
+                  AND LEFT(g.game_id, 3) <> {regular}
+                  AND (g.status <> 'final' OR g.home_score IS NULL OR g.away_score IS NULL)
+                ORDER BY g.game_date DESC, g.game_id
+            """,
+            failure_message=(
+                "play-in, playoff or Cup games on a night that is already due are"
+                " not final with a score: the nightly schedule pipeline fetches"
+                " regular-season results only, so the app shows them as scheduled"
+                " until the weekly schedule sync"
             ),
         ),
         _check(

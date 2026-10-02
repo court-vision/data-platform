@@ -376,6 +376,8 @@ Three groups of checks run together, one scalar query each (`0` rows offending p
 
 A failed consistency check keeps its first 5 offending rows in `details.sample`, so the run page can say which player and which night. Facts about one night (a score, a game link) stay failing until repaired or 7 days old; running totals (season stats, team records, rolling averages) are judged on their newest row, so last night's lag is red this morning and gone once the table catches up. To replay them over past nights, build them with a pinned window: `build_consistency_checks(through=date(2026, 4, 12))`.
 
+A game night's rows in `nba.games` that are not final are reported by two checks: `games_final_after_game_night` for the regular season and `games_outside_regular_season_final_after_game_night` for the play-in, the playoffs and the Cup final. The nightly `game_schedule` pipeline fetches regular-season results only, so the second is expected to be red through the postseason (those rows wait for Monday's `schedule-sync`) until that pipeline fetches the rest; kept apart, it does not bury a regular-season miss.
+
 ### Health
 
 | Method | Path | Description |

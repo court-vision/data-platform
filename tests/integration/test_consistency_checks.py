@@ -33,6 +33,7 @@ pytestmark = pytest.mark.integration
 NIGHT = date(2026, 3, 10)
 SEASON = "2025-26"
 GAME = "0022500900"
+CUP_FINAL = "0062500001"
 CURRY, JAMES, ROOKIE = 201939, 2544, 1649999
 
 LINE = dict(reb=5, ast=6, stl=2, blk=0, tov=3, fgm=10, fga=20, fg3m=5, fg3a=12, ftm=5, fta=6)
@@ -112,6 +113,7 @@ ROLLING_MATCH = "player_rolling_stats_match_game_log"
 LINK = "player_game_stats_game_link_agrees"
 SCORE = "games_score_matches_player_points"
 FINAL = "games_final_after_game_night"
+FINAL_OTHER = "games_outside_regular_season_final_after_game_night"
 TEAM = "team_stats_record_matches_schedule"
 LIVE = "live_players_have_game_log"
 
@@ -206,6 +208,48 @@ class TestSeasonTotalsAgainstTheGameLog:
         assert GAMES in failing(NIGHT + timedelta(days=6))
         assert GAMES not in failing(NIGHT + timedelta(days=8))
 
+    def test_the_cup_final_is_in_the_game_log_and_in_no_season_total(self, world):
+        # The night before: a game row every player in it gets, which the
+        # season totals never count. Rolling averages do average it.
+        eve = NIGHT - timedelta(days=1)
+        Game.create(
+            game_id=CUP_FINAL, game_date=eve, season=SEASON,
+            home_team_id="GSW", away_team_id="LAL", status="final", home_score=30, away_score=28,
+        )
+        _played(CURRY, "GSW", pts=30, night=eve, game_id=CUP_FINAL)
+        _played(JAMES, "LAL", pts=28, night=eve, game_id=CUP_FINAL)
+        PlayerRollingStats.update(gp=2).execute()
+
+        assert failing() == {}
+        # And on the morning after it, before either player's next game.
+        PlayerGameStats.delete().where(PlayerGameStats.game_date == NIGHT).execute()
+        assert GAMES not in failing(eve) and TOTALS not in failing(eve)
+
+    def test_a_season_row_written_a_game_short_is_not_a_failure_a_week_later(self, integration_db):
+        # A back-to-back whose games both arrive late. A season row is written
+        # when the games played move: the 14th's row exists because the 13th's
+        # game arrived, and lacks the 14th's own. The 15th's run catches up.
+        Player.create(id=CURRY, name="Stephen Curry", name_normalized="stephen curry")
+        played = [date(2026, 1, day) for day in (8, 10, 13, 14, 17, 19, 21)]
+        for night in played:
+            _played(CURRY, "GSW", pts=30, night=night, game_id=None)
+        written = {8: 1, 10: 2, 14: 3, 15: 4, 17: 5, 19: 6, 21: 7}  # day -> games in the row
+        for day, games in written.items():
+            PlayerSeasonStats.create(
+                player_id=CURRY, team_id="GSW", as_of_date=date(2026, 1, day), season=SEASON,
+                gp=games, pts=30 * games, fpts=0, min=0,
+                **{stat: games * value for stat, value in LINE.items()},
+            )
+
+        # The lag itself is reported on both mornings it is real.
+        for day in (13, 14):
+            row, = sample(GAMES, through=date(2026, 1, day))
+            assert (row["gap"], row["gap_before"]) == (-1, 0), day
+        # A week on, the 14th's row is the baseline: one game short, while the
+        # totals and the log now agree exactly.
+        a_week_on = failing(date(2026, 1, 21))
+        assert GAMES not in a_week_on and TOTALS not in a_week_on
+
 
 class TestRollingAveragesAgainstTheGameLog:
     def test_a_window_that_was_not_recomputed(self, world):
@@ -289,6 +333,15 @@ class TestTheGameLogAgainstTheSchedule:
         )
         assert failing() == {FINAL: 1}
         assert sample(FINAL)[0]["game"] == "NYK @ BOS"
+
+    def test_a_playoff_game_still_scheduled_is_reported_apart_from_the_regular_season(self, world):
+        # The nightly schedule pipeline fetches regular-season results only.
+        Game.create(
+            game_id="0042500101", game_date=NIGHT - timedelta(days=1), season=SEASON,
+            home_team_id="BOS", away_team_id="NYK", status="scheduled",
+        )
+        assert failing() == {FINAL_OTHER: 1}
+        assert sample(FINAL_OTHER)[0]["game"] == "NYK @ BOS"
 
     def test_a_game_later_than_the_window_may_still_be_scheduled(self, world):
         Game.create(
