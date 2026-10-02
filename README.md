@@ -180,7 +180,7 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
-| `BACKEND_INTERNAL_URL` | No | — | Backend base URL for the lineup-alerts pipeline's `POST /v1/internal/jobs/lineup/evaluate` and the projections editor's `POST /v1/internal/jobs/valuation/standard` (both authenticated with `PIPELINE_API_TOKEN`). Unset → the pipeline logs `backend_not_configured` and evaluates nothing, and the editor shows its lines without ranks. Must be `http://*.railway.internal` on Railway: prod `http://api.railway.internal:8080`, staging `http://api-staging.railway.internal:8080` |
+| `BACKEND_INTERNAL_URL` | No | — | Backend base URL for the lineup-alerts pipeline's `POST /v1/internal/jobs/lineup/evaluate` and the projections editor's `POST /v1/internal/jobs/valuation/standard` (both authenticated with `PIPELINE_API_TOKEN`). Unset → the pipeline logs `backend_not_configured` and evaluates nothing, and the editor shows its lines without ranks. Must be `http://*.railway.internal` on Railway: prod `http://backend.railway.internal:8080` (the Railway service is named `api`; its private domain is `backend`), staging `http://api-staging.railway.internal:8080` |
 | `BACKEND_TIMEOUT_SECONDS` | No | `45` | Read timeout per evaluate call (connect timeout is fixed at 5 s; no retry) |
 | `ALERT_WEBHOOK_URL` | No | — | Discord (or Slack) incoming webhook for ops alerts (`#cv-alerts`). Unset → alerts are a no-op; set on **production only**. See [Alerting](#alerting) |
 | `ALERT_WEBHOOK_FORMAT` | No | `discord` | `discord` (embeds) or `slack` (`{"text": ...}`) |
@@ -304,7 +304,7 @@ All `/v1/internal/*` endpoints require the `Authorization: Bearer <PIPELINE_API_
 | `POST` | `/v1/internal/pipelines/breakout-detection` | Individual: breakout candidate detection |
 | `POST` | `/v1/internal/pipelines/lineup-alerts` | Individual: email lineup alerts |
 | `POST` | `/v1/internal/pipelines/player-profiles` | Individual: player profile data |
-| `POST` | `/v1/internal/pipelines/preseason-market` | ESPN's draft ranks, ADP and projections for the coming season (Aug 15 – Oct 31). Chains `player-profiles` and `cv-projection` behind it. Fired daily by the cron-runner `preseason-market` job |
+| `POST` | `/v1/internal/pipelines/preseason-market` | ESPN's draft ranks, ADP and projections for the coming season (Aug 15 – Oct 31). The trigger runs a chain: `player-profiles` first (new players need their `nba.players` row before the snapshot can attach ESPN's line to them), then `preseason-market`, then `cv-projection`; each runs whatever the previous one did. Fired daily by the cron-runner `preseason-market` job |
 | `POST` | `/v1/internal/pipelines/cv-projection` | Court Vision's own projection (`nba.player_projections`, `source='cv'`): three seasons of history, ESPN's line, the curated adjustments. Same window as preseason-market; `?force=true` runs outside it. Also run by the projections editor after every save |
 | `POST` | `/v1/internal/pipelines/season-history` | One row per player per season in `nba.player_history`, what the projection is built from. Manual: repeat `?seasons=2012-13&seasons=2013-14…` to backfill; with none, the season just finished |
 
@@ -469,6 +469,7 @@ Rows are written when a **post-game** batch reaches its per-pipeline decisions, 
 
 - **Retries**: `@with_retry(max_attempts=3)` decorator using tenacity with exponential backoff on `RetryableError` subclasses (`RateLimitError`, `NetworkError`, `ServerError`)
 - **Circuit breakers**: `nba_api_circuit` and `espn_api_circuit` open after 5 consecutive failures, recover after 60s
+- **stats.nba.com 5xx / empty bodies**: `utils/patches.py` re-asks a stats.nba.com request up to 4 times (1 s, 2 s, 4 s apart, and within 20 s in all — a re-ask's timeout is what is left of that) when the answer is a 5xx, empty, or not JSON, then raises `ServerError` / `NetworkError` with the status code so `@with_retry` retries the call. The re-asks sit below `nba_api_circuit`: the circuit counts a call that stayed bad after them, not each flaky response. Each re-ask logs a `stats_reask` warning, so a night of flaky answers that all came good is still visible. 4xx is not retried; cdn.nba.com (live) responses are left alone
 - **HTTP client**: `ResilientHTTPClient` combines retry + circuit breaker with classified error types
 
 ### Extractors

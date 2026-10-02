@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # PIPELINE_API_TOKEN both services share. Unset -> the pipeline logs
     # `backend_not_configured` and does nothing for any team.
     # Railway private networking only (validator below):
-    #   production: http://api.railway.internal:8080
+    #   production: http://backend.railway.internal:8080  (service `api`, private domain `backend`)
     #   staging:    http://api-staging.railway.internal:8080
     backend_internal_url: Optional[str] = None
     # Read timeout per evaluate call: > backend roster read + 30 s writer call + re-read.
