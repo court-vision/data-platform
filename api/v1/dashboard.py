@@ -418,11 +418,13 @@ async def get_quality_run(
 ) -> QualityRunDetailResponse:
     """One run: every check's outcome, not only the failures, each with its definition."""
     try:
-        uuid.UUID(run_id)
+        # Postgres is asked for the id as Python read it, not as it was typed:
+        # uuid.UUID also takes "0x…", a sign, "_" and padding, none of which cast.
+        canonical = str(uuid.UUID(run_id))
     except ValueError:
         # Not an id at all. Asked of Postgres it would be a cast error, a 500.
         raise HTTPException(status_code=404, detail=f"Quality run '{run_id}' not found")
-    data = await run_in_db_thread(_build_quality_run, run_id)
+    data = await run_in_db_thread(_build_quality_run, canonical)
     if data is None:
         raise HTTPException(status_code=404, detail=f"Quality run '{run_id}' not found")
     return QualityRunDetailResponse(

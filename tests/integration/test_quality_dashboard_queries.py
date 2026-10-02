@@ -6,12 +6,16 @@ matrix), stepping between runs, and both page payloads end to end.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import datetime, timedelta
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from api.v1 import dashboard
+from core.middleware import setup_middleware
 from db.base import db
 from db.models.data_quality_check import DataQualityCheck
 from db.models.data_quality_run import DataQualityRun
@@ -138,3 +142,22 @@ class TestRunDetail:
 
     def test_an_unknown_run_is_none(self):
         assert dashboard._build_quality_run(str(uuid.uuid4())) is None
+
+    @pytest.mark.parametrize("run_id", [
+        "0x111111111111111111111111111111",
+        "+1111111111111111111111111111111",
+        "1_111111111111111111111111111111",
+        "%0A1111111111111111111111111111111",
+        "1111111111111111111111111111111%20",
+    ])
+    def test_an_id_only_python_reads_as_a_uuid_is_a_404_not_a_cast_error(self, three_runs, run_id):
+        app = FastAPI()
+        setup_middleware(app)
+        app.include_router(dashboard.router, prefix="/v1")
+        client = TestClient(app, raise_server_exceptions=False)
+        auth = {"Authorization": f"Bearer {os.environ.get('PIPELINE_API_TOKEN', 'test-token')}"}
+
+        res = client.get(f"/v1/dashboard/quality/runs/{run_id}", headers=auth)
+        assert res.status_code == 404, res.text
+        # And the real runs are still there to be asked for.
+        assert client.get(f"/v1/dashboard/quality/runs/{three_runs[2]}", headers=auth).status_code == 200
