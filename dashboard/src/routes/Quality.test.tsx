@@ -132,6 +132,15 @@ describe("Quality", () => {
     expect(matrixRow(render({ ...full, limit: 50 }, "?limit=50"), "ranges_valid")).toContain("critical · 20 runs")
   })
 
+  test("on a narrow screen a name wraps in full with its streak beneath, not cut short to fit beside it", () => {
+    const row = matrixRow(render(DATA), "ranges_valid")
+    // No DOM here, so this reads the classes: stacked and wrapping until md, one truncated line from there.
+    const label = row.match(/<span class="([^"]*)"><span class="([^"]*)" title="ranges_valid"/)
+    expect(label?.[1].split(" ")).toEqual(expect.arrayContaining(["flex-col", "md:flex-row"]))
+    expect(label?.[2].split(" ")).toEqual(expect.arrayContaining(["break-all", "md:truncate"]))
+    expect(label?.[2].split(" ")).not.toContain("truncate")
+  })
+
   test("the tiles read the newest run, split by severity", () => {
     const html = render(DATA)
     expect(html).toContain(">0/2<") // passing

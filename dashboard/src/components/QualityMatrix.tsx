@@ -46,8 +46,10 @@ export function QualityMatrix({ checks, runs, limit }: { checks: QualityCheckRow
                 const orMore = windowFull && failedThroughout(check.results)
                 return (
                   <li key={check.name} className="grid items-center gap-x-[2px]" style={template}>
-                    <span className="sticky left-0 z-10 flex min-w-0 items-baseline gap-2 bg-card pr-3">
-                      <span className="truncate font-mono text-xs" title={check.name}>
+                    {/* Under md the column is too narrow for both on one line: the name wraps
+                        in full and the streak sits beneath it, so neither is cut to fit the other. */}
+                    <span className="sticky left-0 z-10 flex min-w-0 flex-col bg-card pr-3 md:flex-row md:items-baseline md:gap-2">
+                      <span className="break-all font-mono text-xs md:truncate" title={check.name}>
                         {check.name}
                       </span>
                       {streak > 0 && (
