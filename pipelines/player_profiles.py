@@ -38,6 +38,7 @@ class PlayerProfilesPipeline(BasePipeline):
         target_table="nba.player_profiles",
         category=PipelineCategory.SCHEDULED,
         trigger_slug="player-profiles",
+        cron_job="preseason-market",    # chained after preseason-market, daily
         timeout_seconds=120,
     )
 

@@ -200,3 +200,26 @@ def test_projected_gp_derives_from_applied_totals():
     assert projected_gp(None, 68.47) is None
     assert projected_gp(100.0, 0) is None
     assert projected_gp("bad", 1.0) is None
+
+
+def test_projected_gp_prefers_espns_own_games_projection():
+    assert projected_gp(5067.0, 68.47, 72.0) == 72
+    # A category league's payload: no applied figures, games still projected.
+    assert projected_gp(None, None, 72.0) == 72
+    assert projected_gp(None, None, 0) is None
+    assert projected_gp(5067.0, 68.47, "bad") == 74
+
+
+def test_parse_reads_projected_games_from_stat_42():
+    player = _espn_player(stats=[
+        {"id": "102027", "appliedTotal": None, "appliedAverage": None,
+         "stats": {"42": 72.0, "40": 2563.2}, "averageStats": {"0": 28.1}},
+    ])
+    row = parse_draft_market_players([player], projected_split_id="102027")[0]
+    assert row["projected_games"] == 72.0
+    assert projected_gp(row["projected_total"], row["projected_avg"], row["projected_games"]) == 72
+
+
+def test_parse_without_a_projected_split_has_no_games():
+    row = parse_draft_market_players([_espn_player(stats=[])], projected_split_id="102027")[0]
+    assert row["projected_games"] is None

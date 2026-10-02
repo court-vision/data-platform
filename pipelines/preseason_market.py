@@ -52,8 +52,19 @@ def projection_line(average_stats: dict) -> dict:
     return line
 
 
-def projected_gp(total, avg) -> int | None:
-    """Games played implied by ESPN's applied total/average, when both exist."""
+def projected_gp(total, avg, games=None) -> int | None:
+    """Projected games played: ESPN's own games projection (stat 42) when it
+    sends one, else the games its applied total/average imply.
+
+    The applied figures are points-scoring fields and come back empty from a
+    category league, which is what the pipeline reads from — relying on them
+    alone left every projection's games blank.
+    """
+    try:
+        if games is not None and float(games) > 0:
+            return round(float(games))
+    except (TypeError, ValueError):
+        pass
     try:
         total, avg = float(total), float(avg)
     except (TypeError, ValueError):
@@ -148,10 +159,13 @@ class PreseasonMarketPipeline(BasePipeline):
                         season=season,
                         as_of_date=as_of_date,
                         line=line,
-                        projected_gp=projected_gp(row["projected_total"], row["projected_avg"]),
+                        projected_gp=projected_gp(
+                            row["projected_total"], row["projected_avg"], row.get("projected_games")
+                        ),
                         raw={
                             "applied_total": row["projected_total"],
                             "applied_avg": row["projected_avg"],
+                            "projected_games": row.get("projected_games"),
                         },
                         pipeline_run_id=ctx.run_id,
                     )

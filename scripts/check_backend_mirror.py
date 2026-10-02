@@ -58,6 +58,8 @@ MIRRORED = [
     "db/models/nba/player_ownership.py",
     "db/models/nba/player_profiles.py",
     "db/models/nba/player_projections.py",
+    "db/models/nba/player_history.py",
+    "db/models/nba/projection_adjustments.py",
     "db/models/nba/player_season_stats.py",
     "db/models/nba/players.py",
     "db/models/nba/team_stats.py",

@@ -125,6 +125,73 @@ class NBAApiExtractor(BaseExtractor):
         max_delay=settings.retry_max_delay,
     )
     @nba_api_circuit
+    def get_season_totals(self, season: str) -> list[dict]:
+        """
+        Every player's regular-season totals for one season (LeagueDashPlayerStats,
+        MeasureType Base, PerMode Totals): GP, MIN, the counting stats, DD2/TD3 and AGE.
+
+        A player traded mid-season comes back once, under his last team.
+        """
+        from nba_api.stats.endpoints import leaguedashplayerstats
+
+        self.log.debug("season_totals_start", season=season)
+        try:
+            stats = leaguedashplayerstats.LeagueDashPlayerStats(
+                season=season,
+                measure_type_detailed_defense="Base",
+                per_mode_detailed="Totals",
+            )
+            api_data = stats.get_normalized_dict()["LeagueDashPlayerStats"]
+            self.log.info("season_totals_complete", season=season, player_count=len(api_data))
+            return api_data
+        except Exception as e:
+            error_str = str(e).lower()
+            if "timeout" in error_str:
+                raise NetworkError(f"NBA API timeout: {e}")
+            if "connection" in error_str:
+                raise NetworkError(f"NBA API connection error: {e}")
+            raise
+
+    @with_retry(
+        max_attempts=settings.retry_max_attempts,
+        base_delay=settings.retry_base_delay,
+        max_delay=settings.retry_max_delay,
+    )
+    @nba_api_circuit
+    def get_career_starts(self) -> dict[int, int]:
+        """
+        Player id -> first NBA season (start year) for every player in NBA
+        history (CommonAllPlayers FROM_YEAR). Experience is what the projection's
+        early-career curve is keyed on, and retired players need it too.
+        """
+        from nba_api.stats.endpoints import commonallplayers
+
+        try:
+            rows = commonallplayers.CommonAllPlayers(is_only_current_season=0).get_normalized_dict()[
+                "CommonAllPlayers"
+            ]
+        except Exception as e:
+            error_str = str(e).lower()
+            if "timeout" in error_str:
+                raise NetworkError(f"NBA API timeout: {e}")
+            if "connection" in error_str:
+                raise NetworkError(f"NBA API connection error: {e}")
+            raise
+        starts: dict[int, int] = {}
+        for row in rows:
+            try:
+                starts[int(row["PERSON_ID"])] = int(row["FROM_YEAR"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        self.log.info("career_starts_complete", player_count=len(starts))
+        return starts
+
+    @with_retry(
+        max_attempts=settings.retry_max_attempts,
+        base_delay=settings.retry_base_delay,
+        max_delay=settings.retry_max_delay,
+    )
+    @nba_api_circuit
     def get_advanced_stats(self, season: str | None = None) -> list[dict]:
         """
         Fetch advanced player stats from NBA API.

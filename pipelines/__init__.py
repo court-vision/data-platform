@@ -28,6 +28,8 @@ from pipelines.game_start_times import GameStartTimesPipeline
 from pipelines.daily_matchup_scores import DailyMatchupScoresPipeline
 from pipelines.playoff_bracket import PlayoffBracketPipeline
 from pipelines.preseason_market import PreseasonMarketPipeline
+from pipelines.season_history import SeasonHistoryPipeline
+from pipelines.cv_projection import CVProjectionPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -56,6 +58,9 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "game_start_times": GameStartTimesPipeline,
     "playoff_bracket": PlayoffBracketPipeline,
     "preseason_market": PreseasonMarketPipeline,
+    "season_history": SeasonHistoryPipeline,
+    # After preseason_market: it reads the day's ESPN projection.
+    "cv_projection": CVProjectionPipeline,
 }
 
 
@@ -180,6 +185,8 @@ __all__ = [
     "DailyMatchupScoresPipeline",
     "PlayoffBracketPipeline",
     "PreseasonMarketPipeline",
+    "SeasonHistoryPipeline",
+    "CVProjectionPipeline",
     # Registry
     "PIPELINE_REGISTRY",
     "get_pipelines_by_category",
