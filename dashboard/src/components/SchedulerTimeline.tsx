@@ -5,13 +5,14 @@ import { formatCentralLong, formatClockCentral, formatDayClockCentral, formatDur
 import {
   axisTicks,
   buildLanes,
+  clusterBuckets,
   clusterRuns,
   DEFAULT_RANGE,
   rangeMs,
   RANGES,
   runTone,
-  SLOTS,
   type Cluster,
+  type Counted,
   type CronRun,
   type RunTone,
   type TimelineRange,
@@ -30,7 +31,11 @@ const TONE_TEXT: Record<RunTone, string> = {
   failure: "text-status-loss",
 }
 
-/** How many of a group's troubled runs its popover lists before it says "and N more". */
+/**
+ * How many of a group's troubled runs its popover lists before it says "and N
+ * more". A counted column comes with that many (SCHEDULER_LISTED in
+ * api/v1/dashboard.py).
+ */
 const LISTED = 5
 
 interface Props {
@@ -38,6 +43,8 @@ interface Props {
   now: number
   range?: TimelineRange
   onRangeChange?: (range: TimelineRange) => void
+  /** The window's runs counted per job and column: `runs` are then only the ones a mark can open. */
+  counted?: Counted | null
   /** A longer range was asked for and has not answered yet. */
   loading?: boolean
   /** The window held more runs than the reply carries: the oldest are missing. */
@@ -46,11 +53,11 @@ interface Props {
 }
 
 /** cron-runner activity over the chosen window, one lane per job. */
-export function SchedulerTimeline({ runs, now, range = DEFAULT_RANGE, onRangeChange, loading = false, truncated = false, error = null }: Props) {
+export function SchedulerTimeline({ runs, now, range = DEFAULT_RANGE, onRangeChange, counted = null, loading = false, truncated = false, error = null }: Props) {
   const windowMs = rangeMs(range)
-  const lanes = buildLanes(runs, now, windowMs)
+  const lanes = buildLanes(runs, now, windowMs, counted)
   const ticks = axisTicks(now, windowMs, range.tickMs)
-  const shown = lanes.reduce((count, lane) => count + lane.runs.length, 0)
+  const shown = lanes.reduce((count, lane) => count + lane.count, 0)
 
   return (
     <Card>
@@ -111,14 +118,14 @@ export function SchedulerTimeline({ runs, now, range = DEFAULT_RANGE, onRangeCha
                 <span className="truncate font-mono text-xs text-muted-foreground">{lane.job}</span>
                 <div className="relative h-7 rounded-sm bg-muted/40">
                   <div className="absolute inset-y-0 left-0 right-0 my-auto h-px bg-border" aria-hidden />
-                  {clusterRuns(lane.runs, now, windowMs).map((cluster) =>
-                    cluster.runs.length === 1 ? (
+                  {(lane.counted ? clusterBuckets(lane.counted, lane.runs, now, windowMs) : clusterRuns(lane.runs, now, windowMs)).map((cluster) =>
+                    cluster.count === 1 && cluster.runs.length === 1 ? (
                       <RunMarker key={cluster.runs[0].id} run={cluster.runs[0]} left={cluster.position} />
                     ) : (
                       <ClusterMarker key={cluster.slot} job={lane.job} cluster={cluster} />
                     ),
                   )}
-                  {lane.runs.length === 0 && (
+                  {lane.count === 0 && (
                     <span className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground/60">
                       {loading ? "loading…" : "no runs in window"}
                     </span>
@@ -181,9 +188,8 @@ function resultWords(run: CronRun): string {
 
 /** What a group holds, in words: the mark's colour is never the only way to know. */
 export function clusterSummary(cluster: Cluster): string {
-  const failed = cluster.runs.filter((run) => runTone(run) === "failure").length
-  const retried = cluster.runs.filter((run) => runTone(run) === "retried").length
-  const parts = [`${cluster.runs.length} runs`]
+  const { failed, retried } = cluster
+  const parts = [cluster.count === 1 ? "1 run" : `${cluster.count} runs`]
   if (failed > 0) parts.push(`${failed} failed`)
   if (retried > 0) parts.push(`${retried} retried`)
   if (failed === 0 && retried === 0) parts.push("all succeeded")
@@ -191,47 +197,54 @@ export function clusterSummary(cluster: Cluster): string {
 }
 
 function ClusterMarker({ job, cluster }: { job: string; cluster: Cluster }) {
-  const first = cluster.runs[0]
-  const last = cluster.runs[cluster.runs.length - 1]
-  const troubled = cluster.runs.filter((run) => runTone(run) !== "success")
-  const summary = clusterSummary(cluster)
-
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={`${job}: ${summary}, from ${formatCentralLong(first.triggered_at)} to ${formatCentralLong(last.triggered_at)}`}
-          data-runs={cluster.runs.length}
+          aria-label={`${job}: ${clusterSummary(cluster)}, from ${formatCentralLong(cluster.from)} to ${formatCentralLong(cluster.to)}`}
+          data-runs={cluster.count}
           data-tone={cluster.tone}
           className={cn(
             "absolute top-1/2 h-3 min-w-2 -translate-x-1/2 -translate-y-1/2 rounded-sm ring-1 ring-card transition-transform hover:scale-y-150 focus-visible:scale-y-150 focus-visible:outline-none",
             TONE_CLASS[cluster.tone],
           )}
-          style={{ left: `${cluster.position}%`, width: `${100 / SLOTS}%` }}
+          style={{ left: `${cluster.position}%`, width: `${cluster.width}%` }}
         />
       </PopoverTrigger>
       <PopoverContent align="center" className="w-80 p-3 text-xs">
-        <dl className="grid grid-cols-[6rem_1fr] gap-y-1">
-          <Row label="Job" value={job} />
-          <Row label="Runs" value={summary} className={TONE_TEXT[cluster.tone]} />
-          <Row label="From" value={formatCentralLong(first.triggered_at)} />
-          <Row label="To" value={formatCentralLong(last.triggered_at)} />
-        </dl>
-        {troubled.length > 0 && (
-          <ul className="mt-2 flex flex-col gap-1 border-t border-border/60 pt-2">
-            {troubled.slice(0, LISTED).map((run) => (
-              <li key={run.id} className="font-mono text-[11px]">
-                <span className="text-muted-foreground">{formatCentralLong(run.triggered_at)}</span>{" "}
-                <span className={TONE_TEXT[runTone(run)]}>{resultWords(run)}</span>
-                {run.error_message && <span className="block break-words text-status-loss">{run.error_message}</span>}
-              </li>
-            ))}
-            {troubled.length > LISTED && <li className="text-muted-foreground">and {troubled.length - LISTED} more</li>}
-          </ul>
-        )}
+        <ClusterDetail job={job} cluster={cluster} />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** What a group's popover says: what it holds, and the troubled runs it came with. */
+export function ClusterDetail({ job, cluster }: { job: string; cluster: Cluster }) {
+  const listed = cluster.runs.filter((run) => runTone(run) !== "success").slice(0, LISTED)
+  const unlisted = cluster.failed + cluster.retried - listed.length
+
+  return (
+    <>
+      <dl className="grid grid-cols-[6rem_1fr] gap-y-1">
+        <Row label="Job" value={job} />
+        <Row label="Runs" value={clusterSummary(cluster)} className={TONE_TEXT[cluster.tone]} />
+        <Row label="From" value={formatCentralLong(cluster.from)} />
+        <Row label="To" value={formatCentralLong(cluster.to)} />
+      </dl>
+      {(listed.length > 0 || unlisted > 0) && (
+        <ul className="mt-2 flex flex-col gap-1 border-t border-border/60 pt-2">
+          {listed.map((run) => (
+            <li key={run.id} className="font-mono text-[11px]">
+              <span className="text-muted-foreground">{formatCentralLong(run.triggered_at)}</span>{" "}
+              <span className={TONE_TEXT[runTone(run)]}>{resultWords(run)}</span>
+              {run.error_message && <span className="block break-words text-status-loss">{run.error_message}</span>}
+            </li>
+          ))}
+          {unlisted > 0 && <li className="text-muted-foreground">and {unlisted} more</li>}
+        </ul>
+      )}
+    </>
   )
 }
 

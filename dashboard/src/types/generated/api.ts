@@ -230,7 +230,12 @@ export interface paths {
          * Get Scheduler Runs
          * @description The cron-runner's job runs over a longer window than the status payload's
          *     six hours, for the Overview's range selector. Newest first, without the
-         *     response bodies; `truncated` says the window held more than the cap.
+         *     response bodies.
+         *
+         *     Up to 24 hours: every run, and `truncated` says the window held more than
+         *     the cap. Past that: `buckets` counts every run per job and column of the
+         *     timeline, and `runs` carries only the ones a mark can open (each column's
+         *     newest run, and its newest few that failed or were retried).
          */
         get: operations["get_scheduler_runs_v1_dashboard_scheduler_get"];
         put?: never;
@@ -2210,10 +2215,43 @@ export interface components {
             total: number;
         };
         /**
+         * SchedulerBucket
+         * @description One job's runs in one column of the scheduler timeline, counted.
+         */
+        SchedulerBucket: {
+            /** Failed */
+            failed: number;
+            /**
+             * First Triggered At
+             * Format: date-time
+             */
+            first_triggered_at: string;
+            /** Job Name */
+            job_name: string;
+            /**
+             * Last Triggered At
+             * Format: date-time
+             */
+            last_triggered_at: string;
+            /** Retried */
+            retried: number;
+            /** Runs */
+            runs: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /**
          * SchedulerRunsData
          * @description Cron-runner job runs over a chosen window, for the scheduler timeline.
          */
         SchedulerRunsData: {
+            /** Bucket Seconds */
+            bucket_seconds: number | null;
+            /** Buckets */
+            buckets: components["schemas"]["SchedulerBucket"][] | null;
             /**
              * Fetched At
              * Format: date-time

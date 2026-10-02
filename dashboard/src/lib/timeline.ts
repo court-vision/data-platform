@@ -2,6 +2,19 @@ import type { Schemas } from "@/lib/api"
 import { parseUtc } from "@/lib/time"
 
 export type CronRun = Schemas["CronJobRunEntry"]
+/** One job's runs in one column, counted on the server. */
+export type RunBucket = Schemas["SchedulerBucket"]
+
+/**
+ * Past a day the reply counts the window's runs per job and column instead of
+ * carrying them all: a week of 30-second polls is fourteen thousand rows. The
+ * runs that do come are the ones a mark can open.
+ */
+export interface Counted {
+  buckets: RunBucket[]
+  /** A column's width. */
+  bucketMs: number
+}
 
 const HOUR_MS = 60 * 60 * 1000
 
@@ -61,26 +74,48 @@ export function markerPosition(triggeredAt: string, now: number, windowMs = WIND
 
 export interface Lane {
   job: string
+  /** The runs in hand: every run in the window, or with `counted` only the ones a mark can open. */
   runs: CronRun[]
+  /** The job's counted columns that reach into the window; null when every run is in hand. */
+  counted: Counted | null
+  /** How many runs the window holds. */
+  count: number
 }
 
-export function buildLanes(runs: CronRun[], now: number, windowMs = WINDOW_MS): Lane[] {
-  const byJob = new Map<string, CronRun[]>()
-  for (const run of runs) {
-    if (markerPosition(run.triggered_at, now, windowMs) === null) continue
-    const list = byJob.get(run.job_name) ?? []
-    list.push(run)
-    byJob.set(run.job_name, list)
+export function buildLanes(runs: CronRun[], now: number, windowMs = WINDOW_MS, counted: Counted | null = null): Lane[] {
+  const byJob = new Map<string, Lane>()
+  const empty = (job: string): Lane => ({ job, runs: [], counted: counted && { ...counted, buckets: [] }, count: 0 })
+  const laneFor = (job: string) => {
+    const lane = byJob.get(job) ?? empty(job)
+    byJob.set(job, lane)
+    return lane
+  }
+  if (counted) {
+    for (const bucket of counted.buckets) {
+      if (columnPosition(bucket, now, windowMs, counted.bucketMs) === null) continue
+      const lane = laneFor(bucket.job_name)
+      lane.counted?.buckets.push(bucket)
+      lane.count += bucket.runs
+    }
+    // A run belongs to its column, and the column is what is in the window or out of it.
+    for (const run of runs) byJob.get(run.job_name)?.runs.push(run)
+  } else {
+    for (const run of runs) {
+      if (markerPosition(run.triggered_at, now, windowMs) === null) continue
+      const lane = laneFor(run.job_name)
+      lane.runs.push(run)
+      lane.count += 1
+    }
   }
 
   const lanes: Lane[] = []
   for (const job of LANES) {
-    const laneRuns = byJob.get(job) ?? []
-    if (laneRuns.length > 0 || ALWAYS_SHOWN.has(job)) lanes.push({ job, runs: laneRuns })
+    const lane = byJob.get(job)
+    if (lane || ALWAYS_SHOWN.has(job)) lanes.push(lane ?? empty(job))
     byJob.delete(job)
   }
   // A job this UI does not know still gets a lane, after the known ones.
-  for (const [job, laneRuns] of byJob) lanes.push({ job, runs: laneRuns })
+  for (const lane of byJob.values()) lanes.push(lane)
   return lanes
 }
 
@@ -110,9 +145,22 @@ export interface Cluster {
   slot: number
   /** Percent along the window: a lone run's own moment, a group's column centre. */
   position: number
-  /** Oldest first. */
+  /** Percent of the window a group's mark spans: its column. */
+  width: number
+  /**
+   * Oldest first. Every run of the group, or of a counted column the ones
+   * that came with it: its newest, and its newest few that failed or were
+   * retried.
+   */
   runs: CronRun[]
   tone: RunTone
+  /** How many runs the group holds, and how many of them failed or were retried. */
+  count: number
+  failed: number
+  retried: number
+  /** When the first and the last of them fired. */
+  from: string
+  to: string
 }
 
 /**
@@ -139,8 +187,68 @@ export function clusterRuns(runs: CronRun[], now: number, windowMs = WINDOW_MS, 
       return {
         slot,
         position: members.length === 1 ? members[0].position : ((slot + 0.5) / slots) * 100,
+        width: 100 / slots,
         runs: clustered,
         tone: worstTone(clustered),
+        count: clustered.length,
+        failed: clustered.filter((run) => runTone(run) === "failure").length,
+        retried: clustered.filter((run) => runTone(run) === "retried").length,
+        from: clustered[0].triggered_at,
+        to: clustered[clustered.length - 1].triggered_at,
       }
     })
+}
+
+/** Percent along the window of a counted column's centre, held inside the lane; null when the column is outside it. */
+function columnPosition(bucket: RunBucket, now: number, windowMs: number, bucketMs: number): number | null {
+  const from = parseUtc(bucket.start)?.getTime()
+  if (from == null) return null
+  const start = now - windowMs
+  if (from + bucketMs <= start || from > now) return null
+  const half = (bucketMs / windowMs) * 50
+  return Math.min(100 - half, Math.max(half, ((from + bucketMs / 2 - start) / windowMs) * 100))
+}
+
+/**
+ * One lane's marks from its counted columns: one mark a column, in the worst
+ * tone the counts hold, with the runs that came for it. A run alone in its
+ * column keeps its own moment, as it does when every run is in hand.
+ */
+export function clusterBuckets(counted: Counted, runs: CronRun[], now: number, windowMs = WINDOW_MS): Cluster[] {
+  const { buckets, bucketMs } = counted
+  // Columns are cut from the epoch, on the server and here.
+  const inHand = new Map<number, { run: CronRun; at: number }[]>()
+  for (const run of runs) {
+    const at = parseUtc(run.triggered_at)?.getTime()
+    if (at == null) continue
+    const column = Math.floor(at / bucketMs)
+    const list = inHand.get(column) ?? []
+    list.push({ run, at })
+    inHand.set(column, list)
+  }
+
+  const clusters: Cluster[] = []
+  for (const bucket of buckets) {
+    const from = parseUtc(bucket.start)?.getTime()
+    const centre = columnPosition(bucket, now, windowMs, bucketMs)
+    if (from == null || centre === null) continue
+    const slot = Math.round(from / bucketMs)
+    const mine = (inHand.get(slot) ?? []).sort((a, b) => a.at - b.at).map((member) => member.run)
+    const alone = bucket.runs === 1 && mine.length === 1
+    const position = alone ? markerPosition(mine[0].triggered_at, now, windowMs) : centre
+    if (position === null) continue
+    clusters.push({
+      slot,
+      position,
+      width: (bucketMs / windowMs) * 100,
+      runs: mine,
+      tone: bucket.failed > 0 ? "failure" : bucket.retried > 0 ? "retried" : "success",
+      count: bucket.runs,
+      failed: bucket.failed,
+      retried: bucket.retried,
+      from: bucket.first_triggered_at,
+      to: bucket.last_triggered_at,
+    })
+  }
+  return clusters.sort((a, b) => a.slot - b.slot)
 }

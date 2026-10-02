@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   axisTicks,
   buildLanes,
+  clusterBuckets,
   clusterRuns,
   markerPosition,
   parseRange,
@@ -12,6 +13,7 @@ import {
   WINDOW_MS,
   worstTone,
   type CronRun,
+  type RunBucket,
   type RunTone,
 } from "@/lib/timeline"
 
@@ -160,5 +162,88 @@ describe("clusterRuns", () => {
     const clusters = clusterRuns(polls, now, week)
     expect(clusters.length).toBeLessThanOrEqual(96)
     expect(clusters.reduce((count, c) => count + c.runs.length, 0)).toBe(2000)
+  })
+})
+
+describe("counted columns", () => {
+  // Past a day the server counts the runs per job and column. A week in 96
+  // columns is 105 minutes a column, cut from the epoch.
+  const week = rangeMs(parseRange("7d"))
+  const bucketMs = week / 96
+  const column = (iso: string) => Math.floor(Date.parse(`${iso}Z`) / bucketMs) * bucketMs
+  const naive = (ms: number) => new Date(ms).toISOString().slice(0, 19)
+
+  function bucket(at: string, overrides: Partial<RunBucket> = {}): RunBucket {
+    return {
+      job_name: "live-stats",
+      start: naive(column(at)),
+      runs: 210,
+      failed: 0,
+      retried: 0,
+      first_triggered_at: at,
+      last_triggered_at: at,
+      ...overrides,
+    }
+  }
+
+  test("a lane is its columns, and holds as many runs as they count", () => {
+    const counted = { buckets: [bucket("2026-09-20T03:00:00"), bucket("2026-09-22T03:00:00", { runs: 90 })], bucketMs }
+    const lanes = buildLanes([], now, week, counted)
+    expect(lanes.map((lane) => [lane.job, lane.count])).toEqual([["pre-game", 0], ["live-stats", 300], ["post-game", 0]])
+    expect(lanes[1].counted?.buckets).toHaveLength(2)
+  })
+
+  test("a column older than the window is neither drawn nor counted", () => {
+    const counted = { buckets: [bucket("2026-09-10T03:00:00"), bucket("2026-09-22T03:00:00")], bucketMs }
+    expect(buildLanes([], now, week, counted)[1].count).toBe(210)
+    expect(clusterBuckets(counted, [], now, week)).toHaveLength(1)
+  })
+
+  test("a column is one mark at its centre, a column wide, in the worst tone it counts", () => {
+    const at = "2026-09-22T03:00:00"
+    const [calm, retried, failed] = [{}, { retried: 2 }, { retried: 2, failed: 1 }].map(
+      (counts) => clusterBuckets({ buckets: [bucket(at, counts)], bucketMs }, [], now, week)[0],
+    )
+    expect([calm.tone, retried.tone, failed.tone]).toEqual(["success", "retried", "failure"])
+    expect(calm.count).toBe(210)
+    expect(calm.width).toBeCloseTo(100 / 96)
+    expect(calm.position).toBeCloseTo(((column(at) + bucketMs / 2 - (now - week)) / week) * 100)
+  })
+
+  test("the runs that came with a column are its own, oldest first", () => {
+    const at = "2026-09-22T03:00:00"
+    const mine = [
+      run({ id: "newest", job_name: "live-stats", triggered_at: "2026-09-22T03:20:00" }),
+      run({ id: "failed", job_name: "live-stats", triggered_at: "2026-09-22T03:05:00", result: "failure" }),
+    ]
+    const elsewhere = run({ id: "other", job_name: "live-stats", triggered_at: "2026-09-23T03:05:00" })
+    const [mark] = clusterBuckets({ buckets: [bucket(at, { failed: 1 })], bucketMs }, [...mine, elsewhere], now, week)
+    expect(mark.runs.map((r) => r.id)).toEqual(["failed", "newest"])
+    expect([mark.count, mark.failed]).toEqual([210, 1])
+  })
+
+  test("a run alone in its column keeps its own moment", () => {
+    const at = "2026-09-22T06:00:00"
+    const only = run({ id: "only", job_name: "playoffs", triggered_at: at })
+    const [mark] = clusterBuckets({ buckets: [bucket(at, { job_name: "playoffs", runs: 1 })], bucketMs }, [only], now, week)
+    expect([mark.count, mark.runs.length]).toEqual([1, 1])
+    expect(mark.position).toBe(markerPosition(at, now, week) as number)
+  })
+
+  test("the columns at the window's edges stay inside the lane", () => {
+    const edges = [bucket(naive(now - week + 60_000)), bucket(naive(now - 60_000))]
+    const marks = clusterBuckets({ buckets: edges, bucketMs }, [], now, week)
+    expect(marks).toHaveLength(2)
+    for (const mark of marks) {
+      expect(mark.position - mark.width / 2).toBeGreaterThanOrEqual(0)
+      expect(mark.position + mark.width / 2).toBeLessThanOrEqual(100)
+    }
+  })
+
+  test("a wider range's columns are drawn as wide as they are in a narrower window", () => {
+    // The 7d reply kept on screen while 3d loads: each column still spans 105 minutes.
+    const threeDays = rangeMs(parseRange("3d"))
+    const [mark] = clusterBuckets({ buckets: [bucket("2026-09-23T03:00:00")], bucketMs }, [], now, threeDays)
+    expect(mark.width).toBeCloseTo((bucketMs / threeDays) * 100)
   })
 })

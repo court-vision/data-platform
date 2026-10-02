@@ -70,6 +70,11 @@ export function Overview() {
             onRangeChange={(next) => setParams(next.key === DEFAULT_RANGE.key ? {} : { scheduler: next.key }, { replace: true })}
             loading={!defaultRange && !longer.data && !longer.error}
             truncated={!defaultRange && (longer.data?.truncated ?? false)}
+            counted={
+              !defaultRange && longer.data?.buckets && longer.data.bucket_seconds
+                ? { buckets: longer.data.buckets, bucketMs: longer.data.bucket_seconds * 1000 }
+                : null
+            }
             error={!defaultRange && longer.error ? longer.error.message : null}
           />
           <QualityPanel

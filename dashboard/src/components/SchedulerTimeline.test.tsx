@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { clusterSummary, SchedulerTimeline } from "@/components/SchedulerTimeline"
-import { clusterRuns, parseRange, type CronRun } from "@/lib/timeline"
+import { ClusterDetail, clusterSummary, SchedulerTimeline } from "@/components/SchedulerTimeline"
+import { clusterBuckets, clusterRuns, parseRange, rangeMs, type CronRun, type RunBucket } from "@/lib/timeline"
 
 const now = Date.parse("2026-09-24T18:00:00Z")
 
@@ -63,6 +63,52 @@ describe("SchedulerTimeline", () => {
     expect(cut).toContain("the oldest runs in this window are not shown")
     const failed = renderToStaticMarkup(<SchedulerTimeline runs={[]} now={now} range={parseRange("24h")} error="HTTP 500" />)
     expect(failed).toContain("Could not load this range: HTTP 500")
+  })
+})
+
+describe("a window counted on the server", () => {
+  const week = parseRange("7d")
+  const bucketMs = rangeMs(week) / 96
+  const column = Math.floor(Date.parse("2026-09-22T03:00:00Z") / bucketMs) * bucketMs
+  const polls: RunBucket = {
+    job_name: "live-stats",
+    start: new Date(column).toISOString().slice(0, 19),
+    runs: 210,
+    failed: 8,
+    retried: 0,
+    first_triggered_at: "2026-09-22T02:15:00",
+    last_triggered_at: "2026-09-22T03:59:30",
+  }
+  const bracket: RunBucket = { ...polls, job_name: "playoffs", runs: 1, failed: 0, first_triggered_at: "2026-09-22T03:00:00", last_triggered_at: "2026-09-22T03:00:00" }
+  const carried = [
+    run({ id: "latest", triggered_at: "2026-09-22T03:59:30", duration_seconds: 0.4 }),
+    ...[3, 4, 5, 6, 7].map((i) =>
+      run({ id: `f${i}`, triggered_at: `2026-09-22T03:0${i}:00`, result: "failure", http_status: 503, attempts: 3, duration_seconds: 31, error_message: "endpoint returned status 503" }),
+    ),
+    run({ id: "bracket", job_name: "playoffs", triggered_at: "2026-09-22T03:00:00" }),
+  ]
+  const counted = { buckets: [polls, bracket], bucketMs }
+
+  test("a column is one mark holding every run counted, not only the ones carried", () => {
+    const html = renderToStaticMarkup(<SchedulerTimeline runs={carried} now={now} range={week} counted={counted} />)
+    expect(html).toMatch(/data-runs="210" data-tone="failure"/)
+    expect(html).toContain('aria-label="live-stats: 210 runs, 8 failed, from Sep 21, 9:15:00 PM CT to Sep 21, 10:59:30 PM CT"')
+    // The card counts what the window holds: 210 polls and one bracket refresh.
+    expect(html).toContain(">211</span>")
+    // Only the two lanes that fired nothing say so.
+    expect(html.match(/no runs in window/g)).toHaveLength(2)
+  })
+
+  test("a run alone in its column is still its own dot", () => {
+    const html = renderToStaticMarkup(<SchedulerTimeline runs={carried} now={now} range={week} counted={counted} />)
+    expect(html).toContain('aria-label="playoffs success at Sep 21, 10:00:00 PM CT"')
+  })
+
+  test("its popover lists the failures carried and counts the rest", () => {
+    const [mark] = clusterBuckets({ buckets: [polls], bucketMs }, carried.filter((r) => r.job_name === "live-stats"), now, rangeMs(week))
+    const html = renderToStaticMarkup(<ClusterDetail job="live-stats" cluster={mark} />)
+    expect(html.match(/failure after 3 attempts/g)).toHaveLength(5)
+    expect(html).toContain("and 3 more")
   })
 })
 
