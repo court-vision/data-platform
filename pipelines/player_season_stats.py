@@ -106,7 +106,8 @@ class PlayerSeasonStatsPipeline(BasePipeline):
     def _played_on(self, game_date: date) -> set[int]:
         """Players with a regular-season game row that night."""
         rows = PlayerGameStats.select(PlayerGameStats.player_id).where(
-            (PlayerGameStats.game_date == game_date) & regular_season_game_rows()
+            (PlayerGameStats.game_date == game_date)
+            & regular_season_game_rows(game_date)
         )
         return {row.player_id for row in rows}
 

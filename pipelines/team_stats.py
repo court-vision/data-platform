@@ -80,7 +80,7 @@ class TeamStatsPipeline(BasePipeline):
             .where(
                 (PlayerGameStats.game_date == game_date)
                 & PlayerGameStats.team_id.is_null(False)
-                & regular_season_game_rows()
+                & regular_season_game_rows(game_date)
             )
             .distinct()
         )

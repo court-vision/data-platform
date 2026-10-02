@@ -7,6 +7,11 @@ hold themselves back until every player or team in the night's game log shows
 the game, so the game log has to be read the way the dashboards count.
 """
 
+from datetime import date
+
+from peewee import fn
+
+from db.models.nba.games import Game
 from db.models.nba.player_game_stats import PlayerGameStats
 
 # NBA game ids start with the kind of game: 001 preseason, 002 regular season,
@@ -14,15 +19,25 @@ from db.models.nba.player_game_stats import PlayerGameStats
 REGULAR_SEASON_PREFIX = "002"
 
 
-def regular_season_game_rows():
-    """Filter for game-log rows the season dashboards count.
+def regular_season_game_rows(game_date: date):
+    """Filter for that night's game-log rows the season dashboards count.
 
-    The game log does carry the Cup final (18 rows for 2025-12-16, ids `006`),
-    and a dashboard never moves for it: a check that waited on those players
-    would hold the pipeline all night. A row without a game id is one whose
-    game the schedule did not have when it was written; the log is fetched as
-    regular season, so it is counted.
+    The game log is fetched with no season type, so it carries whatever was
+    played: the Cup final is in it (18 rows for 2025-12-16, ids `006`), and a
+    dashboard never moves for it. A check that waited on those players would
+    hold the pipeline all night.
+
+    A row without a game id is one whose game the schedule did not have when
+    it was written, so its kind has to come from the night. Regular-season
+    and other games do not share a date: the row is counted unless the
+    schedule has a game of another kind that night. A playoff game the
+    schedule had not caught up with is then left out with the rest of its
+    night, rather than holding the pipelines for a game no dashboard counts.
     """
-    return PlayerGameStats.game_id.is_null() | PlayerGameStats.game_id.startswith(
-        REGULAR_SEASON_PREFIX
+    other_kind_that_night = Game.select().where(
+        (Game.game_date == game_date)
+        & ~Game.game_id.startswith(REGULAR_SEASON_PREFIX)
+    )
+    return PlayerGameStats.game_id.startswith(REGULAR_SEASON_PREFIX) | (
+        PlayerGameStats.game_id.is_null() & ~fn.EXISTS(other_kind_that_night)
     )

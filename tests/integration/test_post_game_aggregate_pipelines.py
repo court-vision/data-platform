@@ -453,3 +453,81 @@ def test_the_cup_final_holds_neither_pipeline(integration_db) -> None:
         {"TEAM_ABBREVIATION": "SAS", "GP": 25, "W": 17, "L": 8},
     ]
     assert teams._run_sync(nba_date=NIGHT).status == ApiStatus.SUCCESS
+
+
+def _team_dashboard(gp: dict[str, int]) -> list[dict]:
+    return [
+        {"TEAM_ABBREVIATION": team, "TEAM_NAME": team, "GP": games, "W": 1, "L": games - 1}
+        for team, games in gp.items()
+    ]
+
+
+@pytest.mark.integration
+def test_a_playoff_game_the_schedule_does_not_have_holds_neither_pipeline(integration_db) -> None:
+    """The first playoff weekend: one series is in the schedule, the next is not yet.
+
+    The schedule learns a playoff game once its teams are named, so a game
+    played before the next sync lands in the game log without a game id.
+    Nothing says what kind of game that row is but the night it was played
+    on, and no season dashboard moves on a playoff night. Counted as regular
+    season, those rows failed both pipelines on every poll.
+    """
+    night = date(2026, 4, 18)
+    _game("0022501190", night - timedelta(days=6), "BOS", "PHI")
+    _game("0042500111", night, "DET", "ORL")
+    _played(1, "DET", "0042500111", night)
+    _played(2, "ORL", "0042500111", night)
+    # 0042500161 is not in nba.games, so its rows are stored without an id.
+    _played(3, "BOS", "0042500161", night)
+    _played(4, "PHI", "0042500161", night)
+    assert PlayerGameStats.get(PlayerGameStats.player == 3).game_id is None
+    for player_id, team in ((1, "DET"), (2, "ORL"), (3, "BOS"), (4, "PHI")):
+        _season_row(player_id, team, 70, night - timedelta(days=6))
+
+    season = PlayerSeasonStatsPipeline()
+    season.espn_extractor.get_player_data = lambda: {}
+    season.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "DET", 70), _leader(2, "ORL", 70), _leader(3, "BOS", 70), _leader(4, "PHI", 70),
+    ]
+    teams = TeamStatsPipeline()
+    teams.nba_extractor.get_team_stats = lambda *_: _team_dashboard(
+        {"DET": 1, "ORL": 1, "BOS": 1, "PHI": 1}
+    )
+
+    statuses = {
+        pipeline.config.name: pipeline._run_sync(nba_date=night).status
+        for pipeline in (season, teams)
+    }
+
+    assert statuses == {
+        "player_season_stats": ApiStatus.SUCCESS,
+        "team_stats": ApiStatus.SUCCESS,
+    }
+
+
+@pytest.mark.integration
+def test_a_regular_season_game_the_schedule_does_not_have_is_still_waited_for(integration_db) -> None:
+    """The other half of the rule: on a regular-season night a row without an id counts."""
+    _game("0022501180", NIGHT, "BOS", "NYK")
+    _played(1, "BOS", "0022501180")
+    _played(2, "PHX", "0022501185")  # not in nba.games
+    assert PlayerGameStats.get(PlayerGameStats.player == 2).game_id is None
+    _season_row(1, "BOS", 63, NIGHT - timedelta(days=2))
+    _season_row(2, "PHX", 63, NIGHT - timedelta(days=2))
+
+    season = PlayerSeasonStatsPipeline()
+    season.espn_extractor.get_player_data = lambda: {}
+    season.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 64), _leader(2, "PHX", 63),
+    ]
+    result = season._run_sync(nba_date=NIGHT)
+    assert result.status == ApiStatus.ERROR
+    assert "1 of 2 players" in result.error
+
+    teams = TeamStatsPipeline()
+    teams.nba_extractor.get_team_stats = lambda *_: _team_dashboard(
+        {"BOS": 1, "NYK": 1, "PHX": 0}
+    )
+    result = teams._run_sync(nba_date=NIGHT)
+    assert result.status == ApiStatus.ERROR
+    assert "1 team(s)" in result.error and "PHX" in result.error
