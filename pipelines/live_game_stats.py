@@ -15,6 +15,7 @@ from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 from pipelines.transformers import calculate_fantasy_points, minutes_to_int
+from pipelines.transformers.minutes import seconds_played
 
 
 class LiveGameStatsPipeline(BasePipeline):
@@ -116,17 +117,23 @@ class LiveGameStatsPipeline(BasePipeline):
             all_players = home_players + away_players
 
             for player_data in all_players:
-                # Only process players who are active (not DNP)
+                # Only process players who are active (dressed for the game)
                 status = player_data.get("status", "")
                 if status != "ACTIVE":
                     continue
 
                 stats_raw = player_data.get("statistics", {})
                 minutes_str = stats_raw.get("minutesCalculated", "PT00M00.00S")
-                min_int = minutes_to_int(minutes_str)
 
-                if min_int == 0:
+                # Skip only a player who has not played. `minutesCalculated` is
+                # whole minutes ("PT00M" for a 40-second appearance), so the
+                # question goes to `minutes`, which keeps the seconds
+                # ("PT00M40.00S"). Same rule as player_game_stats, so live and
+                # settled agree about who played; the row is stored with `min` 0.
+                if seconds_played(stats_raw.get("minutes") or minutes_str) <= 0:
                     continue
+
+                min_int = minutes_to_int(minutes_str)
 
                 player_id = player_data.get("personId")
                 if not player_id:
