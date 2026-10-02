@@ -116,6 +116,9 @@ async def trigger_cumulative_player_stats(
     Trigger the cumulative player stats pipeline.
 
     Updates season totals and rankings for players who played on the given date.
+    Runs on its own, outside the post-game batch: it does not wait for the
+    night's game log, and a success here after the post-game window opens
+    counts as the night's run, so the batch will not run it again.
     Pass ?date=YYYY-MM-DD to backfill a specific date.
     """
     result = await run_pipeline("player_season_stats", date_override=date)
@@ -426,6 +429,9 @@ async def trigger_player_rolling_stats(
     Materializes L7, L14, and L30 rolling per-game averages from
     player_game_stats into nba.player_rolling_stats.
     Depends on player_game_stats having fresh data for the target date.
+    Runs on its own, outside the post-game batch: it does not wait for the
+    night's game log, and a success here after the post-game window opens
+    counts as the night's run, so the batch will not run it again.
     Pass ?date=YYYY-MM-DD to backfill a specific date.
     """
     result = await run_pipeline("player_rolling_stats", date_override=date)
@@ -447,6 +453,9 @@ async def trigger_team_stats(
     Fetches season-to-date stats for all 30 NBA teams from NBA API
     (base counting stats + advanced efficiency metrics) and upserts
     to nba.team_stats.
+    Runs on its own, outside the post-game batch: it does not wait for the
+    night's game log, and a success here after the post-game window opens
+    counts as the night's run, so the batch will not run it again.
     Pass ?date=YYYY-MM-DD to backfill a specific date.
     """
     result = await run_pipeline("team_stats", date_override=date)
@@ -729,6 +738,9 @@ async def trigger_post_game(
 
     Per-pipeline dedup enables partial batch retries — if one pipeline fails, the
     next cron invocation will retry only the failed pipeline, not the whole batch.
+    A pipeline skipped for an unmet dependency has no successful run either, so
+    it is retried on the same terms, and a dependency counts as met only by a
+    success since the window opened.
 
     Once the window has **closed**, one last poll sweeps the night: any pipeline
     with no successful run for the date is recorded and alerted
@@ -737,6 +749,8 @@ async def trigger_post_game(
     no trace outside the logs.
 
     Pass ?force=true to skip all gates (useful for manual re-triggers or backfills).
+    The dependency rule is not a gate: a forced run of tonight's batch still
+    skips a pipeline whose dependency has not succeeded since the window opened.
     Pass ?date=YYYY-MM-DD to backfill a specific date (implies force=true).
     """
     from core.settings import settings
@@ -752,9 +766,29 @@ async def trigger_post_game(
     now_et = datetime.now(eastern)
     nba_date = nba_date_et(now_et)
 
-    # Cutoff for "tonight": runs at or after the window opened. Assigned inside
-    # the gated path below, where the window is known.
+    # Cutoff for "tonight": runs at or after the window opened. Assigned where
+    # the window is known: just below for a forced run of tonight's batch,
+    # inside the gated path otherwise. A `?date=` backfill has none.
     window_open_utc: Optional[datetime] = None
+
+    if force and date is None:
+        # A forced run of tonight's batch skips the gates, not the dependency
+        # rule. The night it is reached for is a night things are being held:
+        # on the date cutoff, a game log that fails in this batch leaves its
+        # dependents running on last night's success, and that run then dedups
+        # them for the rest of the night. A day without games has no window.
+        latest_game_time = Game.get_latest_game_time_on_date(nba_date)
+        if latest_game_time:
+            opens_at = post_game_window(
+                now_et.replace(tzinfo=None),
+                latest_game_time,
+                nba_date,
+                settings.estimated_game_duration_minutes,
+                settings.post_game_pipeline_window_minutes,
+            ).opens_at
+            window_open_utc = (
+                eastern.localize(opens_at).astimezone(pytz.utc).replace(tzinfo=None)
+            )
 
     if not force:
         # Check if there are any scheduled games on the NBA date
@@ -944,6 +978,9 @@ async def trigger_post_game(
             pipeline_names=pipelines_to_run,
             nba_date=target_date,
             batch_id=batch,
+            # The same cutoff the dedup above uses for "tonight". None for a
+            # `?date=` backfill, which keeps the date-based rule.
+            dependencies_since=window_open_utc,
         )
     )
 
@@ -1034,7 +1071,10 @@ async def _sweep_closed_post_game_window(
                 f"The post-game window has closed and {len(missing)} of {len(survey)} "
                 f"pipelines have no successful run for this NBA date: {', '.join(missing)}. "
                 "That data is not coming back on its own — a manual "
-                "`?force=true&date=` trigger is the only way to fill it."
+                "`?force=true&date=` trigger is the only way to fill it. "
+                "Run it before the next slate tips off: season totals have no "
+                "as-of date, so a backfill during the games writes tonight's "
+                "under the old date."
             ),
             fields={
                 "nba_date": str(nba_date),
@@ -1433,12 +1473,23 @@ def _check_unmet_dependencies(
     pipeline_cls,
     succeeded_in_batch: set[str],
     date_override: Optional[date] = None,
+    since: Optional[datetime] = None,
 ) -> list[str]:
     """
     Check if a pipeline's depends_on requirements are met.
 
     A dependency is met if it either succeeded earlier in this batch OR has a
-    successful PipelineRun for today's NBA date.
+    successful PipelineRun since `since` (UTC naive). Without `since` the
+    cutoff is midnight UTC of the NBA date.
+
+    The post-game batch has to pass `since`. Its runs start after midnight UTC
+    (the evening in the US), so last night's runs sit on the right side of
+    tonight's midnight cutoff: on any day after a game day, every dependency
+    was "met" by the previous night's success. That is how season totals came
+    to be written ahead of the night's game log on 38 nights of 2025-26, and
+    why their own readiness check had no game rows to check against. The
+    pre-game batch wants exactly the loose reading (last night's post-game
+    runs are its dependencies) and passes nothing.
 
     Returns:
         List of unmet dependency names (empty if all met).
@@ -1455,7 +1506,7 @@ def _check_unmet_dependencies(
     for dep_name in deps:
         if dep_name in succeeded_in_batch:
             continue
-        if not PRModel.was_successful_on_date(dep_name, target_date):
+        if not PRModel.was_successful_on_date(dep_name, target_date, after=since):
             unmet.append(dep_name)
 
     return unmet
@@ -1467,6 +1518,7 @@ async def _run_pipelines_background(
     pipeline_names: Optional[list[str]] = None,
     nba_date: Optional[date] = None,
     batch_id=None,
+    dependencies_since: Optional[datetime] = None,
 ) -> None:
     """
     Run pipelines in the background and update job status.
@@ -1476,6 +1528,9 @@ async def _run_pipelines_background(
     nba_date: the batch's game date, shared by every pipeline in it.
     batch_id: `nba.pipeline_batches` row to fold the outcomes back into, so the
         durable record says what happened rather than only what was intended.
+    dependencies_since: a dependency that is not in this batch counts as met
+        only if it succeeded at or after this moment (UTC naive). See
+        `_check_unmet_dependencies`.
     """
     job_manager = get_job_manager()
     outcomes: dict[str, dict] = {}
@@ -1503,7 +1558,7 @@ async def _run_pipelines_background(
             # Dependency enforcement: skip if depends_on pipelines haven't succeeded.
             pipeline_cls = PIPELINE_REGISTRY[name]
             unmet_deps = _check_unmet_dependencies(
-                pipeline_cls, succeeded_in_batch, date_override
+                pipeline_cls, succeeded_in_batch, date_override, dependencies_since
             )
 
             if unmet_deps:
@@ -1789,19 +1844,22 @@ async def trigger_preseason_market(
     rolled to the target season. Called daily by the 'preseason-market' cron
     job in cron-runner during draft season.
 
-    Two pipelines follow it on the same trigger, in order: player-profiles, so
-    every player's current team is today's (it had no schedule of its own, and
-    a whole offseason of trades went unrecorded), then cv-projection, which is
-    built on the day's ESPN line and those rosters. Both run whatever the
-    market run did; cv-projection gates itself on the same window.
+    The trigger runs three pipelines in order, each whatever the one before
+    it did: player-profiles first, so every player's current team is today's
+    and a new player (a rookie, a new signing) has his nba.players row before
+    the snapshot — the snapshot can only attach ESPN's rank and line to a
+    player that row exists for; then preseason-market; then cv-projection,
+    which is built on the day's ESPN line and those rosters and gates itself
+    on the same window. When player-profiles fails, the other two still run on
+    the roster of its last good run. The response is the market run's.
     """
     options = {"league_id": league_id} if league_id is not None else None
-    result = await run_pipeline("preseason_market", date_override=date, options=options)
     profiles = await run_pipeline("player_profiles")
+    result = await run_pipeline("preseason_market", date_override=date, options=options)
     projection = await run_pipeline("cv_projection", date_override=date)
     log.info(
         "preseason_chain_complete",
-        preseason_market=result.status, player_profiles=profiles.status, cv_projection=projection.status,
+        player_profiles=profiles.status, preseason_market=result.status, cv_projection=projection.status,
     )
     return PipelineResponse(
         status=result.status,
@@ -1844,8 +1902,9 @@ async def trigger_cv_projection(
 
     Builds Court Vision's projection — three seasons of history, ESPN's line,
     the curated adjustments — into nba.player_projections with source 'cv'.
-    Called daily by the 'cv-projection' cron job after preseason-market, and
-    by the projections editor after an adjustment is saved.
+    It has no cron job of its own: the preseason-market trigger runs it daily
+    as the last link of its chain, and the projections editor runs it after an
+    adjustment is saved.
     """
     result = await run_pipeline("cv_projection", date_override=date, options={"force": True} if force else None)
     return PipelineResponse(status=result.status, message=result.message, data=result)

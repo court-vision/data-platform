@@ -182,7 +182,7 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
-| `BACKEND_INTERNAL_URL` | No | — | Backend base URL for the lineup-alerts pipeline's `POST /v1/internal/jobs/lineup/evaluate` and the projections editor's `POST /v1/internal/jobs/valuation/standard` (both authenticated with `PIPELINE_API_TOKEN`). Unset → the pipeline logs `backend_not_configured` and evaluates nothing, and the editor shows its lines without ranks. Must be `http://*.railway.internal` on Railway: prod `http://api.railway.internal:8080`, staging `http://api-staging.railway.internal:8080` |
+| `BACKEND_INTERNAL_URL` | No | — | Backend base URL for the lineup-alerts pipeline's `POST /v1/internal/jobs/lineup/evaluate` and the projections editor's `POST /v1/internal/jobs/valuation/standard` (both authenticated with `PIPELINE_API_TOKEN`). Unset → the pipeline logs `backend_not_configured` and evaluates nothing, and the editor shows its lines without ranks. Must be `http://*.railway.internal` on Railway: prod `http://backend.railway.internal:8080` (the Railway service is named `api`; its private domain is `backend`), staging `http://api-staging.railway.internal:8080` |
 | `BACKEND_TIMEOUT_SECONDS` | No | `45` | Read timeout per evaluate call (connect timeout is fixed at 5 s; no retry) |
 | `ALERT_WEBHOOK_URL` | No | — | Discord (or Slack) incoming webhook for ops alerts (`#cv-alerts`). Unset → alerts are a no-op; set on **production only**. See [Alerting](#alerting) |
 | `ALERT_WEBHOOK_FORMAT` | No | `discord` | `discord` (embeds) or `slack` (`{"text": ...}`) |
@@ -308,11 +308,11 @@ All `/v1/internal/*` endpoints require the `Authorization: Bearer <PIPELINE_API_
 | `POST` | `/v1/internal/pipelines/breakout-detection` | Individual: breakout candidate detection |
 | `POST` | `/v1/internal/pipelines/lineup-alerts` | Individual: email lineup alerts |
 | `POST` | `/v1/internal/pipelines/player-profiles` | Individual: player profile data |
-| `POST` | `/v1/internal/pipelines/preseason-market` | ESPN's draft ranks, ADP and projections for the coming season (Aug 15 – Oct 31). Chains `player-profiles` and `cv-projection` behind it. Fired daily by the cron-runner `preseason-market` job |
+| `POST` | `/v1/internal/pipelines/preseason-market` | ESPN's draft ranks, ADP and projections for the coming season (Aug 15 – Oct 31). The trigger runs a chain: `player-profiles` first (new players need their `nba.players` row before the snapshot can attach ESPN's line to them), then `preseason-market`, then `cv-projection`; each runs whatever the previous one did. Fired daily by the cron-runner `preseason-market` job |
 | `POST` | `/v1/internal/pipelines/cv-projection` | Court Vision's own projection (`nba.player_projections`, `source='cv'`): three seasons of history, ESPN's line, the curated adjustments. Same window as preseason-market; `?force=true` runs outside it. Also run by the projections editor after every save |
 | `POST` | `/v1/internal/pipelines/season-history` | One row per player per season in `nba.player_history`, what the projection is built from. Manual: repeat `?seasons=2012-13&seasons=2013-14…` to backfill; with none, the season just finished |
 
-All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query param for backfills.
+All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query param for backfills. The season dashboards (`cumulative-player-stats`, `team-stats`, and the post-game batch that runs them) have no as-of date: a backfill writes the API's totals as they stand under the date given. Run one before the day's first tip-off, not while games are being played, or the old date's rows carry tonight's early games.
 
 | Method | Path | Description |
 |---|---|---|
@@ -469,7 +469,7 @@ Four things that were wrong here before the 2026 hardening, kept as a record bec
 - `ctx.date_override` — backfill date (None = not a backfill). Pipelines key data-readiness checks off this, so it must not be set for ordinary runs
 - `ctx.nba_date` — the triggering batch's game date, computed once and shared by every pipeline in the batch
 - `ctx.options` — free-form per-run options from the trigger (e.g. `{"source": "cdn"}`)
-- Auto-creates a `pipeline_run` audit record on start; marks success/failure on completion; a failure is reported to Sentry and posts a `pipeline_failed` alert
+- Auto-creates a `pipeline_run` audit record on start; marks success/failure on completion; a failure is reported to Sentry and posts a `pipeline_failed` alert. A readiness check that finds the upstream data not there yet raises `DataNotReady` (`pipelines/base.py`): still a `failed` run, so the next poll retries it, but it posts `pipeline_waiting` instead and is not sent to Sentry
 
 ### Audit Trail
 
@@ -488,6 +488,7 @@ Rows are written when a **post-game** batch reaches its per-pipeline decisions, 
 
 - **Retries**: `@with_retry(max_attempts=3)` decorator using tenacity with exponential backoff on `RetryableError` subclasses (`RateLimitError`, `NetworkError`, `ServerError`)
 - **Circuit breakers**: `nba_api_circuit` and `espn_api_circuit` open after 5 consecutive failures, recover after 60s
+- **stats.nba.com 5xx / empty bodies**: `utils/patches.py` re-asks a stats.nba.com request up to 4 times (1 s, 2 s, 4 s apart, and within 20 s in all — a re-ask's timeout is what is left of that) when the answer is a 5xx, empty, or not JSON, then raises `ServerError` / `NetworkError` with the status code so `@with_retry` retries the call. The re-asks sit below `nba_api_circuit`: the circuit counts a call that stayed bad after them, not each flaky response. Each re-ask logs a `stats_reask` warning, so a night of flaky answers that all came good is still visible. 4xx is not retried; cdn.nba.com (live) responses are left alone
 - **HTTP client**: `ResilientHTTPClient` combines retry + circuit breaker with classified error types
 
 ### Extractors
@@ -516,7 +517,8 @@ The `/v1/internal/pipelines/all` endpoint returns immediately with a `job_id`. P
 
 | `key` | Severity | Fires when | Dedupe | Hook |
 |---|---|---|---|---|
-| `pipeline_failed:<pipeline>` | critical | `execute()` raised; the run is recorded as `failed` and the exception is captured by Sentry. Live-stats failing all night is one message | 6 h | `pipelines/base.py` `_run_sync` |
+| `pipeline_failed:<pipeline>` | critical | `execute()` raised (anything but `DataNotReady`, next row); the run is recorded as `failed` and the exception is captured by Sentry. Live-stats failing all night is one message | 6 h | `pipelines/base.py` `_run_sync` |
+| `pipeline_waiting:<pipeline>` | warning | `execute()` raised `DataNotReady`: a readiness check found the NBA API without the night's games yet (`player_game_stats`, `player_season_stats`, `team_stats`). The run is recorded as `failed` so the next poll retries it; nothing goes to Sentry. Its own key, so a night of waiting does not use up `pipeline_failed`'s window. A night that never completes still ends in `post_game_incomplete` | 6 h | `pipelines/base.py` `_run_sync` |
 | `pipeline_partial:<pipeline>` | warning | A *successful* run with `records_failed > 0` where nothing succeeded (`records_processed == 0`) or more than 20 % of attempted records (processed + failed) failed | 24 h | `PipelineContext.mark_success` |
 | `cron_failure_streak:<job>` | critical | A cron-runner failure report brings the job's consecutive failures (counted over its last 10 rows) to **exactly** its threshold: `live-stats` 3, `pre-game` / `post-game` / `playoffs` 2, `schedule-sync` / `deploy` 1, unknown jobs 2 (`ALERT_CRON_STREAK_THRESHOLDS`) | 6 h | `POST /v1/internal/cron/job-runs` |
 | `cron_failure_streak:<job>:recovered` | info | A success report follows a streak ≥ threshold; also clears the streak key's dedupe | — | same |

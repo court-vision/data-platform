@@ -462,7 +462,8 @@ class BreakoutDetectionPipeline(BasePipeline):
         A "position-validated opportunity game" is a game where:
         1. The candidate played >= max(season_avg * 1.25, 20) minutes
         2. At least one position-group peer on the same team was absent
-           from the box score (team played but peer has no stats row)
+           from the box score (team played but peer has no stats row, or
+           only a sub-minute one: `min` 0)
 
         This filters blowout garbage time while capturing any positional
         absence — not just the currently injured player specifically.
@@ -500,7 +501,9 @@ class BreakoutDetectionPipeline(BasePipeline):
 
         game_dates = [g.game_date for g in high_usage_games]
 
-        # Step 2: For each high-usage date, find which position peers DID play
+        # Step 2: For each high-usage date, find which position peers DID play.
+        # A peer whose line is `min` 0 was on the floor for seconds: his
+        # minutes were there to absorb, so he counts as absent here.
         peers_played = list(
             PlayerGameStats.select(
                 PlayerGameStats.player,
@@ -508,6 +511,7 @@ class BreakoutDetectionPipeline(BasePipeline):
             ).where(
                 (PlayerGameStats.player.in_(list(position_peer_ids)))
                 & (PlayerGameStats.game_date.in_(game_dates))
+                & (PlayerGameStats.min > 0)
             )
         )
 

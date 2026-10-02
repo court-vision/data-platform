@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
+from db.models.nba.games import Game
 from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.player_season_stats import PlayerSeasonStats
 from db.models.nba.players import Player
+from db.models.nba.team_stats import TeamStats
 from pipelines.player_rolling_stats import PlayerRollingStatsPipeline
 from pipelines.player_season_stats import PlayerSeasonStatsPipeline
+from pipelines.team_stats import TeamStatsPipeline
 from schemas.common import ApiStatus
 
 
@@ -262,3 +265,362 @@ def test_player_rolling_stats_computes_window_percentages_from_totals(integratio
     assert float(l7.fg_pct) == pytest.approx(0.5714, abs=1e-4)
     assert float(l7.fpts) == pytest.approx(45.0, abs=1e-4)
 
+
+
+# ---------------------------------------------------------------------------
+# Readiness: the season dashboards against the night's game log
+# ---------------------------------------------------------------------------
+
+NIGHT = date(2026, 4, 8)
+SEASON = "2025-26"
+
+_ZERO_LINE = {
+    "fpts": 20, "pts": 10, "reb": 4, "ast": 3, "stl": 1, "blk": 0, "tov": 2,
+    "min": 30, "fgm": 4, "fga": 9, "fg3m": 1, "fg3a": 3, "ftm": 1, "fta": 2,
+}
+
+
+def _leader(player_id: int, team: str, gp: int) -> dict:
+    return {
+        "PLAYER_ID": player_id, "PLAYER": f"Player {player_id}", "TEAM": team, "GP": gp,
+        "PTS": 90, "REB": 33, "AST": 23, "STL": 6, "BLK": 3, "TOV": 14,
+        "FGM": 32, "FGA": 74, "FG3M": 11, "FG3A": 28, "FTM": 12, "FTA": 14, "MIN": 300,
+    }
+
+
+def _game(game_id: str, game_date: date, home: str, away: str, status: str = "final") -> None:
+    Game.create(
+        game_id=game_id, game_date=game_date, season=SEASON,
+        home_team_id=home, away_team_id=away, status=status,
+        home_score=110 if status == "final" else None,
+        away_score=104 if status == "final" else None,
+    )
+
+
+def _played(player_id: int, team: str, game_id: str | None, game_date: date = NIGHT) -> None:
+    Player.upsert_player(player_id=player_id, name=f"Player {player_id}")
+    PlayerGameStats.upsert_game_stats(
+        player_id=player_id, game_date=game_date, team_id=team,
+        stats=dict(_ZERO_LINE), game_id=game_id,
+    )
+
+
+def _season_row(player_id: int, team: str, gp: int, as_of: date) -> None:
+    PlayerSeasonStats.upsert_season_stats(
+        player_id=player_id, as_of_date=as_of, season=SEASON, team_id=team,
+        stats={**_ZERO_LINE, "gp": gp, "rost_pct": 10.0},
+    )
+
+
+@pytest.mark.integration
+def test_season_stats_wait_for_every_player_in_the_nights_game_log(integration_db) -> None:
+    """A partial LeagueLeaders update fails the run, and the retry completes it."""
+    _game("0022501180", NIGHT, "BOS", "NYK")
+    _game("0022501185", NIGHT, "PHX", "LAL")
+    _played(1, "BOS", "0022501180")   # early game
+    _played(2, "PHX", "0022501185")   # late game
+    _season_row(1, "BOS", 63, NIGHT - timedelta(days=2))
+    _season_row(2, "PHX", 63, NIGHT - timedelta(days=2))
+
+    pipeline = PlayerSeasonStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+
+    # First poll: the early game has reached the dashboard, the late one has not.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 64), _leader(2, "PHX", 63),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.ERROR
+    assert "1 of 2 players" in result.error
+    assert "Data not ready yet" in result.error
+    assert not PlayerSeasonStats.select().where(PlayerSeasonStats.as_of_date == NIGHT).exists()
+
+    # Next poll: the dashboard has caught up.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 64), _leader(2, "PHX", 64),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.SUCCESS
+    rows = {
+        row.player_id: row.gp
+        for row in PlayerSeasonStats.select().where(PlayerSeasonStats.as_of_date == NIGHT)
+    }
+    assert rows == {1: 64, 2: 64}
+
+    # A re-run of a night already written finds nothing new and is not held.
+    result = pipeline._run_sync(nba_date=NIGHT)
+    assert result.status == ApiStatus.SUCCESS
+    assert result.records_processed == 0
+
+
+@pytest.mark.integration
+def test_team_stats_wait_for_every_team_that_played_that_night(integration_db) -> None:
+    """A dashboard missing the late game fails the run before any team is written."""
+    # Before the night: BOS and NYK two finals each, PHX and LAL one each.
+    _game("0022501100", NIGHT - timedelta(days=3), "BOS", "NYK")
+    _game("0022501110", NIGHT - timedelta(days=2), "NYK", "BOS")
+    _game("0022501120", NIGHT - timedelta(days=2), "PHX", "LAL")
+    # Not regular season, and not this season: neither counts.
+    _game("0062500001", NIGHT - timedelta(days=1), "PHX", "LAL")
+    Game.create(
+        game_id="0022401100", game_date=date(2025, 4, 1), season="2024-25",
+        home_team_id="PHX", away_team_id="LAL", status="final",
+        home_score=101, away_score=99,
+    )
+    # The night: the early game is final in the schedule; the late one is
+    # still "scheduled" there, and only the game log says it was played.
+    _game("0022501180", NIGHT, "BOS", "NYK")
+    _game("0022501185", NIGHT, "PHX", "LAL", status="scheduled")
+    _played(1, "BOS", "0022501180")
+    _played(2, "NYK", "0022501180")
+    _played(3, "PHX", "0022501185")
+    _played(4, "LAL", "0022501185")
+
+    def dashboard(gp: dict[str, int]) -> list[dict]:
+        return [
+            {"TEAM_ABBREVIATION": team, "TEAM_NAME": team, "GP": games, "W": 1, "L": games - 1}
+            for team, games in gp.items()
+        ]
+
+    pipeline = TeamStatsPipeline()
+
+    pipeline.nba_extractor.get_team_stats = lambda *_: dashboard(
+        {"BOS": 3, "NYK": 3, "PHX": 1, "LAL": 1, "DEN": 2}
+    )
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.ERROR
+    assert "2 team(s)" in result.error
+    assert "LAL, PHX" in result.error
+    assert "Data not ready yet" in result.error
+    assert TeamStats.select().count() == 0
+
+    pipeline.nba_extractor.get_team_stats = lambda *_: dashboard(
+        {"BOS": 3, "NYK": 3, "PHX": 2, "LAL": 2, "DEN": 2}
+    )
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.SUCCESS
+    rows = {
+        row.team_id: row.gp
+        for row in TeamStats.select().where(TeamStats.as_of_date == NIGHT)
+    }
+    assert rows == {"BOS": 3, "NYK": 3, "PHX": 2, "LAL": 2, "DEN": 2}
+
+
+@pytest.mark.integration
+def test_team_stats_are_not_held_on_a_day_without_games(integration_db) -> None:
+    """A manual run the morning after: today's games are scheduled, nothing is played."""
+    _game("0022501120", NIGHT - timedelta(days=1), "PHX", "LAL")
+    _game("0022501185", NIGHT, "PHX", "LAL", status="scheduled")
+
+    pipeline = TeamStatsPipeline()
+    pipeline.nba_extractor.get_team_stats = lambda *_: [
+        {"TEAM_ABBREVIATION": "PHX", "GP": 1, "W": 1, "L": 0},
+        {"TEAM_ABBREVIATION": "LAL", "GP": 1, "W": 0, "L": 1},
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.SUCCESS
+    assert TeamStats.select().where(TeamStats.as_of_date == NIGHT).count() == 2
+
+
+@pytest.mark.integration
+def test_the_cup_final_holds_neither_pipeline(integration_db) -> None:
+    """The game log carries the Cup final; the season dashboards never count it.
+
+    2025-12-16 left 18 such rows (NYK and SAS). Waiting on those players would
+    fail both pipelines on every poll of that night.
+    """
+    _game("0062500001", NIGHT, "NYK", "SAS")
+    _played(1, "NYK", "0062500001")
+    _played(2, "SAS", "0062500001")
+    _season_row(1, "NYK", 25, NIGHT - timedelta(days=3))
+    _season_row(2, "SAS", 25, NIGHT - timedelta(days=3))
+
+    season = PlayerSeasonStatsPipeline()
+    season.espn_extractor.get_player_data = lambda: {}
+    season.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "NYK", 25), _leader(2, "SAS", 25),
+    ]
+    assert season._run_sync(nba_date=NIGHT).status == ApiStatus.SUCCESS
+
+    teams = TeamStatsPipeline()
+    teams.nba_extractor.get_team_stats = lambda *_: [
+        {"TEAM_ABBREVIATION": "NYK", "GP": 25, "W": 18, "L": 7},
+        {"TEAM_ABBREVIATION": "SAS", "GP": 25, "W": 17, "L": 8},
+    ]
+    assert teams._run_sync(nba_date=NIGHT).status == ApiStatus.SUCCESS
+
+
+def _team_dashboard(gp: dict[str, int]) -> list[dict]:
+    return [
+        {"TEAM_ABBREVIATION": team, "TEAM_NAME": team, "GP": games, "W": 1, "L": games - 1}
+        for team, games in gp.items()
+    ]
+
+
+@pytest.mark.integration
+def test_a_playoff_game_the_schedule_does_not_have_holds_neither_pipeline(integration_db) -> None:
+    """The first playoff weekend: one series is in the schedule, the next is not yet.
+
+    The schedule learns a playoff game once its teams are named, so a game
+    played before the next sync lands in the game log without a game id.
+    Nothing says what kind of game that row is but the night it was played
+    on, and no season dashboard moves on a playoff night. Counted as regular
+    season, those rows failed both pipelines on every poll.
+    """
+    night = date(2026, 4, 18)
+    _game("0022501190", night - timedelta(days=6), "BOS", "PHI")
+    _game("0042500111", night, "DET", "ORL")
+    _played(1, "DET", "0042500111", night)
+    _played(2, "ORL", "0042500111", night)
+    # 0042500161 is not in nba.games, so its rows are stored without an id.
+    _played(3, "BOS", "0042500161", night)
+    _played(4, "PHI", "0042500161", night)
+    assert PlayerGameStats.get(PlayerGameStats.player == 3).game_id is None
+    for player_id, team in ((1, "DET"), (2, "ORL"), (3, "BOS"), (4, "PHI")):
+        _season_row(player_id, team, 70, night - timedelta(days=6))
+
+    season = PlayerSeasonStatsPipeline()
+    season.espn_extractor.get_player_data = lambda: {}
+    season.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "DET", 70), _leader(2, "ORL", 70), _leader(3, "BOS", 70), _leader(4, "PHI", 70),
+    ]
+    teams = TeamStatsPipeline()
+    teams.nba_extractor.get_team_stats = lambda *_: _team_dashboard(
+        {"DET": 1, "ORL": 1, "BOS": 1, "PHI": 1}
+    )
+
+    statuses = {
+        pipeline.config.name: pipeline._run_sync(nba_date=night).status
+        for pipeline in (season, teams)
+    }
+
+    assert statuses == {
+        "player_season_stats": ApiStatus.SUCCESS,
+        "team_stats": ApiStatus.SUCCESS,
+    }
+
+
+@pytest.mark.integration
+def test_a_regular_season_game_the_schedule_does_not_have_is_still_waited_for(integration_db) -> None:
+    """The other half of the rule: on a regular-season night a row without an id counts."""
+    _game("0022501180", NIGHT, "BOS", "NYK")
+    _played(1, "BOS", "0022501180")
+    _played(2, "PHX", "0022501185")  # not in nba.games
+    assert PlayerGameStats.get(PlayerGameStats.player == 2).game_id is None
+    _season_row(1, "BOS", 63, NIGHT - timedelta(days=2))
+    _season_row(2, "PHX", 63, NIGHT - timedelta(days=2))
+
+    season = PlayerSeasonStatsPipeline()
+    season.espn_extractor.get_player_data = lambda: {}
+    season.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 64), _leader(2, "PHX", 63),
+    ]
+    result = season._run_sync(nba_date=NIGHT)
+    assert result.status == ApiStatus.ERROR
+    assert "1 of 2 players" in result.error
+
+    teams = TeamStatsPipeline()
+    teams.nba_extractor.get_team_stats = lambda *_: _team_dashboard(
+        {"BOS": 1, "NYK": 1, "PHX": 0}
+    )
+    result = teams._run_sync(nba_date=NIGHT)
+    assert result.status == ApiStatus.ERROR
+    assert "1 team(s)" in result.error and "PHX" in result.error
+
+
+@pytest.mark.integration
+def test_a_backfill_run_during_the_slate_does_not_hold_the_nights_run(integration_db) -> None:
+    """`?date=` for an earlier night, run after tonight's early game reached the API.
+
+    The backfill writes today's totals under the old date, so the early
+    player's newest row already holds tonight's game. He never changes again
+    and has no row dated tonight: judged against that row, the night's run
+    failed on every poll with the API fully caught up, and the late player's
+    totals were never written.
+    """
+    earlier = NIGHT - timedelta(days=2)
+    for game_id, home, away, tip_off in (
+        ("0022501180", "BOS", "NYK", time(19, 0)),
+        ("0022501185", "PHX", "LAL", time(22, 0)),
+    ):
+        Game.create(
+            game_id=game_id, game_date=NIGHT, season=SEASON,
+            home_team_id=home, away_team_id=away, status="final",
+            home_score=110, away_score=104, start_time_et=tip_off,
+        )
+    _played(1, "BOS", "0022501180")   # early game
+    _played(2, "PHX", "0022501185")   # late game
+    _season_row(1, "BOS", 63, earlier - timedelta(days=2))
+    _season_row(2, "PHX", 63, earlier - timedelta(days=2))
+    # Written days before the night, not when this test ran.
+    PlayerSeasonStats.update(updated_at=datetime(2026, 4, 5, 6, 0)).execute()
+
+    pipeline = PlayerSeasonStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+
+    # The backfill, at 20:30 ET: both played the earlier night too, and
+    # tonight's early game is already in the dashboard.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 65), _leader(2, "PHX", 64),
+    ]
+    assert pipeline._run_sync(date_override=earlier).status == ApiStatus.SUCCESS
+    PlayerSeasonStats.update(updated_at=datetime(2026, 4, 9, 0, 30)).where(
+        PlayerSeasonStats.as_of_date == earlier
+    ).execute()
+
+    # Tonight's run, with the dashboard fully caught up.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(1, "BOS", 65), _leader(2, "PHX", 65),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.SUCCESS
+    newest = {
+        row.player_id: (row.as_of_date, row.gp)
+        for row in PlayerSeasonStats.latest_per_player(SEASON)
+    }
+    assert newest == {1: (earlier, 65), 2: (NIGHT, 65)}
+
+
+@pytest.mark.integration
+def test_a_player_with_no_season_row_yet_is_held_to_his_games_in_the_log(integration_db) -> None:
+    """With nothing to compare his games played against, the game log is the baseline."""
+    earlier = NIGHT - timedelta(days=2)
+    _game("0022501160", earlier, "PHX", "DEN")
+    _game("0022501185", NIGHT, "PHX", "LAL")
+    # One game already in the log, and no season row: that night's run never completed.
+    _played(2, "PHX", "0022501160", game_date=earlier)
+    _played(2, "PHX", "0022501185")
+    # A season debut: nothing before tonight.
+    _played(3, "LAL", "0022501185")
+
+    pipeline = PlayerSeasonStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+
+    # The dashboard still counts only the earlier game for player 2.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(2, "PHX", 1), _leader(3, "LAL", 1),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.ERROR
+    assert "1 of 2 players" in result.error
+    assert not PlayerSeasonStats.select().where(PlayerSeasonStats.as_of_date == NIGHT).exists()
+
+    # Tonight's game lands: both are written, the debut on its first game.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(2, "PHX", 2), _leader(3, "LAL", 1),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.SUCCESS
+    rows = {
+        row.player_id: row.gp
+        for row in PlayerSeasonStats.select().where(PlayerSeasonStats.as_of_date == NIGHT)
+    }
+    assert rows == {2: 2, 3: 1}

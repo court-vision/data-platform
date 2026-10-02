@@ -9,11 +9,12 @@ from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerGameStats
 from db.models.nba.games import Game
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
 from pipelines.transformers import normalize_name, calculate_fantasy_points, minutes_to_int
+from pipelines.transformers.minutes import seconds_played
 
 
 class PlayerGameStatsPipeline(BasePipeline):
@@ -66,7 +67,7 @@ class PlayerGameStatsPipeline(BasePipeline):
             # NBA API returned nothing, the player game log API hasn't updated yet.
             expected_games = Game.get_games_on_date(game_date)
             if expected_games:
-                raise RuntimeError(
+                raise DataNotReady(
                     f"NBA API returned no stats for {date_str} but "
                     f"{len(expected_games)} game(s) were expected. "
                     "Data not ready yet — will retry."
@@ -94,7 +95,7 @@ class PlayerGameStatsPipeline(BasePipeline):
                     received_count=len(api_game_ids),
                     missing_game_ids=list(missing_games),
                 )
-                raise RuntimeError(
+                raise DataNotReady(
                     f"NBA API returned stats for {len(api_game_ids)} of "
                     f"{len(expected_game_ids)} games on {date_str}. "
                     f"Missing: {missing_games}. Data not ready yet — will retry."
@@ -106,9 +107,14 @@ class PlayerGameStatsPipeline(BasePipeline):
             if pd.isna(minutes_value) or minutes_value == "" or minutes_value is None:
                 continue
 
-            minutes_int = minutes_to_int(minutes_value)
-            if minutes_int == 0:
+            # Skip only a player who did not play. MIN is minutes as a float
+            # (0.67 for forty seconds), so someone who took the floor for less
+            # than a minute truncates to 0 below. The NBA counts that game and
+            # whatever he did in it, so the row is stored, with `min` 0.
+            if seconds_played(minutes_value) <= 0:
                 continue
+
+            minutes_int = minutes_to_int(minutes_value)
 
             player_id = int(row["PLAYER_ID"])
             player_name = row["PLAYER_NAME"]

@@ -8,6 +8,8 @@ import pytest
 from db.models.nba.games import Game
 from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.players import Player
+from pipelines.base import DataNotReady
+from pipelines.context import PipelineContext
 from pipelines.player_game_stats import PlayerGameStatsPipeline
 from schemas.common import ApiStatus
 
@@ -70,6 +72,28 @@ def test_player_game_stats_pipeline_fails_on_incomplete_games(integration_db) ->
 
 
 @pytest.mark.integration
+def test_a_game_log_that_has_not_landed_is_waiting_not_a_crash(integration_db, alerts) -> None:
+    """Both of its readiness checks: some of the night's games missing, and all of them."""
+    game_date = date(2026, 2, 14)
+    _seed_expected_game(game_date, "0022500001")
+    _seed_expected_game(game_date, "0022500002")
+
+    pipeline = PlayerGameStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+    pipeline.nba_extractor.get_game_logs = lambda *_: _stats_df(game_id="0022500001")
+
+    result = pipeline._run_sync(nba_date=game_date)
+
+    assert result.status == ApiStatus.ERROR
+    assert alerts.keys() == ["pipeline_waiting:player_game_stats"]
+    assert alerts.events[0].severity == "warning"
+
+    pipeline.nba_extractor.get_game_logs = lambda *_: pd.DataFrame()
+    with pytest.raises(DataNotReady, match="no stats"):
+        pipeline.execute(PipelineContext("player_game_stats", nba_date=game_date))
+
+
+@pytest.mark.integration
 def test_player_game_stats_pipeline_upserts_idempotently(integration_db) -> None:
     game_date = date(2026, 2, 14)
     _seed_expected_game(game_date, "0022500001")
@@ -124,3 +148,41 @@ def test_a_game_the_schedule_has_not_caught_up_with_still_lands(integration_db) 
     row = PlayerGameStats.select().first()
     assert row is not None and row.game_id is None
     assert row.game_date == game_date, "the box score survived without its game"
+
+
+@pytest.mark.integration
+def test_a_sub_minute_appearance_is_a_stored_game(integration_db) -> None:
+    """Forty seconds truncates to 0 minutes and is still a game the NBA counts.
+
+    The season GP goes up for it, so a missing row here is a game the season
+    table has and the game log does not. A player who did not play (no minutes
+    at all) is still left out.
+    """
+    game_date = date(2026, 2, 14)
+    _seed_expected_game(game_date, "0022500001")
+
+    stats = pd.concat(
+        [_stats_df(game_id="0022500001")] * 3, ignore_index=True
+    ).astype({"MIN": object})
+    counting = ["PTS", "REB", "AST", "STL", "BLK", "TOV", "FGM", "FGA", "FG3M", "FG3A", "FTM", "FTA"]
+    # PlayerGameLogs reports MIN as minutes, a float: forty seconds, with a three.
+    stats.loc[1, ["PLAYER_ID", "PLAYER_NAME", "MIN"]] = [1628969, "Mikal Bridges", 40 / 60]
+    stats.loc[1, counting] = 0
+    stats.loc[1, ["PTS", "FGM", "FGA", "FG3M", "FG3A"]] = [3, 1, 1, 1, 1]
+    stats.loc[2, ["PLAYER_ID", "PLAYER_NAME", "MIN"]] = [203110, "Draymond Green", 0.0]
+    stats.loc[2, counting] = 0
+
+    pipeline = PlayerGameStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+    pipeline.nba_extractor.get_game_logs = lambda *_: stats
+
+    result = pipeline._run_sync(date_override=game_date)
+
+    assert result.status == ApiStatus.SUCCESS
+    stored = {row.player_id: row for row in PlayerGameStats.select()}
+    assert set(stored) == {201939, 1628969}, "the cameo is in, the DNP is out"
+
+    cameo = stored[1628969]
+    assert cameo.min == 0
+    assert (cameo.pts, cameo.fg3m, cameo.fpts) == (3, 1, 5)
+    assert cameo.game_id == "0022500001"

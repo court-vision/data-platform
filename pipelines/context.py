@@ -236,12 +236,16 @@ class PipelineContext:
             dedupe=PARTIAL_ALERT_DEDUPE,
         ))
 
-    def mark_failed(self, error: Exception) -> PipelineResult:
+    def mark_failed(self, error: Exception, waiting: bool = False) -> PipelineResult:
         """
         Mark pipeline as failed and return error result.
 
         Args:
             error: The exception that caused the failure
+            waiting: The pipeline found its upstream data not there yet
+                     (`pipelines.base.DataNotReady`). The run record and the
+                     result are those of any failure, so the next poll retries
+                     it; it is logged as a warning and not sent to Sentry.
 
         Returns:
             PipelineResult with error status
@@ -254,12 +258,15 @@ class PipelineContext:
         if self._db_run:
             self._db_run.mark_failed(error_msg)
 
-        self._log.error(
-            "pipeline_failed",
-            error=error_msg,
-            traceback=tb,
-        )
-        self._report_failure(error)
+        if waiting:
+            self._log.warning("pipeline_not_ready", error=error_msg)
+        else:
+            self._log.error(
+                "pipeline_failed",
+                error=error_msg,
+                traceback=tb,
+            )
+            self._report_failure(error)
 
         return PipelineResult(
             status=ApiStatus.ERROR,
