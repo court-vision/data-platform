@@ -3,8 +3,8 @@ Court Vision Data Platform — Public Interface
 
 Serves the pipeline monitoring dashboard on a public-facing port
 (0.0.0.0:$PORT): the React app at / (core/spa.py) and, beside it, the routes
-the dashboard calls, all token-authed: its status API, the pipeline triggers
-and the quality checks. Live routes, cron reporting and the API docs stay on
+the dashboard calls, all token-authed: its status API, the projections editor,
+the pipeline triggers and the quality checks. Live routes, cron reporting and the API docs stay on
 the private port (::8001) only.
 
 Started alongside main.py by entrypoint.sh. `GET /health` here also probes
@@ -31,7 +31,7 @@ from core.settings import settings
 from core.spa import DIST, mount_dashboard
 from core.telemetry import init_sentry
 from db.base import close_db, init_db
-from api.v1 import dashboard, pipelines, quality
+from api.v1 import dashboard, pipelines, projections, quality
 
 # Sentry must be initialised before the app exists so its ASGI integration wraps it.
 # No SENTRY_DSN (dev, tests) -> nothing happens.
@@ -86,6 +86,7 @@ setup_middleware(app)                         # exception handlers + CORS
 
 # Dashboard + pipeline triggers (triggers are token-authed via verify_pipeline_token)
 app.include_router(dashboard.router, prefix="/v1")
+app.include_router(projections.router, prefix="/v1")
 app.include_router(pipelines.router, prefix="/v1/internal")
 app.include_router(quality.router, prefix="/v1/internal")
 

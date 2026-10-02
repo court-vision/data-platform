@@ -8,6 +8,7 @@ import { Freshness } from "@/routes/Freshness"
 import { NotFound } from "@/routes/NotFound"
 import { Overview } from "@/routes/Overview"
 import { PipelineDetail } from "@/routes/PipelineDetail"
+import { Projections } from "@/routes/Projections"
 import { Quality } from "@/routes/Quality"
 import { QualityRun } from "@/routes/QualityRun"
 
@@ -28,6 +29,7 @@ const router = createBrowserRouter([
       { path: "pipelines/:name", element: <PipelineDetail /> },
       { path: "quality", element: <Quality /> },
       { path: "quality/runs/:runId", element: <QualityRun /> },
+      { path: "projections", element: <Projections /> },
       { path: "*", element: <NotFound /> },
     ],
   },

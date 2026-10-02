@@ -1,6 +1,435 @@
 {
   "components": {
     "schemas": {
+      "AdjustmentChange": {
+        "description": "The numbers an adjustment sets. Minutes and games are targets, not deltas.",
+        "properties": {
+          "games": {
+            "anyOf": [
+              {
+                "maximum": 82.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target games played",
+            "title": "Games"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "maximum": 48.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target minutes per game",
+            "title": "Minutes"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-stat multipliers on the final line, e.g. {\"blk\": 1.1}",
+            "title": "Rates"
+          },
+          "return_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "First game back: games are capped at the ones his team plays from then",
+            "title": "Return Date"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multiplier on scoring and playmaking together (pts, makes and attempts, ast, tov)",
+            "title": "Usage"
+          }
+        },
+        "title": "AdjustmentChange",
+        "type": "object"
+      },
+      "AdjustmentEntry": {
+        "description": "One version of one player's adjustment (nba.projection_adjustments).",
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "games": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Games"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minutes"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rates"
+          },
+          "return_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Date"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "state": {
+            "default": "live",
+            "title": "State",
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usage"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "minutes",
+          "games",
+          "return_date",
+          "usage",
+          "rates",
+          "note",
+          "source_url",
+          "author",
+          "created_at",
+          "state"
+        ],
+        "title": "AdjustmentEntry",
+        "type": "object"
+      },
+      "AdjustmentHistory": {
+        "properties": {
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "season": {
+            "title": "Season",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Every version, newest first",
+            "items": {
+              "$ref": "#/components/schemas/AdjustmentEntry"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "player_id",
+          "season",
+          "versions"
+        ],
+        "title": "AdjustmentHistory",
+        "type": "object"
+      },
+      "AdjustmentHistoryResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdjustmentHistory"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "AdjustmentHistoryResponse",
+        "type": "object"
+      },
+      "AdjustmentSave": {
+        "description": "A new version of a player's adjustment. Saving supersedes the live one.",
+        "properties": {
+          "author": {
+            "default": "dashboard",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Author",
+            "type": "string"
+          },
+          "games": {
+            "anyOf": [
+              {
+                "maximum": 82.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target games played",
+            "title": "Games"
+          },
+          "kind": {
+            "enum": [
+              "year2",
+              "trade",
+              "role",
+              "injury_return",
+              "injury_current",
+              "age",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "maximum": 48.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target minutes per game",
+            "title": "Minutes"
+          },
+          "note": {
+            "description": "Why \u2014 the judgment being recorded",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          },
+          "rates": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-stat multipliers on the final line, e.g. {\"blk\": 1.1}",
+            "title": "Rates"
+          },
+          "return_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "First game back: games are capped at the ones his team plays from then",
+            "title": "Return Date"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The report it came from",
+            "title": "Source Url"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multiplier on scoring and playmaking together (pts, makes and attempts, ast, tov)",
+            "title": "Usage"
+          }
+        },
+        "required": [
+          "kind",
+          "note"
+        ],
+        "title": "AdjustmentSave",
+        "type": "object"
+      },
+      "AdjustmentSaved": {
+        "description": "What a save or a retire did: the table write, and the republish that followed.",
+        "properties": {
+          "adjustment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentEntry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The new live adjustment; None after a retire"
+          },
+          "pipeline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "published": {
+            "description": "Whether cv-projection republished the board's snapshot",
+            "title": "Published",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "player_id",
+          "adjustment",
+          "published",
+          "pipeline"
+        ],
+        "title": "AdjustmentSaved",
+        "type": "object"
+      },
+      "AdjustmentSavedResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdjustmentSaved"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "AdjustmentSavedResponse",
+        "type": "object"
+      },
       "AllPipelinesResponse": {
         "description": "Response for triggering all pipelines",
         "properties": {
@@ -1530,6 +1959,481 @@
         "title": "PipelineRunsResponse",
         "type": "object"
       },
+      "PreviewRequest": {
+        "properties": {
+          "adjustment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The adjustment to try. Omit (or null) to preview having none."
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player_id"
+        ],
+        "title": "PreviewRequest",
+        "type": "object"
+      },
+      "PreviewResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProjectionPreview"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "PreviewResponse",
+        "type": "object"
+      },
+      "PreviewSide": {
+        "properties": {
+          "final": {
+            "$ref": "#/components/schemas/ProjectionLine"
+          },
+          "ranks": {
+            "$ref": "#/components/schemas/StandardRanks"
+          }
+        },
+        "required": [
+          "final",
+          "ranks"
+        ],
+        "title": "PreviewSide",
+        "type": "object"
+      },
+      "ProjectionLine": {
+        "description": "One per-game stat line and the games it is expected over.",
+        "properties": {
+          "ast": {
+            "default": 0.0,
+            "title": "Ast",
+            "type": "number"
+          },
+          "blk": {
+            "default": 0.0,
+            "title": "Blk",
+            "type": "number"
+          },
+          "fg3a": {
+            "default": 0.0,
+            "title": "Fg3A",
+            "type": "number"
+          },
+          "fg3m": {
+            "default": 0.0,
+            "title": "Fg3M",
+            "type": "number"
+          },
+          "fga": {
+            "default": 0.0,
+            "title": "Fga",
+            "type": "number"
+          },
+          "fgm": {
+            "default": 0.0,
+            "title": "Fgm",
+            "type": "number"
+          },
+          "fta": {
+            "default": 0.0,
+            "title": "Fta",
+            "type": "number"
+          },
+          "ftm": {
+            "default": 0.0,
+            "title": "Ftm",
+            "type": "number"
+          },
+          "games": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected games; None where the source has none",
+            "title": "Games"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min"
+          },
+          "pts": {
+            "default": 0.0,
+            "title": "Pts",
+            "type": "number"
+          },
+          "reb": {
+            "default": 0.0,
+            "title": "Reb",
+            "type": "number"
+          },
+          "stl": {
+            "default": 0.0,
+            "title": "Stl",
+            "type": "number"
+          },
+          "tov": {
+            "default": 0.0,
+            "title": "Tov",
+            "type": "number"
+          }
+        },
+        "required": [
+          "games",
+          "min",
+          "pts",
+          "reb",
+          "ast",
+          "stl",
+          "blk",
+          "tov",
+          "fgm",
+          "fga",
+          "fg3m",
+          "fg3a",
+          "ftm",
+          "fta"
+        ],
+        "title": "ProjectionLine",
+        "type": "object"
+      },
+      "ProjectionPreview": {
+        "description": "One player's published line and ranks, and what they would be under the edit.",
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/PreviewSide"
+          },
+          "before": {
+            "$ref": "#/components/schemas/PreviewSide"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "ranks_available": {
+            "title": "Ranks Available",
+            "type": "boolean"
+          },
+          "ranks_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ranks Reason"
+          }
+        },
+        "required": [
+          "player_id",
+          "before",
+          "after",
+          "ranks_available",
+          "ranks_reason"
+        ],
+        "title": "ProjectionPreview",
+        "type": "object"
+      },
+      "ProjectionRow": {
+        "description": "One projected player: the four lines, his ranks, and his live adjustment.",
+        "properties": {
+          "adjustment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentEntry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "age": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Age in the season being projected",
+            "title": "Age"
+          },
+          "blended": {
+            "$ref": "#/components/schemas/ProjectionLine",
+            "description": "The two combined, before any adjustment"
+          },
+          "espn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectionLine"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ESPN's projection, where ESPN has one"
+          },
+          "espn_ranks": {
+            "$ref": "#/components/schemas/StandardRanks",
+            "description": "ESPN's published draft ranks: points board and category board"
+          },
+          "espn_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ESPN's share of the blend: 0 with no ESPN line, 1 with no NBA history",
+            "title": "Espn Weight"
+          },
+          "final": {
+            "$ref": "#/components/schemas/ProjectionLine",
+            "description": "With the live adjustment applied: what is published"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "ranks": {
+            "$ref": "#/components/schemas/StandardRanks",
+            "description": "Court Vision's rank for the final line; nulls when the backend could not be asked"
+          },
+          "seasons": {
+            "description": "Start years of the seasons the statistical line was built from",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Seasons",
+            "type": "array"
+          },
+          "statistical": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectionLine"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "History alone: three seasons, aged and regressed. None for a rookie."
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          }
+        },
+        "required": [
+          "player_id",
+          "name",
+          "team",
+          "position",
+          "age",
+          "seasons",
+          "espn_weight",
+          "statistical",
+          "espn",
+          "blended",
+          "final",
+          "ranks",
+          "espn_ranks",
+          "adjustment"
+        ],
+        "title": "ProjectionRow",
+        "type": "object"
+      },
+      "ProjectionsData": {
+        "properties": {
+          "coefficients_version": {
+            "title": "Coefficients Version",
+            "type": "string"
+          },
+          "espn_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ESPN snapshot the lines were read from",
+            "title": "Espn As Of"
+          },
+          "espn_weight": {
+            "description": "The blend's default weight on ESPN's line",
+            "title": "Espn Weight",
+            "type": "number"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "kinds": {
+            "description": "The adjustment kinds the table accepts",
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StandardLeague"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "players": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectionRow"
+            },
+            "title": "Players",
+            "type": "array"
+          },
+          "published_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The latest Court Vision snapshot in nba.player_projections",
+            "title": "Published As Of"
+          },
+          "ranks_available": {
+            "description": "Whether the backend valued the pool",
+            "title": "Ranks Available",
+            "type": "boolean"
+          },
+          "ranks_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why not, when it did not",
+            "title": "Ranks Reason"
+          },
+          "season": {
+            "title": "Season",
+            "type": "string"
+          },
+          "unpublished": {
+            "default": 0,
+            "description": "Players whose line here differs from the published snapshot (or is missing from it): 0 means the board is reading exactly what this page shows",
+            "title": "Unpublished",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "season",
+          "coefficients_version",
+          "espn_weight",
+          "espn_as_of",
+          "published_as_of",
+          "unpublished",
+          "ranks_available",
+          "ranks_reason",
+          "league",
+          "kinds",
+          "players",
+          "fetched_at"
+        ],
+        "title": "ProjectionsData",
+        "type": "object"
+      },
+      "ProjectionsResponse": {
+        "description": "Response for GET /v1/dashboard/projections.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProjectionsData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "ProjectionsResponse",
+        "type": "object"
+      },
       "QualityCheckEntry": {
         "description": "Single failed/errored quality check entry.",
         "properties": {
@@ -2212,6 +3116,71 @@
         "title": "ServicesResponse",
         "type": "object"
       },
+      "StandardLeague": {
+        "description": "What the ranks were measured in.",
+        "properties": {
+          "league_size": {
+            "title": "League Size",
+            "type": "integer"
+          },
+          "playoff_weeks": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Playoff Weeks",
+            "type": "array"
+          },
+          "playoff_weight": {
+            "title": "Playoff Weight",
+            "type": "number"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "league_size",
+          "rounds",
+          "playoff_weight",
+          "playoff_weeks"
+        ],
+        "title": "StandardLeague",
+        "type": "object"
+      },
+      "StandardRanks": {
+        "description": "A place in the standard league: 12 teams, ESPN's default points weights or 9-cat.",
+        "properties": {
+          "categories": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categories"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
+          }
+        },
+        "required": [
+          "points",
+          "categories"
+        ],
+        "title": "StandardRanks",
+        "type": "object"
+      },
       "TableFreshness": {
         "description": "What date one table runs through, when it was last written, and the verdict.",
         "properties": {
@@ -2531,6 +3500,241 @@
         "summary": "Get Pipeline Runs",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/projections": {
+      "get": {
+        "description": "Every projected player with the four lines side by side \u2014 statistical,\nESPN, blend, final \u2014 his live adjustment, and where the final line ranks in\nthe standard league next to ESPN's own ranks.\n\nThe lines are computed here from the same inputs cv-projection reads, so\nthe page reflects an adjustment the moment it is saved; `unpublished` says\nhow many of them the published snapshot has not caught up with.",
+        "operationId": "get_projections_v1_dashboard_projections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Projections",
+        "tags": [
+          "projections"
+        ]
+      }
+    },
+    "/v1/dashboard/projections/preview": {
+      "post": {
+        "description": "One player's final line and standard ranks as they stand, and as they\nwould be under the adjustment in the body (or with none at all). Nothing is\nwritten. The whole pool is re-valued, because a rank is a place among\neverybody.",
+        "operationId": "preview_adjustment_v1_dashboard_projections_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Adjustment",
+        "tags": [
+          "projections"
+        ]
+      }
+    },
+    "/v1/dashboard/projections/{player_id}/adjustment": {
+      "delete": {
+        "description": "Withdraw the player's live adjustment without a replacement (the row is\nkept, marked retired), then republish the projection.",
+        "operationId": "retire_adjustment_v1_dashboard_projections__player_id__adjustment_delete",
+        "parameters": [
+          {
+            "description": "NBA player id (nba.players.id)",
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "description": "NBA player id (nba.players.id)",
+              "minimum": 1,
+              "title": "Player Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjustmentSavedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire Adjustment",
+        "tags": [
+          "projections"
+        ]
+      },
+      "put": {
+        "description": "Make the body the player's live adjustment for the season. The previous\nversion is kept and marked superseded. Then republish the projection.",
+        "operationId": "save_adjustment_v1_dashboard_projections__player_id__adjustment_put",
+        "parameters": [
+          {
+            "description": "NBA player id (nba.players.id)",
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "description": "NBA player id (nba.players.id)",
+              "minimum": 1,
+              "title": "Player Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjustmentSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjustmentSavedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Adjustment",
+        "tags": [
+          "projections"
+        ]
+      }
+    },
+    "/v1/dashboard/projections/{player_id}/adjustments": {
+      "get": {
+        "description": "Every version of the player's adjustment this season, newest first:\nthe live one, the ones it superseded, and any that were retired.",
+        "operationId": "get_adjustment_history_v1_dashboard_projections__player_id__adjustments_get",
+        "parameters": [
+          {
+            "description": "NBA player id (nba.players.id)",
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "description": "NBA player id (nba.players.id)",
+              "minimum": 1,
+              "title": "Player Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjustmentHistoryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Adjustment History",
+        "tags": [
+          "projections"
         ]
       }
     },
@@ -2945,6 +4149,76 @@
           }
         ],
         "summary": "Trigger Cumulative Player Stats",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/cv-projection": {
+      "post": {
+        "description": "Trigger the cv-projection pipeline.\n\nBuilds Court Vision's projection \u2014 three seasons of history, ESPN's line,\nthe curated adjustments \u2014 into nba.player_projections with source 'cv'.\nCalled daily by the 'cv-projection' cron job after preseason-market, and\nby the projections editor after an adjustment is saved.",
+        "operationId": "trigger_cv_projection_v1_internal_pipelines_cv_projection_post",
+        "parameters": [
+          {
+            "description": "Override snapshot date (YYYY-MM-DD). Omit for automatic date.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override snapshot date (YYYY-MM-DD). Omit for automatic date.",
+              "title": "Date"
+            }
+          },
+          {
+            "description": "Run outside the Aug 15 - Oct 31 preseason window.",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Run outside the Aug 15 - Oct 31 preseason window.",
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Cv Projection",
         "tags": [
           "pipelines"
         ]
@@ -3901,7 +5175,7 @@
     },
     "/v1/internal/pipelines/preseason-market": {
       "post": {
-        "description": "Trigger the preseason-market pipeline.\n\nSnapshots ESPN draft ranks, auction values, and real-draft crowd averages\n(ADP, average auction price) into nba.draft_market \u2014 plus projected stat\nlines into nba.player_projections once ESPN publishes them. Self-gating:\nno-ops outside the Aug 15 \u2013 Oct 31 window and when the league has not\nrolled to the target season. Called daily by the 'preseason-market' cron\njob in cron-runner during draft season.",
+        "description": "Trigger the preseason-market pipeline.\n\nSnapshots ESPN draft ranks, auction values, and real-draft crowd averages\n(ADP, average auction price) into nba.draft_market \u2014 plus projected stat\nlines into nba.player_projections once ESPN publishes them. Self-gating:\nno-ops outside the Aug 15 \u2013 Oct 31 window and when the league has not\nrolled to the target season. Called daily by the 'preseason-market' cron\njob in cron-runner during draft season.\n\nTwo pipelines follow it on the same trigger, in order: player-profiles, so\nevery player's current team is today's (it had no schedule of its own, and\na whole offseason of trades went unrecorded), then cv-projection, which is\nbuilt on the day's ESPN line and those rosters. Both run whatever the\nmarket run did; cv-projection gates itself on the same window.",
         "operationId": "trigger_preseason_market_v1_internal_pipelines_preseason_market_post",
         "parameters": [
           {
@@ -3970,6 +5244,60 @@
           }
         ],
         "summary": "Trigger Preseason Market",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/season-history": {
+      "post": {
+        "description": "Trigger the season-history pipeline.\n\nWrites one row per player per completed regular season into\nnba.player_history \u2014 the Court Vision projection's input. Manual: the\none-time backfill passes every season wanted; the yearly append passes\nnothing, after the regular season ends.",
+        "operationId": "trigger_season_history_v1_internal_pipelines_season_history_post",
+        "parameters": [
+          {
+            "description": "Seasons to write, e.g. `seasons=2023-24&seasons=2024-25`. Omit for the season just finished.",
+            "in": "query",
+            "name": "seasons",
+            "required": false,
+            "schema": {
+              "default": [],
+              "description": "Seasons to write, e.g. `seasons=2023-24&seasons=2024-25`. Omit for the season just finished.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Seasons",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Season History",
         "tags": [
           "pipelines"
         ]

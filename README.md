@@ -49,6 +49,7 @@ data-platform/
 │   ├── pipelines.py         # Pipeline trigger endpoints (/v1/internal/pipelines/*)
 │   ├── live.py              # Live schedule endpoint for cron-runner (/v1/live/*)
 │   ├── dashboard.py         # Pipeline monitoring dashboard (/v1/dashboard/*)
+│   ├── projections.py       # Projections editor (/v1/dashboard/projections/*)
 │   └── quality.py           # Data quality check endpoints (/v1/internal/quality/*)
 │
 ├── pipelines/
@@ -179,7 +180,7 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
-| `BACKEND_INTERNAL_URL` | No | — | Backend base URL for the lineup-alerts pipeline's `POST /v1/internal/jobs/lineup/evaluate` (authenticated with `PIPELINE_API_TOKEN`). Unset → the pipeline logs `backend_not_configured` and evaluates nothing. Must be `http://*.railway.internal` on Railway: prod `http://api.railway.internal:8080`, staging `http://api-staging.railway.internal:8080` |
+| `BACKEND_INTERNAL_URL` | No | — | Backend base URL for the lineup-alerts pipeline's `POST /v1/internal/jobs/lineup/evaluate` and the projections editor's `POST /v1/internal/jobs/valuation/standard` (both authenticated with `PIPELINE_API_TOKEN`). Unset → the pipeline logs `backend_not_configured` and evaluates nothing, and the editor shows its lines without ranks. Must be `http://*.railway.internal` on Railway: prod `http://api.railway.internal:8080`, staging `http://api-staging.railway.internal:8080` |
 | `BACKEND_TIMEOUT_SECONDS` | No | `45` | Read timeout per evaluate call (connect timeout is fixed at 5 s; no retry) |
 | `ALERT_WEBHOOK_URL` | No | — | Discord (or Slack) incoming webhook for ops alerts (`#cv-alerts`). Unset → alerts are a no-op; set on **production only**. See [Alerting](#alerting) |
 | `ALERT_WEBHOOK_FORMAT` | No | `discord` | `discord` (embeds) or `slack` (`{"text": ...}`) |
@@ -255,6 +256,7 @@ Response models the dashboard consumes extend `schemas.common.ApiModel`, so fiel
 |---|---|---|
 | `/` Overview | `/status` (30 s), `/services` (60 s) | Every pipeline by category with a Run button, the scheduler timeline, data quality, batch jobs, what is deployed |
 | `/data` Data | `/freshness` (60 s) | Every table a pipeline writes (`PipelineConfig.target_table`): the date it runs through, its last write, and whether that is what the season expects. Nightly tables are judged against the schedule's game days (post-game tables through the last settled night, pre-game tables through the last day whose first tip-off has passed); live, scheduled and conditional writers are shown, not judged |
+| `/projections` Projections | `/projections` (on open, after a write, on Refresh) | Court Vision's projection: every player's published line with our rank beside ESPN's, in points or 9-cat. A row opens onto the four lines it is built from, the versions of its adjustment, and the editor. An edit must be previewed (the line and the rank move) before it can be saved; a save republishes. Format, filter, sort, search and the open player are in the URL |
 | `/pipelines/:name` | `/pipelines/{name}/runs?limit=` (30 s) | One pipeline: what the registry says about it (trigger, cron job, gates, dependencies), a summary over its newest runs, a duration chart, and the runs with their errors. Linked from every Overview row; `?limit=50\|100\|200` is in the URL, so a page can be shared |
 | `/quality` | `/quality?limit=` (60 s) | Every data-quality check as it is defined (what it asserts, the table and pipelines it guards, its SQL) against its result in each of the newest runs: a checks × runs matrix that tells a failure new tonight from one a week old. `?limit=20\|50\|100` is in the URL |
 | `/quality/runs/:runId` | `/quality/runs/{run_id}` | One run: every check's outcome, failures first and opened, each with its definition; a check removed from the code since keeps its result. Older / Newer step through runs |
@@ -304,6 +306,9 @@ All `/v1/internal/*` endpoints require the `Authorization: Bearer <PIPELINE_API_
 | `POST` | `/v1/internal/pipelines/breakout-detection` | Individual: breakout candidate detection |
 | `POST` | `/v1/internal/pipelines/lineup-alerts` | Individual: email lineup alerts |
 | `POST` | `/v1/internal/pipelines/player-profiles` | Individual: player profile data |
+| `POST` | `/v1/internal/pipelines/preseason-market` | ESPN's draft ranks, ADP and projections for the coming season (Aug 15 – Oct 31). Chains `player-profiles` and `cv-projection` behind it. Fired daily by the cron-runner `preseason-market` job |
+| `POST` | `/v1/internal/pipelines/cv-projection` | Court Vision's own projection (`nba.player_projections`, `source='cv'`): three seasons of history, ESPN's line, the curated adjustments. Same window as preseason-market; `?force=true` runs outside it. Also run by the projections editor after every save |
+| `POST` | `/v1/internal/pipelines/season-history` | One row per player per season in `nba.player_history`, what the projection is built from. Manual: repeat `?seasons=2012-13&seasons=2013-14…` to backfill; with none, the season just finished |
 
 All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query param for backfills.
 
@@ -341,6 +346,11 @@ All individual trigger endpoints accept an optional `?date=YYYY-MM-DD` query par
 | `GET` | `/v1/dashboard/status` | Token | Pipeline health, cron runs, quality runs, batch jobs |
 | `GET` | `/v1/dashboard/services` | Token | Running version, environment and uptime of this service and the backend |
 | `GET` | `/v1/dashboard/freshness` | Token | What date each pipeline's table runs through, when it was last written, and a verdict (`fresh`, `stale`, `idle`, `empty`, `unjudged`, `error`) against the game days in `nba.games` — the schedule, never the results, so a failed batch cannot move its own mark (`services/freshness_service.py`) |
+| `GET` | `/v1/dashboard/projections` | Token | Every projected player: the statistical line, ESPN's, the blend and the final line, his live adjustment, and where the final line ranks in standard points and standard 9-cat beside ESPN's ranks. Computed from the pipeline's own inputs, so it reflects a save at once; `unpublished` counts the players the published snapshot has not caught up with |
+| `POST` | `/v1/dashboard/projections/preview` | Token | One player's final line and ranks under a proposed adjustment (or with none). Writes nothing |
+| `PUT` | `/v1/dashboard/projections/{player_id}/adjustment` | Token | Save a new version of the player's adjustment (the old one is kept, superseded), then run `cv-projection` |
+| `DELETE` | `/v1/dashboard/projections/{player_id}/adjustment` | Token | Retire the live adjustment (kept, marked retired), then run `cv-projection`. 404 when there is none |
+| `GET` | `/v1/dashboard/projections/{player_id}/adjustments` | Token | Every version of the player's adjustment this season, newest first |
 | `GET` | `/v1/dashboard/pipelines/{name}/runs` | Token | One pipeline's registry config and its newest runs (`?limit=`, 1–200, default 50) with a summary over that window; only `last_success_at` is all-time. A row left `running` past the two-hour cutoff of `PipelineRun.is_running` has the status `stuck`. 404 for a name not in the registry |
 | `GET` | `/v1/dashboard/quality` | Token | The check catalogue (`name`, `severity`, `group`, `table`, `pipelines`, `failure_message`, `sql`) with each check's result in the newest runs (`?limit=`, 1–100, default 20), aligned with `runs` |
 | `GET` | `/v1/dashboard/quality/runs/{run_id}` | Token | One run's outcomes, errors and failures first, each with its definition (`null` once the check is gone from the code), and the ids of the runs before and after. 404 for an unknown or malformed id |
@@ -552,6 +562,10 @@ Key tables written by this service:
 | `nba.player_ownership` | PlayerOwnershipPipeline |
 | `nba.player_rolling_stats` | PlayerRollingStatsPipeline |
 | `nba.player_profiles` | PlayerProfilesPipeline |
+| `nba.draft_market`, `nba.player_projections` (`source='espn'`) | PreseasonMarketPipeline |
+| `nba.player_projections` (`source='cv'`) | CVProjectionPipeline |
+| `nba.player_history` | SeasonHistoryPipeline |
+| `nba.projection_adjustments` | The projections editor (`api/v1/projections.py`) and `scripts/seed_projection_adjustments.py`; append-only |
 | `nba.team_stats` | TeamStatsPipeline |
 | `nba.games` | GameSchedulePipeline, GameStartTimesPipeline |
 | `nba.live_player_stats` | LiveGameStatsPipeline |
