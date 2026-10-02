@@ -62,6 +62,8 @@ def season(monkeypatch):
     pipeline._gp_before_tip_off = lambda game_date, season, player_ids: dict(
         pipeline.stored if pipeline.before_tip_off is None else pipeline.before_tip_off
     )
+    pipeline.logged_before = {}
+    pipeline._games_logged_before = lambda game_date, season, player_ids: dict(pipeline.logged_before)
 
     monkeypatch.setattr(Player, "upsert_player", classmethod(lambda cls, **kw: None))
     monkeypatch.setattr(
@@ -113,6 +115,19 @@ class TestSeasonStatsWaitForTheNight:
 
         with pytest.raises(RuntimeError, match="1 of 2 players"):
             season.execute(_ctx("player_season_stats"))
+
+    def test_a_player_with_no_season_row_must_outcount_his_games_in_the_log(self, season):
+        """No row to compare against, so an entry alone is not a new game."""
+        season.stored = {EARLY: 63}
+        season.logged_before = {LATE: 1}
+        _leaders(season, {EARLY: 64, LATE: 1})
+
+        with pytest.raises(RuntimeError, match="1 of 2 players"):
+            season.execute(_ctx("player_season_stats"))
+
+        _leaders(season, {EARLY: 64, LATE: 2})
+        season.execute(_ctx("player_season_stats"))
+        assert {u["player_id"]: u["stats"]["gp"] for u in season.upserts} == {EARLY: 64, LATE: 2}
 
     def test_writes_once_everyone_who_played_has_moved(self, season):
         _leaders(season, {EARLY: 64, LATE: 64})
