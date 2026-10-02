@@ -22,7 +22,7 @@ from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
 from pipelines.rankings_view import refresh_rankings
-from pipelines.readiness import regular_season_game_rows
+from pipelines.readiness import REGULAR_SEASON_PREFIX, regular_season_game_rows
 from pipelines.transformers import normalize_name, calculate_fantasy_points
 
 
@@ -154,8 +154,38 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         )
         return {row.player_id: row.gp for row in rows}
 
+    def _games_logged_before(
+        self, game_date: date, season: str, player_ids: set[int]
+    ) -> dict[int, int]:
+        """Each player's regular-season games in the log before that night, this season.
+
+        A game id carries its kind and its season ("00225..." is a 2025-26
+        regular-season game), so the count needs no dates. Rows without a game
+        id are left out: an undercount lets a player through as before, where
+        an overcount would hold the run all night for a game he never played.
+        """
+        prefix = REGULAR_SEASON_PREFIX + season[2:4]
+        rows = (
+            PlayerGameStats.select(
+                PlayerGameStats.player_id,
+                fn.COUNT(PlayerGameStats.id).alias("games"),
+            )
+            .where(
+                PlayerGameStats.player_id.in_(list(player_ids))
+                & (PlayerGameStats.game_date < game_date)
+                & PlayerGameStats.game_id.startswith(prefix)
+            )
+            .group_by(PlayerGameStats.player_id)
+        )
+        return {row.player_id: row.games for row in rows}
+
     def _players_behind(
-        self, game_date: date, season: str, incremented: set[int], api_gp: dict[int, int]
+        self,
+        game_date: date,
+        season: str,
+        incremented: set[int],
+        api_gp: dict[int, int],
+        known: set[int],
     ) -> tuple[set[int], set[int]]:
         """Who played that night, and which of them the API has not caught up on.
 
@@ -183,6 +213,12 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         ordinary night those are his newest rows and nothing changes. It is
         still a new game and not the right number: where the backfilled night
         was itself a game he played, he passes on that one, as above.
+
+        A player with no season row yet (`known` is who has one) is in
+        `incremented` whatever the API says, because there is nothing to
+        compare his games played against. For him the game log is the
+        baseline: the API has to count more games than the log held for him
+        before the night. On his season debut that is any game at all.
         """
         played = self._played_on(game_date)
         behind = played - incremented
@@ -196,6 +232,14 @@ class PlayerSeasonStatsPipeline(BasePipeline):
                     for player_id in behind
                     if api_gp.get(player_id, 0) <= before_tip_off.get(player_id, 0)
                 }
+        without_a_row = (played & incremented) - known
+        if without_a_row:
+            logged = self._games_logged_before(game_date, season, without_a_row)
+            behind |= {
+                player_id
+                for player_id in without_a_row
+                if api_gp.get(player_id, 0) <= logged.get(player_id, 0)
+            }
         return played, behind
 
     def execute(self, ctx: PipelineContext) -> None:
@@ -275,7 +319,7 @@ class PlayerSeasonStatsPipeline(BasePipeline):
         # the API has no as-of date, so its totals say nothing about that night.
         if not ctx.date_override:
             played, behind = self._players_behind(
-                game_date, season, set(entries), api_gp
+                game_date, season, set(entries), api_gp, set(db_gp_map)
             )
             if behind:
                 ctx.log.warning(

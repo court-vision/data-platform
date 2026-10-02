@@ -585,3 +585,42 @@ def test_a_backfill_run_during_the_slate_does_not_hold_the_nights_run(integratio
         for row in PlayerSeasonStats.latest_per_player(SEASON)
     }
     assert newest == {1: (earlier, 65), 2: (NIGHT, 65)}
+
+
+@pytest.mark.integration
+def test_a_player_with_no_season_row_yet_is_held_to_his_games_in_the_log(integration_db) -> None:
+    """With nothing to compare his games played against, the game log is the baseline."""
+    earlier = NIGHT - timedelta(days=2)
+    _game("0022501160", earlier, "PHX", "DEN")
+    _game("0022501185", NIGHT, "PHX", "LAL")
+    # One game already in the log, and no season row: that night's run never completed.
+    _played(2, "PHX", "0022501160", game_date=earlier)
+    _played(2, "PHX", "0022501185")
+    # A season debut: nothing before tonight.
+    _played(3, "LAL", "0022501185")
+
+    pipeline = PlayerSeasonStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+
+    # The dashboard still counts only the earlier game for player 2.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(2, "PHX", 1), _leader(3, "LAL", 1),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.ERROR
+    assert "1 of 2 players" in result.error
+    assert not PlayerSeasonStats.select().where(PlayerSeasonStats.as_of_date == NIGHT).exists()
+
+    # Tonight's game lands: both are written, the debut on its first game.
+    pipeline.nba_extractor.get_league_leaders = lambda *_: [
+        _leader(2, "PHX", 2), _leader(3, "LAL", 1),
+    ]
+    result = pipeline._run_sync(nba_date=NIGHT)
+
+    assert result.status == ApiStatus.SUCCESS
+    rows = {
+        row.player_id: row.gp
+        for row in PlayerSeasonStats.select().where(PlayerSeasonStats.as_of_date == NIGHT)
+    }
+    assert rows == {2: 2, 3: 1}
