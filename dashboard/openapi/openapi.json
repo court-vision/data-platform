@@ -2488,6 +2488,324 @@
         "title": "QualityCheckEntry",
         "type": "object"
       },
+      "QualityCheckInfo": {
+        "description": "A quality check as it is defined in code: what it asserts and what it guards.",
+        "properties": {
+          "failure_message": {
+            "title": "Failure Message",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pipelines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pipelines",
+            "type": "array"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "severity",
+          "group",
+          "table",
+          "pipelines",
+          "failure_message",
+          "sql"
+        ],
+        "title": "QualityCheckInfo",
+        "type": "object"
+      },
+      "QualityCheckOutcome": {
+        "description": "One check's result in one run, with its definition when it still exists.",
+        "properties": {
+          "check_name": {
+            "title": "Check Name",
+            "type": "string"
+          },
+          "definition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualityCheckInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "failures": {
+            "default": 0,
+            "title": "Failures",
+            "type": "integer"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "check_name",
+          "status",
+          "severity",
+          "failures",
+          "message",
+          "details",
+          "duration_ms",
+          "definition"
+        ],
+        "title": "QualityCheckOutcome",
+        "type": "object"
+      },
+      "QualityCheckRow": {
+        "description": "A check with its result in each run of the window.",
+        "properties": {
+          "failure_message": {
+            "title": "Failure Message",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pipelines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pipelines",
+            "type": "array"
+          },
+          "results": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "table": {
+            "title": "Table",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "severity",
+          "group",
+          "table",
+          "pipelines",
+          "failure_message",
+          "sql",
+          "results"
+        ],
+        "title": "QualityCheckRow",
+        "type": "object"
+      },
+      "QualityOverviewData": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/QualityCheckRow"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/QualityRunEntry"
+            },
+            "title": "Runs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "checks",
+          "limit",
+          "fetched_at"
+        ],
+        "title": "QualityOverviewData",
+        "type": "object"
+      },
+      "QualityOverviewResponse": {
+        "description": "Response for GET /v1/dashboard/quality.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualityOverviewData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "QualityOverviewResponse",
+        "type": "object"
+      },
+      "QualityRunDetailData": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/QualityCheckOutcome"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "newer_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newer Run Id"
+          },
+          "older_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Older Run Id"
+          },
+          "run": {
+            "$ref": "#/components/schemas/QualityRunEntry"
+          }
+        },
+        "required": [
+          "run",
+          "checks",
+          "older_run_id",
+          "newer_run_id",
+          "fetched_at"
+        ],
+        "title": "QualityRunDetailData",
+        "type": "object"
+      },
+      "QualityRunDetailResponse": {
+        "description": "Response for GET /v1/dashboard/quality/runs/{run_id}.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualityRunDetailData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "QualityRunDetailResponse",
+        "type": "object"
+      },
       "QualityRunEntry": {
         "description": "Summary of a data quality run.",
         "properties": {
@@ -3417,6 +3735,107 @@
         "summary": "Get Adjustment History",
         "tags": [
           "projections"
+        ]
+      }
+    },
+    "/v1/dashboard/quality": {
+      "get": {
+        "description": "The quality page: every check as it is defined (what it asserts, the table\nand pipelines it guards, its SQL) with its result in each of the newest\nruns, so a failure can be read as \"new tonight\" or \"failing for a week\".",
+        "operationId": "get_quality_v1_dashboard_quality_get",
+        "parameters": [
+          {
+            "description": "Newest runs to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Newest runs to return",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Quality",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/quality/runs/{run_id}": {
+      "get": {
+        "description": "One run: every check's outcome, not only the failures, each with its definition.",
+        "operationId": "get_quality_run_v1_dashboard_quality_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityRunDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Quality Run",
+        "tags": [
+          "dashboard"
         ]
       }
     },

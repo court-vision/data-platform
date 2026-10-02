@@ -1,4 +1,4 @@
-import { Activity, Database, SlidersHorizontal, type LucideIcon } from "lucide-react"
+import { Activity, Database, FlaskConical, SlidersHorizontal, type LucideIcon } from "lucide-react"
 
 export interface NavItem {
   to: string
@@ -12,5 +12,6 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   { to: "/", label: "Overview", icon: Activity, end: true },
   { to: "/data", label: "Data", icon: Database },
+  { to: "/quality", label: "Quality", icon: FlaskConical },
   { to: "/projections", label: "Projections", icon: SlidersHorizontal },
 ]

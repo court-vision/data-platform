@@ -1,4 +1,5 @@
 import { FlaskConical, Loader2 } from "lucide-react"
+import { Link } from "react-router"
 
 import { StatusBadge } from "@/components/StateBadge"
 import { Button } from "@/components/ui/button"
@@ -23,7 +24,12 @@ export function QualityPanel({ quality_latest: latest, recent_quality_runs: rece
             Data quality
             <span className="font-mono text-xs font-normal text-muted-foreground">{recent.length}</span>
           </CardTitle>
-          <CardDescription>Assertions over the nba.* tables. Runs take a minute.</CardDescription>
+          <CardDescription>
+            Assertions over the nba.* tables. Runs take a minute.{" "}
+            <Link to="/quality" className="text-primary underline-offset-4 hover:underline">
+              Every check and its history
+            </Link>
+          </CardDescription>
         </div>
         <Button variant="outline" size="sm" disabled={run.isPending} onClick={() => run.mutate()} className="gap-1.5">
           {run.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <FlaskConical className="size-3.5" aria-hidden />}
@@ -37,7 +43,12 @@ export function QualityPanel({ quality_latest: latest, recent_quality_runs: rece
           <div className="grid gap-4 md:grid-cols-2">
             <section aria-label="Latest run" className="rounded-md border p-3">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs uppercase tracking-wider text-muted-foreground">Latest run</span>
+                <Link
+                  to={`/quality/runs/${latest.run_id}`}
+                  className="text-xs uppercase tracking-wider text-muted-foreground underline-offset-4 hover:text-primary hover:underline"
+                >
+                  Latest run
+                </Link>
                 <StatusBadge status={latest.status} />
               </div>
               <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
@@ -82,7 +93,13 @@ export function QualityPanel({ quality_latest: latest, recent_quality_runs: rece
                 {recent.map((entry) => (
                   <li key={entry.run_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
                     <StatusBadge status={entry.status} />
-                    <span className="font-mono" title={formatCentral(entry.started_at)}>{relativeTime(entry.started_at, now)}</span>
+                    <Link
+                      to={`/quality/runs/${entry.run_id}`}
+                      className="font-mono underline-offset-4 hover:text-primary hover:underline"
+                      title={formatCentral(entry.started_at)}
+                    >
+                      {relativeTime(entry.started_at, now)}
+                    </Link>
                     <span className="font-mono text-muted-foreground">
                       {entry.passed_checks}/{entry.total_checks} passed · {formatDuration(entry.duration_seconds)}
                     </span>
