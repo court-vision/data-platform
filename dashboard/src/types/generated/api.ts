@@ -405,8 +405,9 @@ export interface paths {
          *
          *     Builds Court Vision's projection — three seasons of history, ESPN's line,
          *     the curated adjustments — into nba.player_projections with source 'cv'.
-         *     Called daily by the 'cv-projection' cron job after preseason-market, and
-         *     by the projections editor after an adjustment is saved.
+         *     It has no cron job of its own: the preseason-market trigger runs it daily
+         *     as the last link of its chain, and the projections editor runs it after an
+         *     adjustment is saved.
          */
         post: operations["trigger_cv_projection_v1_internal_pipelines_cv_projection_post"];
         delete?: never;
@@ -890,11 +891,14 @@ export interface paths {
          *     rolled to the target season. Called daily by the 'preseason-market' cron
          *     job in cron-runner during draft season.
          *
-         *     Two pipelines follow it on the same trigger, in order: player-profiles, so
-         *     every player's current team is today's (it had no schedule of its own, and
-         *     a whole offseason of trades went unrecorded), then cv-projection, which is
-         *     built on the day's ESPN line and those rosters. Both run whatever the
-         *     market run did; cv-projection gates itself on the same window.
+         *     The trigger runs three pipelines in order, each whatever the one before
+         *     it did: player-profiles first, so every player's current team is today's
+         *     and a new player (a rookie, a new signing) has his nba.players row before
+         *     the snapshot — the snapshot can only attach ESPN's rank and line to a
+         *     player that row exists for; then preseason-market; then cv-projection,
+         *     which is built on the day's ESPN line and those rosters and gates itself
+         *     on the same window. When player-profiles fails, the other two still run on
+         *     the roster of its last good run. The response is the market run's.
          */
         post: operations["trigger_preseason_market_v1_internal_pipelines_preseason_market_post"];
         delete?: never;
