@@ -779,6 +779,9 @@ export interface paths {
          *
          *     Per-pipeline dedup enables partial batch retries — if one pipeline fails, the
          *     next cron invocation will retry only the failed pipeline, not the whole batch.
+         *     A pipeline skipped for an unmet dependency has no successful run either, so
+         *     it is retried on the same terms, and a dependency counts as met only by a
+         *     success since the window opened.
          *
          *     Once the window has **closed**, one last poll sweeps the night: any pipeline
          *     with no successful run for the date is recorded and alerted
