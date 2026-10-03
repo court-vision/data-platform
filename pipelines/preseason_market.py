@@ -14,7 +14,17 @@ late-arrival states: the public league not yet rolled to the target season
 (extractor returns None) and projections not yet published (rows carry no
 projected split). Unresolvable players are counted as skips, not failures —
 draft-eligible rookies routinely reach ESPN before nba.players has them.
+
+It also fills in nba.players.espn_id. Box scores are the only other writer of
+it, so a rookie, or a veteran back from a missed season, would otherwise have
+none until his first game. Without one the draft room cannot send him to ESPN or recognise
+him in ESPN's pick feed. A player matched here by name takes the id ESPN just
+gave him (see `adopt_espn_id`).
 """
+
+from datetime import datetime
+
+from peewee import IntegrityError
 
 from core.settings import settings
 from db.base import db
@@ -72,6 +82,39 @@ def projected_gp(total, avg, games=None) -> int | None:
     return round(total / avg) if avg else None
 
 
+def adopt_espn_id(player: Player, espn_id: int, ctx: PipelineContext) -> bool:
+    """Give a player resolved by name the ESPN id his market row carries.
+
+    Only fills an empty id, and only when the name is his alone; an id he
+    already holds is never overwritten, so a name match can at worst miss an
+    id, not move one onto the wrong player. The write runs in a savepoint: an
+    id another player took mid-run is logged and skipped rather than failing
+    the day's snapshot. Returns whether the id was written.
+    """
+    if player.espn_id is not None:
+        if player.espn_id != espn_id:
+            ctx.log.warning("espn_id_mismatch", player_id=player.id,
+                            held_espn_id=player.espn_id, market_espn_id=espn_id)
+        return False
+    if Player.select().where(Player.name_normalized == player.name_normalized).count() > 1:
+        ctx.log.warning("espn_id_ambiguous_name", player_id=player.id,
+                        name_normalized=player.name_normalized, market_espn_id=espn_id)
+        return False
+    try:
+        with db.atomic():
+            written = (
+                Player.update(espn_id=espn_id, updated_at=datetime.utcnow())
+                .where((Player.id == player.id) & Player.espn_id.is_null())
+                .execute()
+            )
+    except IntegrityError:
+        ctx.log.warning("espn_id_taken", player_id=player.id, market_espn_id=espn_id)
+        return False
+    if written:
+        player.espn_id = espn_id
+    return bool(written)
+
+
 class PreseasonMarketPipeline(BasePipeline):
     """
     Snapshot ESPN draft-market data (and projections, once published) daily
@@ -124,9 +167,14 @@ class PreseasonMarketPipeline(BasePipeline):
         # partial day the latest. All-or-nothing keeps a mid-run failure from
         # superseding yesterday's complete snapshot.
         projections_written = 0
+        espn_ids_adopted = 0
         with db.atomic():
             for row in rows:
-                player = by_espn_id.get(row["espn_id"]) or Player.find_by_name(row["normalized_name"])
+                player = by_espn_id.get(row["espn_id"])
+                if player is None:
+                    player = Player.find_by_name(row["normalized_name"])
+                    if player is not None and adopt_espn_id(player, row["espn_id"], ctx):
+                        espn_ids_adopted += 1
                 if player is None:
                     ctx.increment_skipped(1, "unresolved_player")
                     continue
@@ -177,5 +225,6 @@ class PreseasonMarketPipeline(BasePipeline):
             "preseason_market_complete",
             records=ctx.records_processed,
             projections=projections_written,
+            espn_ids_adopted=espn_ids_adopted,
             skipped=ctx.records_skipped,
         )
