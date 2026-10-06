@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     backend_internal_url: Optional[str] = None
     # Read timeout per evaluate call: > backend roster read + 30 s writer call + re-read.
     backend_timeout_seconds: float = 45.0
+    # The scheduled-pickups tick (POST /v1/internal/jobs/pickups/execute): up to
+    # `pickups_per_run` rows per call, each a few ESPN round trips (board, pool,
+    # write, re-read, then the seat on day D), so its read timeout is its own.
+    pickups_backend_timeout_seconds: float = 120.0
+    pickups_per_run: int = 4
 
     # Pre-game pipeline scheduling
     pre_game_window_minutes: int = 150  # how many minutes before first tip-off pre-game pipelines become eligible
@@ -122,6 +127,7 @@ class Settings(BaseSettings):
         "playoffs": 2,
         "schedule-sync": 1,
         "deploy": 1,
+        "scheduled-pickups": 5,   # one-minute cadence: five misses is five minutes
     }
     alert_cron_streak_default_threshold: int = 2
 

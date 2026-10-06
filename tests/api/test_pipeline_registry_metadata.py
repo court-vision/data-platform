@@ -26,6 +26,7 @@ CRON_RUNNER_JOBS = {
     "schedule-sync",
     "playoffs",
     "preseason-market",
+    "scheduled-pickups",
 }
 
 # SCHEDULED pipelines that no cron-runner job fires (manual trigger only).
@@ -109,6 +110,11 @@ class TestCronJobs:
         config = PIPELINE_REGISTRY["preseason_market"].config
         assert config.cron_job_name == "preseason-market"
         assert trigger_endpoint(config) == "/v1/internal/pipelines/preseason-market"
+
+    def test_scheduled_pickups_picks_up_its_cron_runs(self):
+        config = PIPELINE_REGISTRY["scheduled_pickups"].config
+        assert config.cron_job_name == "scheduled-pickups"
+        assert trigger_endpoint(config) == "/v1/internal/pipelines/scheduled-pickups"
 
 
 @pytest.mark.api

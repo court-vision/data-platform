@@ -1143,6 +1143,41 @@ async def trigger_lineup_alerts(
     )
 
 
+@router.post("/scheduled-pickups", response_model=PipelineResponse)
+async def trigger_scheduled_pickups(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(False, description="Run even when no pickup is due (the dashboard's Run button)."),
+) -> PipelineResponse:
+    """
+    Trigger the scheduled-pickups pipeline — the executor tick for usr.scheduled_pickups.
+
+    Called every minute by the 'scheduled-pickups' cron job. Gates on whether any
+    pickup is due (one EXISTS query, no run row); when one is, asks the backend to
+    attempt the due rows and emails each outcome. The backend owns the retry
+    rules, so a tick that finds nothing due costs one query.
+    """
+    if not force and not await _due_pickups_exist():
+        return PipelineResponse(status=ApiStatus.SKIPPED, message="No scheduled pickups are due")
+    result = await run_pipeline("scheduled_pickups")
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+DUE_PICKUPS_SQL = (
+    "SELECT EXISTS (SELECT 1 FROM usr.scheduled_pickups WHERE status = 'pending' "
+    "AND not_before_at <= now() AND (next_attempt_at IS NULL OR next_attempt_at <= now()))"
+)
+
+
+def _has_due_pickups() -> bool:
+    from db.base import db
+    row = db.execute_sql(DUE_PICKUPS_SQL).fetchone()
+    return bool(row and row[0])
+
+
+async def _due_pickups_exist() -> bool:
+    return await run_in_db_thread(_has_due_pickups)
+
+
 @router.post("/live-stats", response_model=LiveStatsResponse)
 async def trigger_live_stats(
     _: str = Security(verify_pipeline_token),
