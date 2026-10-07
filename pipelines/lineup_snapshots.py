@@ -11,7 +11,8 @@ row of his own.
 
 One capture per league, not per team: ESPN teams in usr.teams are grouped by
 (league_id, year) and read with the first member's cookies that work (public
-leagues need none). The day to capture is decided by ESPN itself —
+leagues need none); a 401/403 on any read, the status read or a day's, moves
+on to the next member's. The day to capture is decided by ESPN itself —
 `status.latestScoringPeriod` (L) is today, so days ≤ L-1 are finished — and
 every finished day not yet stored within the last `GAP_FILL_PERIODS` is
 captured in ascending order, so a missed night (an early Sunday slate closing
@@ -33,8 +34,9 @@ replaces what is stored; any difference is logged as `lineup_snapshot_drift`
 — the running evidence that ESPN never rewrites a finished day.
 
 Counters: a team-day stored is a processed record; business outcomes (a league
-whose cookies all fail, a Yahoo team, a day outside the regular season) are
-skipped records with a reason; a league whose read or write raised is a failed
+whose cookies all fail its status read, a Yahoo team, a day outside the regular
+season) are skipped records with a reason; a league whose read or write raised
+(a day read refused with every remaining member's cookies included) is a failed
 record. Each day's write is one transaction, so a redeploy mid-run never leaves
 half a day behind.
 """
@@ -234,6 +236,36 @@ def _load_teams() -> list[Team]:
     return list(Team.select())
 
 
+class LeagueUnreadable(Exception):
+    """No member team's cookies are left for a read of the league: ESPN refused
+    them (401/403) or they could not be decrypted."""
+
+
+class MemberCookies:
+    """A league's member teams' cookies in turn, shared by every read of the league.
+
+    The pair ESPN accepted last serves the next read too; a 401/403 moves on to
+    the next member's (hydrated when first reached, undecryptable ones passed
+    over) — for the status read and each day's read alike.
+    """
+
+    def __init__(self, ctx: PipelineContext, league: LeagueGroup):
+        self._ctx = ctx
+        self._untried = iter(league.teams)
+        self.current: Optional[tuple[Team, dict]] = None
+
+    def advance(self) -> Optional[tuple[Team, dict]]:
+        """The next member's (team, credentials); None once every member has been tried."""
+        self.current = None
+        for team, league_info in self._untried:
+            try:
+                self.current = (team, credential_service.hydrate(team, dict(league_info)))
+                break
+            except CredentialDecryptionError:
+                self._ctx.log.warning("lineup_snapshots_credentials_unreadable", team_id=team.team_id)
+        return self.current
+
+
 class LineupSnapshotsPipeline(BasePipeline):
     """
     1. Group the saved ESPN teams by league (current season only)
@@ -283,11 +315,11 @@ class LineupSnapshotsPipeline(BasePipeline):
         observed_totals = False
         for league in leagues:
             try:
-                found = self._discover(ctx, league)
-                if found is None:
+                cookies = MemberCookies(ctx, league)
+                discovery = self._discover(ctx, league, cookies)
+                if discovery is None:
                     ctx.increment_skipped(1, "league_unreadable")
                     continue
-                credentials, discovery = found
                 latest = discovery.latest_scoring_period
                 if not latest:
                     ctx.log.info("lineup_snapshots_no_scoring_period", league_id=league.key.league_id)
@@ -311,14 +343,7 @@ class LineupSnapshotsPipeline(BasePipeline):
 
                 before = ctx.records_processed
                 for period in periods:
-                    payload = self.espn_extractor.get_league(
-                        league_id=league.key.league_id,
-                        espn_s2=credentials.get("espn_s2", ""),
-                        swid=credentials.get("swid", ""),
-                        year=league.key.season,
-                        views=ROSTER_VIEWS,
-                        scoring_period_id=period,
-                    )
+                    payload = self._read(ctx, league, cookies, ROSTER_VIEWS, scoring_period_id=period)
                     day = parse_league_day(payload)
                     stored = self._store_day(ctx, league.key, period, day, discovery, replace=backfill)
                     if stored and not observed_totals:
@@ -380,30 +405,44 @@ class LineupSnapshotsPipeline(BasePipeline):
             groups.setdefault(key, LeagueGroup(key=key, teams=[])).teams.append((team, league_info))
         return list(groups.values()), skipped
 
-    def _discover(self, ctx: PipelineContext, league: LeagueGroup) -> Optional[tuple[dict, LeagueDiscovery]]:
-        """The league's status, read with the first member team's cookies ESPN accepts."""
-        for team, league_info in league.teams:
+    def _read(
+        self,
+        ctx: PipelineContext,
+        league: LeagueGroup,
+        cookies: MemberCookies,
+        views: tuple[str, ...],
+        scoring_period_id: Optional[int] = None,
+    ) -> dict:
+        """One read of the league with the cookies ESPN accepted last, moving on
+        to the next member's while it refuses them; `LeagueUnreadable` when none is left."""
+        member = cookies.current or cookies.advance()
+        while member is not None:
+            team, credentials = member
             try:
-                credentials = credential_service.hydrate(team, dict(league_info))
-            except CredentialDecryptionError:
-                ctx.log.warning("lineup_snapshots_credentials_unreadable", team_id=team.team_id)
-                continue
-            try:
-                payload = self.espn_extractor.get_league(
+                return self.espn_extractor.get_league(
                     league_id=league.key.league_id,
                     espn_s2=credentials.get("espn_s2", ""),
                     swid=credentials.get("swid", ""),
                     year=league.key.season,
-                    views=DISCOVERY_VIEWS,
+                    views=views,
+                    scoring_period_id=scoring_period_id,
                 )
             except ProviderAuthError as exc:
                 ctx.log.warning("lineup_snapshots_credentials_refused", team_id=team.team_id,
-                                league_id=league.key.league_id, status_code=exc.status_code)
-                continue
-            return credentials, parse_league_discovery(payload)
-        ctx.log.warning("lineup_snapshots_league_unreadable", league_id=league.key.league_id,
-                        teams=len(league.teams))
-        return None
+                                league_id=league.key.league_id, status_code=exc.status_code,
+                                scoring_period_id=scoring_period_id)
+                member = cookies.advance()
+        raise LeagueUnreadable(f"no member team's cookies were accepted for league {league.key.league_id}")
+
+    def _discover(self, ctx: PipelineContext, league: LeagueGroup, cookies: MemberCookies) -> Optional[LeagueDiscovery]:
+        """The league's status, read with the first member team's cookies ESPN accepts."""
+        try:
+            payload = self._read(ctx, league, cookies, DISCOVERY_VIEWS)
+        except LeagueUnreadable:
+            ctx.log.warning("lineup_snapshots_league_unreadable", league_id=league.key.league_id,
+                            teams=len(league.teams))
+            return None
+        return parse_league_discovery(payload)
 
     # ---- which days ----
 

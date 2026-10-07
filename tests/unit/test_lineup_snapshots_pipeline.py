@@ -48,14 +48,15 @@ class FakeExtractor:
     """Answers the discovery read with the fixture at `latest` (or the league's
     own in `latest_by_league`), a day read with the roster fixture."""
 
-    def __init__(self, latest=61, final=167, refuse=(), latest_by_league=None):
+    def __init__(self, latest=61, final=167, refuse=(), latest_by_league=None, refuse_days=()):
         self.latest, self.final, self.refuse = latest, final, set(refuse)
         self.latest_by_league = dict(latest_by_league or {})
+        self.refuse_days = set(refuse_days)    # cookies refused for day reads only
         self.calls = []
 
     def get_league(self, league_id, espn_s2, swid, year, views, scoring_period_id=None):
         self.calls.append((league_id, espn_s2, year, tuple(views), scoring_period_id))
-        if espn_s2 in self.refuse:
+        if espn_s2 in self.refuse or (scoring_period_id is not None and espn_s2 in self.refuse_days):
             raise ProviderAuthError("refused", status_code=401)
         if scoring_period_id is None:
             payload = copy.deepcopy(DISCOVERY)
@@ -253,6 +254,27 @@ class TestLeaguesAndCredentials:
         pipeline.execute(c)
         assert [c_[1] for c_ in pipeline.espn_extractor.calls] == ["s2-1", "s2-2", "s2-2"]
         assert c.records_processed == 3 and c.records_failed == 0
+
+    def test_a_refused_day_read_moves_on_to_the_next_members_cookies(self, pipeline, monkeypatch):
+        teams(monkeypatch, team_row(1), team_row(2))
+        pipeline.store = FakeStore(stored_periods=range(46, 58))                     # days 58-60 to capture
+        pipeline.espn_extractor = FakeExtractor(latest=61, refuse_days={"s2-1"})     # status read fine, day reads not
+        c = ctx()
+        pipeline.execute(c)
+        assert [(c_[1], c_[4]) for c_ in pipeline.espn_extractor.calls] == [
+            ("s2-1", None), ("s2-1", 58), ("s2-2", 58), ("s2-2", 59), ("s2-2", 60),   # the refused pair is not retried
+        ]
+        assert [w[1] for w in pipeline.store.writes] == [58, 59, 60]
+        assert c.records_processed == 9 and c.records_failed == 0
+
+    def test_a_day_read_every_member_is_refused_fails_only_that_league(self, pipeline, monkeypatch):
+        teams(monkeypatch, team_row(1), team_row(2), team_row(3, league_id=555))
+        pipeline.store = FakeStore(stored_periods=range(46, 60), keys=(KEY, OTHER))
+        pipeline.espn_extractor = FakeExtractor(latest=61, refuse_days={"s2-1", "s2-2"})
+        c = ctx()
+        pipeline.execute(c)
+        assert [w[:2] for w in pipeline.store.writes] == [(OTHER, 60)]
+        assert c.failure_reasons == {"LeagueUnreadable": 1} and c.records_processed == 3
 
     def test_every_cookie_refused_skips_the_league(self, pipeline, monkeypatch):
         teams(monkeypatch, team_row(1), team_row(2))
