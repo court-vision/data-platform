@@ -1246,6 +1246,11 @@
             "title": "Error Streak",
             "type": "integer"
           },
+          "force_on_run": {
+            "default": false,
+            "title": "Force On Run",
+            "type": "boolean"
+          },
           "is_running": {
             "default": false,
             "title": "Is Running",
@@ -1329,7 +1334,8 @@
           "last_success_at",
           "is_running",
           "error_streak",
-          "accepts_date"
+          "accepts_date",
+          "force_on_run"
         ],
         "title": "PipelineHealthEntry",
         "type": "object"
@@ -1392,6 +1398,11 @@
             "title": "Espn Gated",
             "type": "boolean"
           },
+          "force_on_run": {
+            "default": false,
+            "title": "Force On Run",
+            "type": "boolean"
+          },
           "is_running": {
             "default": false,
             "title": "Is Running",
@@ -1429,6 +1440,7 @@
           "target_table",
           "trigger_endpoint",
           "accepts_date",
+          "force_on_run",
           "cron_job",
           "depends_on",
           "allow_concurrent",

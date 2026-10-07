@@ -1580,6 +1580,11 @@ export interface components {
              */
             error_streak: number;
             /**
+             * Force On Run
+             * @default false
+             */
+            force_on_run: boolean;
+            /**
              * Is Running
              * @default false
              */
@@ -1628,6 +1633,11 @@ export interface components {
              * @default false
              */
             espn_gated: boolean;
+            /**
+             * Force On Run
+             * @default false
+             */
+            force_on_run: boolean;
             /**
              * Is Running
              * @default false

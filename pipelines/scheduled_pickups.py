@@ -72,6 +72,8 @@ class ScheduledPickupsPipeline(BasePipeline):
         category=PipelineCategory.SCHEDULED,
         trigger_slug="scheduled-pickups",
         cron_job="scheduled-pickups",
+        # The route skips a tick with nothing due; the dashboard's Run runs anyway.
+        force_on_run=True,
         timeout_seconds=180,
     )
 
