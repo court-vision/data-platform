@@ -108,6 +108,7 @@ class TestRegistryCompleteness:
             "player_rolling_stats": ("player_game_stats",),
             "team_stats": ("player_game_stats", "game_schedule"),
             "breakout_detection": ("espn_injury_status", "player_season_stats", "player_game_stats"),
+            "lineup_snapshots": ("daily_matchup_scores",),
         }
         for name, expected in expected_deps.items():
             cls = PIPELINE_REGISTRY[name]

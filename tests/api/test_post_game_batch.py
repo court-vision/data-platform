@@ -513,6 +513,13 @@ class TestDependenciesMeanTonight:
             if "player_game_stats" in PIPELINE_REGISTRY[name].config.depends_on
         }
         assert waits_on_game_log >= {"player_season_stats", "player_rolling_stats", "team_stats"}
+        # lineup_snapshots waits for the ESPN-gated daily_matchup_scores instead,
+        # which this batch never runs: it stays skipped on both polls.
+        waits_on_espn_gate = {
+            name for name in names
+            if any(PIPELINE_REGISTRY[dep].config.espn_gated for dep in PIPELINE_REGISTRY[name].config.depends_on)
+        }
+        assert waits_on_espn_gate == {"lineup_snapshots"}
 
         with freeze_time(IN_WINDOW):
             first = asyncio.run(poll())
@@ -528,5 +535,7 @@ class TestDependenciesMeanTonight:
         with freeze_time(IN_WINDOW):
             second = asyncio.run(poll())
 
-        assert all(status == "success" for status in second.values())
+        assert all(status == "success" for name, status in second.items() if name not in waits_on_espn_gate)
+        assert all(second[name] == "skipped" for name in waits_on_espn_gate)
+        assert not waits_on_espn_gate & set(ran)
         assert ran.index("game_schedule") < ran.index("team_stats")

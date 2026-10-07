@@ -4958,6 +4958,64 @@
         ]
       }
     },
+    "/v1/internal/pipelines/lineup-snapshots": {
+      "post": {
+        "description": "Trigger the lineup snapshots pipeline.\n\nCaptures every ESPN team's lineup for each finished scoring period\n(usr.lineup_snapshots). Production reaches it through the post-game batch,\nwhere it waits for daily_matchup_scores (whose ESPN gate is what waits for\nESPN's nightly flip); this direct trigger skips that dependency.\nPass ?date=YYYY-MM-DD to re-capture one day \u2014 the stored rows are replaced\nand any difference is logged as `lineup_snapshot_drift`.",
+        "operationId": "trigger_lineup_snapshots_v1_internal_pipelines_lineup_snapshots_post",
+        "parameters": [
+          {
+            "description": "Capture exactly this NBA date's ESPN day for every league, replacing what is stored (YYYY-MM-DD). Omit for the nightly catch-up.",
+            "in": "query",
+            "name": "date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Capture exactly this NBA date's ESPN day for every league, replacing what is stored (YYYY-MM-DD). Omit for the nightly catch-up.",
+              "title": "Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Lineup Snapshots",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/live-stats": {
       "post": {
         "description": "Trigger the live game stats pipeline.\n\nCalled every ~60 seconds by the cron-runner's live loop. Self-gates\nagainst the game schedule \u2014 returns immediately (no-op) if no games\nare scheduled today or if we're more than 15 minutes before tip-off.\n\nThe all_games_complete field in the response signals the cron-runner\nloop to exit once all games for the day are final.\n\nSafe to call frequently \u2014 runs in milliseconds when outside game window.",

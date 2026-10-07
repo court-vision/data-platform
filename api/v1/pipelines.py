@@ -155,6 +155,29 @@ async def trigger_daily_matchup_scores(
     )
 
 
+@router.post("/lineup-snapshots", response_model=PipelineResponse)
+async def trigger_lineup_snapshots(
+    _: str = Security(verify_pipeline_token),
+    date: Optional[date] = Query(None, description="Capture exactly this NBA date's ESPN day for every league, replacing what is stored (YYYY-MM-DD). Omit for the nightly catch-up."),
+) -> PipelineResponse:
+    """
+    Trigger the lineup snapshots pipeline.
+
+    Captures every ESPN team's lineup for each finished scoring period
+    (usr.lineup_snapshots). Production reaches it through the post-game batch,
+    where it waits for daily_matchup_scores (whose ESPN gate is what waits for
+    ESPN's nightly flip); this direct trigger skips that dependency.
+    Pass ?date=YYYY-MM-DD to re-capture one day — the stored rows are replaced
+    and any difference is logged as `lineup_snapshot_drift`.
+    """
+    result = await run_pipeline("lineup_snapshots", date_override=date)
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
 _ESPN_ENDPOINT = (
     "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{}/segments/0/leagues/{}"
 )

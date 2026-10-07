@@ -6,6 +6,7 @@ from .lineups import Lineup
 from .data_quality_run import DataQualityRun
 from .data_quality_check import DataQualityCheck
 from .scheduled_pickups import ScheduledPickup
+from .lineup_snapshots import LineupSnapshot, LineupSnapshotPlayer
 
 __all__ = [
     'User',
@@ -15,4 +16,6 @@ __all__ = [
     'DataQualityRun',
     'DataQualityCheck',
     'ScheduledPickup',
+    'LineupSnapshot',
+    'LineupSnapshotPlayer',
 ]

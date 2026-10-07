@@ -5,7 +5,7 @@ Fetches data from ESPN Fantasy Basketball API.
 """
 
 import json
-from typing import Optional, Any
+from typing import Any, Optional, Sequence
 
 import requests
 
@@ -14,6 +14,7 @@ from core.settings import settings
 from core.resilience import (
     with_retry,
     espn_api_circuit,
+    ClientError,
     NetworkError,
     RateLimitError,
     ServerError,
@@ -28,6 +29,10 @@ from utils.espn_helpers import POSITION_MAP, PRO_TEAM_MAP
 ESPN_FANTASY_ENDPOINT = (
     "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{}/segments/0/leagues/{}"
 )
+
+
+class ProviderAuthError(ClientError):
+    """ESPN answered 401/403: the cookies are wrong or expired for this league."""
 
 
 def _int_or_none(value) -> int | None:
@@ -450,36 +455,33 @@ class ESPNExtractor(BaseExtractor):
         max_delay=settings.retry_max_delay,
     )
     @espn_api_circuit
-    def get_roster_with_slots(
+    def get_league(
         self,
         league_id: int,
-        team_name: str,
         espn_s2: str,
         swid: str,
         year: int,
-    ) -> Optional[list[dict]]:
+        views: Sequence[str],
+        scoring_period_id: Optional[int] = None,
+    ) -> dict:
         """
-        Fetch a team's roster with lineup slot assignments.
+        One raw league read (`?view=...`), optionally for a specific ESPN day.
 
-        Returns player data needed for lineup alerts: name, team, lineup_slot,
-        injured status, and injury status.
+        `scoring_period_id` asks for the league as of that day: with `mRoster`
+        ESPN answers with every team's roster AS OF day N — membership and
+        slots — and echoes N as the top-level `scoringPeriodId` while
+        `status.latestScoringPeriod` stays today's. It answers 200 for any N,
+        so the caller bounds it.
 
-        Args:
-            league_id: ESPN league ID
-            team_name: Name of the team to find
-            espn_s2: ESPN S2 cookie for authentication
-            swid: ESPN SWID cookie for authentication
-            year: Season year
-
-        Returns:
-            List of dicts with keys: name, team, lineup_slot, injured, injury_status
-            or None if team not found
+        401/403 raise `ProviderAuthError` (not retried, does not count against
+        the circuit) so a caller holding several users' cookies can try the
+        next pair. Public leagues read with empty cookies.
         """
-        params = {"view": ["mTeam", "mRoster"]}
-        cookies = {"espn_s2": espn_s2, "SWID": swid}
+        params: dict[str, Any] = {"view": list(views)}
+        if scoring_period_id:
+            params["scoringPeriodId"] = int(scoring_period_id)
+        cookies = {"espn_s2": espn_s2 or "", "SWID": swid or ""}
         endpoint = ESPN_FANTASY_ENDPOINT.format(year, league_id)
-
-        team_abbrev_corrections = {"PHL": "PHI", "PHO": "PHX"}
 
         try:
             response = requests.get(
@@ -488,62 +490,17 @@ class ESPNExtractor(BaseExtractor):
                 cookies=cookies,
                 timeout=settings.http_timeout,
             )
-
-            if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", 60))
-                raise RateLimitError("ESPN rate limited", retry_after=retry_after)
-
-            if response.status_code >= 500:
-                raise ServerError("ESPN server error", status_code=response.status_code)
-
-            response.raise_for_status()
-            data = response.json()
-
         except requests.exceptions.Timeout:
             raise NetworkError("ESPN request timed out")
         except requests.exceptions.ConnectionError:
             raise NetworkError("ESPN connection failed")
 
-        # Find the team by name
-        teams = data.get("teams", [])
-        target_team = None
-        for team in teams:
-            if team.get("name", "").strip() == team_name.strip():
-                target_team = team
-                break
-
-        if not target_team:
-            self.log.warning("team_not_found", team=team_name)
-            return None
-
-        # Extract roster with lineup slots
-        roster = []
-        entries = target_team.get("roster", {}).get("entries", [])
-
-        for entry in entries:
-            player_data = entry.get("playerPoolEntry", {}).get("player", {})
-            if not player_data:
-                player_data = entry.get("player", {})
-
-            name = player_data.get("fullName", "Unknown")
-
-            pro_team_id = player_data.get("proTeamId", 0)
-            team_abbrev = PRO_TEAM_MAP.get(pro_team_id, "FA")
-            team_abbrev = team_abbrev_corrections.get(team_abbrev, team_abbrev)
-
-            lineup_slot_id = entry.get("lineupSlotId", 0)
-            lineup_slot = POSITION_MAP.get(lineup_slot_id, "")
-
-            injured = player_data.get("injured", False)
-            injury_status = player_data.get("injuryStatus")
-
-            roster.append({
-                "name": name,
-                "team": team_abbrev,
-                "lineup_slot": lineup_slot,
-                "injured": injured,
-                "injury_status": injury_status,
-            })
-
-        self.log.info("roster_extracted", team=team_name, player_count=len(roster))
-        return roster
+        if response.status_code in (401, 403):
+            raise ProviderAuthError("ESPN refused the credentials", status_code=response.status_code)
+        if response.status_code == 429:
+            retry_after = int(response.headers.get("Retry-After", 60))
+            raise RateLimitError("ESPN rate limited", retry_after=retry_after)
+        if response.status_code >= 500:
+            raise ServerError("ESPN server error", status_code=response.status_code)
+        response.raise_for_status()
+        return response.json()
