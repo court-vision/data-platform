@@ -1,0 +1,438 @@
+{
+ "id": 993431466,
+ "seasonId": 2026,
+ "scoringPeriodId": 175,
+ "status": {
+  "latestScoringPeriod": 175,
+  "finalScoringPeriod": 167,
+  "currentMatchupPeriod": 21,
+  "firstScoringPeriod": 1
+ },
+ "settings": {
+  "name": "Phoenix Pro H2H Points League",
+  "scheduleSettings": {
+   "matchupPeriods": {
+    "1": [
+     1
+    ],
+    "2": [
+     2
+    ],
+    "3": [
+     3
+    ],
+    "4": [
+     4
+    ],
+    "5": [
+     5
+    ],
+    "6": [
+     6
+    ],
+    "7": [
+     7
+    ],
+    "8": [
+     8
+    ],
+    "9": [
+     9
+    ],
+    "10": [
+     10
+    ],
+    "11": [
+     11
+    ],
+    "12": [
+     12
+    ],
+    "13": [
+     13
+    ],
+    "14": [
+     14
+    ],
+    "15": [
+     15
+    ],
+    "16": [
+     16
+    ],
+    "17": [
+     17
+    ],
+    "18": [
+     18
+    ],
+    "19": [
+     19
+    ],
+    "20": [
+     20,
+     21
+    ],
+    "21": [
+     22,
+     23
+    ]
+   },
+   "matchupPeriodCount": 19
+  }
+ },
+ "schedule": [
+  {
+   "id": 1,
+   "matchupPeriodId": 1,
+   "home": {
+    "teamId": 10
+   },
+   "away": {
+    "teamId": 7
+   }
+  },
+  {
+   "id": 2,
+   "matchupPeriodId": 1,
+   "home": {
+    "teamId": 2
+   },
+   "away": {
+    "teamId": 9
+   }
+  },
+  {
+   "id": 3,
+   "matchupPeriodId": 1,
+   "home": {
+    "teamId": 3
+   },
+   "away": {
+    "teamId": 8
+   }
+  },
+  {
+   "id": 4,
+   "matchupPeriodId": 1,
+   "home": {
+    "teamId": 1
+   },
+   "away": {
+    "teamId": 4
+   }
+  },
+  {
+   "id": 5,
+   "matchupPeriodId": 1,
+   "home": {
+    "teamId": 6
+   },
+   "away": {
+    "teamId": 5
+   }
+  },
+  {
+   "id": 6,
+   "matchupPeriodId": 2,
+   "home": {
+    "teamId": 7
+   },
+   "away": {
+    "teamId": 9
+   }
+  },
+  {
+   "id": 7,
+   "matchupPeriodId": 2,
+   "home": {
+    "teamId": 8
+   },
+   "away": {
+    "teamId": 10
+   }
+  },
+  {
+   "id": 8,
+   "matchupPeriodId": 2,
+   "home": {
+    "teamId": 4
+   },
+   "away": {
+    "teamId": 2
+   }
+  },
+  {
+   "id": 9,
+   "matchupPeriodId": 2,
+   "home": {
+    "teamId": 5
+   },
+   "away": {
+    "teamId": 3
+   }
+  },
+  {
+   "id": 10,
+   "matchupPeriodId": 2,
+   "home": {
+    "teamId": 6
+   },
+   "away": {
+    "teamId": 1
+   }
+  },
+  {
+   "id": 41,
+   "matchupPeriodId": 9,
+   "home": {
+    "teamId": 2
+   },
+   "away": {
+    "teamId": 7
+   }
+  },
+  {
+   "id": 42,
+   "matchupPeriodId": 9,
+   "home": {
+    "teamId": 3
+   },
+   "away": {
+    "teamId": 10
+   }
+  },
+  {
+   "id": 43,
+   "matchupPeriodId": 9,
+   "home": {
+    "teamId": 1
+   },
+   "away": {
+    "teamId": 9
+   }
+  },
+  {
+   "id": 44,
+   "matchupPeriodId": 9,
+   "home": {
+    "teamId": 6
+   },
+   "away": {
+    "teamId": 8
+   }
+  },
+  {
+   "id": 45,
+   "matchupPeriodId": 9,
+   "home": {
+    "teamId": 5
+   },
+   "away": {
+    "teamId": 4
+   }
+  },
+  {
+   "id": 46,
+   "matchupPeriodId": 10,
+   "home": {
+    "teamId": 7
+   },
+   "away": {
+    "teamId": 10
+   }
+  },
+  {
+   "id": 47,
+   "matchupPeriodId": 10,
+   "home": {
+    "teamId": 9
+   },
+   "away": {
+    "teamId": 2
+   }
+  },
+  {
+   "id": 48,
+   "matchupPeriodId": 10,
+   "home": {
+    "teamId": 8
+   },
+   "away": {
+    "teamId": 3
+   }
+  },
+  {
+   "id": 49,
+   "matchupPeriodId": 10,
+   "home": {
+    "teamId": 4
+   },
+   "away": {
+    "teamId": 1
+   }
+  },
+  {
+   "id": 50,
+   "matchupPeriodId": 10,
+   "home": {
+    "teamId": 5
+   },
+   "away": {
+    "teamId": 6
+   }
+  },
+  {
+   "id": 96,
+   "matchupPeriodId": 20,
+   "home": {
+    "teamId": 10
+   },
+   "away": {
+    "teamId": 2
+   }
+  },
+  {
+   "id": 97,
+   "matchupPeriodId": 20,
+   "home": {
+    "teamId": 3
+   },
+   "away": {
+    "teamId": 5
+   }
+  },
+  {
+   "id": 98,
+   "matchupPeriodId": 20,
+   "home": {
+    "teamId": 1
+   },
+   "away": {
+    "teamId": 9
+   }
+  },
+  {
+   "id": 99,
+   "matchupPeriodId": 20,
+   "home": {
+    "teamId": 4
+   },
+   "away": {
+    "teamId": 8
+   }
+  },
+  {
+   "id": 100,
+   "matchupPeriodId": 20,
+   "home": {
+    "teamId": 6
+   },
+   "away": {
+    "teamId": 7
+   }
+  },
+  {
+   "id": 101,
+   "matchupPeriodId": 21,
+   "home": {
+    "teamId": 3
+   },
+   "away": {
+    "teamId": 2
+   }
+  },
+  {
+   "id": 102,
+   "matchupPeriodId": 21,
+   "home": {
+    "teamId": 10
+   },
+   "away": {
+    "teamId": 5
+   }
+  },
+  {
+   "id": 103,
+   "matchupPeriodId": 21,
+   "home": {
+    "teamId": 9
+   },
+   "away": {
+    "teamId": 4
+   }
+  },
+  {
+   "id": 104,
+   "matchupPeriodId": 21,
+   "home": {
+    "teamId": 1
+   },
+   "away": {
+    "teamId": 6
+   }
+  },
+  {
+   "id": 105,
+   "matchupPeriodId": 21,
+   "home": {
+    "teamId": 8
+   },
+   "away": {
+    "teamId": 7
+   }
+  }
+ ],
+ "teams": [
+  {
+   "id": 1,
+   "name": "Flaggin it",
+   "abbrev": "FLA"
+  },
+  {
+   "id": 2,
+   "name": "Steve's Smart Team",
+   "abbrev": "SST"
+  },
+  {
+   "id": 3,
+   "name": "Matthew's Monstrous Team",
+   "abbrev": "MMT"
+  },
+  {
+   "id": 4,
+   "name": "Gabriel's Great Team",
+   "abbrev": "GGT"
+  },
+  {
+   "id": 5,
+   "name": "Lets See",
+   "abbrev": "Tlee"
+  },
+  {
+   "id": 6,
+   "name": "Trade Master",
+   "abbrev": "TDM"
+  },
+  {
+   "id": 7,
+   "name": "Anne's Astounding Team",
+   "abbrev": "AAT"
+  },
+  {
+   "id": 8,
+   "name": "Minnesota Hoopers",
+   "abbrev": "MNH"
+  },
+  {
+   "id": 9,
+   "name": "Tattoo",
+   "abbrev": "Tt"
+  },
+  {
+   "id": 10,
+   "name": "James's Scary Team",
+   "abbrev": "JST"
+  }
+ ]
+}

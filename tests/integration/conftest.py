@@ -13,6 +13,7 @@ from db.models.nba.pipeline_batch import PipelineBatch
 from db.models.nba.players import Player
 from db.models.nba.team_stats import TeamStats
 from db.models.nba.teams import NBATeam
+from db.models.lineup_snapshots import LineupSnapshot, LineupSnapshotPlayer
 from db.models.pipeline_run import PipelineRun
 
 
@@ -28,6 +29,9 @@ INTEGRATION_MODELS = [
     # Read by the consistency checks (services/consistency_checks.py).
     TeamStats,
     LivePlayerStats,
+    # Written by the lineup_snapshots pipeline's store (tests/integration/test_lineup_snapshot_store.py).
+    LineupSnapshot,
+    LineupSnapshotPlayer,
 ]
 
 
@@ -40,6 +44,7 @@ def integration_db():
         pytest.skip(f"Integration DB unavailable: {exc}")
 
     db.execute_sql("CREATE SCHEMA IF NOT EXISTS nba;")
+    db.execute_sql("CREATE SCHEMA IF NOT EXISTS usr;")
     db.create_tables(INTEGRATION_MODELS, safe=True)
 
     # Ensure required dimension values are present for FK constraints.
@@ -57,6 +62,8 @@ def clean_integration_tables(integration_db):
     db.execute_sql(
         """
         TRUNCATE TABLE
+          usr.lineup_snapshot_players,
+          usr.lineup_snapshots,
           nba.player_rolling_stats,
           nba.team_stats,
           nba.live_player_stats,

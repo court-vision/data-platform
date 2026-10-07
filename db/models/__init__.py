@@ -5,6 +5,7 @@ from .teams import Team
 from .lineups import Lineup
 from .data_quality_run import DataQualityRun
 from .data_quality_check import DataQualityCheck
+from .lineup_snapshots import LineupSnapshot, LineupSnapshotPlayer
 
 __all__ = [
     'User',
@@ -13,4 +14,6 @@ __all__ = [
     'Lineup',
     'DataQualityRun',
     'DataQualityCheck',
+    'LineupSnapshot',
+    'LineupSnapshotPlayer',
 ]

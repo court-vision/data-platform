@@ -50,6 +50,7 @@ MIRRORED = [
     "core/resilience.py",              # shim over cv_core
     "core/season.py",                  # shim over cv_core
     "db/models/api_keys.py",
+    "db/models/lineup_snapshots.py",  # dp writes, backend reads (matchup past days)
     "db/models/lineups.py",
     "db/models/nba/breakout_candidates.py",
     "db/models/nba/draft_market.py",
