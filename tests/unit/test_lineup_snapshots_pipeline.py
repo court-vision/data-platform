@@ -343,4 +343,5 @@ class TestRecords:
         assert [r.lineup.provider_team_id for r in records] == [1, 2, 3]
         assert all(r.matchup_period_id == week for r in records)     # one-week matchups mid-season
         opponents = {r.lineup.provider_team_id: r.opponent_provider_team_id for r in records}
-        assert opponents[1] is not None and opponents[opponents[1]] == 1 if opponents[1] in opponents else True
+        # the fixture's schedule for matchup period 9 (day 60's week): 1 v 9, 2 v 7, 3 v 10
+        assert week == 9 and opponents == {1: 9, 2: 7, 3: 10}
