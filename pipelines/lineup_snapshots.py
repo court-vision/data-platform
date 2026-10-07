@@ -16,8 +16,10 @@ leagues need none). The day to capture is decided by ESPN itself —
 every finished day not yet stored within the last `GAP_FILL_PERIODS` is
 captured in ascending order, so a missed night (an early Sunday slate closing
 the post-game window before 02:00 CT, an outage, the All-Star break) heals
-itself on the next run. A night where ESPN has not rolled past the game date
-yet raises `DataNotReady`, and the post-game batch retries at its next poll.
+itself on the next run. A league ESPN has not rolled past the game date yet
+makes the run raise `DataNotReady` once the other leagues are stored, and the
+post-game batch retries at its next poll (a success would be deduped for the
+rest of the night).
 
 Timing: POST_GAME with `depends_on=("daily_matchup_scores",)` — that
 pipeline's ESPN gate is what waits for ESPN's nightly flip, and an unmet
@@ -337,9 +339,14 @@ class LineupSnapshotsPipeline(BasePipeline):
                 )
                 ctx.increment_failed(1, type(exc).__name__)
 
-        if waiting and ctx.records_processed == 0:
+        # A league ESPN has not rolled yet keeps the run waiting even when the
+        # others were stored: a success is deduped for the rest of the night,
+        # which would leave that league's day to the next game night's gap
+        # fill. The stored leagues find nothing missing on the retry.
+        if waiting:
             raise DataNotReady(
-                f"ESPN has not advanced past day {target} for {waiting} league(s); the next poll retries"
+                f"ESPN has not advanced past day {target} for {waiting} of {len(leagues)} league(s); "
+                f"the next poll retries ({ctx.records_processed} team-day(s) stored this run)"
             )
         if processed_leagues == 0 and ctx.records_failed > 0 and ctx.records_failed >= len(leagues):
             raise RuntimeError(f"0 of {len(leagues)} leagues processed — ESPN may be unavailable")

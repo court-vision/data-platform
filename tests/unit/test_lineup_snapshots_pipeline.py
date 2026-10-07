@@ -32,6 +32,7 @@ DISCOVERY = json.loads((FIXTURES / "espn_league_discovery.json").read_text())
 SEASON = 2026          # the fixtures' seasonId; tests pin settings.espn_year to it
 LEAGUE = 993431466
 KEY = LeagueKey(provider_league_id=str(LEAGUE), season=SEASON)
+OTHER = LeagueKey(provider_league_id="555", season=SEASON)   # a second league (team_row(..., league_id=555))
 GAME_DATE = schedule_service.date_for_espn_scoring_period(60)   # ESPN day 60 of 2025-26
 
 
@@ -44,10 +45,12 @@ def team_row(team_id, league_id=LEAGUE, year=SEASON, provider="espn", name="Flag
 
 
 class FakeExtractor:
-    """Answers the discovery read with the fixture at `latest`, a day read with the roster fixture."""
+    """Answers the discovery read with the fixture at `latest` (or the league's
+    own in `latest_by_league`), a day read with the roster fixture."""
 
-    def __init__(self, latest=61, final=167, refuse=()):
+    def __init__(self, latest=61, final=167, refuse=(), latest_by_league=None):
         self.latest, self.final, self.refuse = latest, final, set(refuse)
+        self.latest_by_league = dict(latest_by_league or {})
         self.calls = []
 
     def get_league(self, league_id, espn_s2, swid, year, views, scoring_period_id=None):
@@ -56,7 +59,7 @@ class FakeExtractor:
             raise ProviderAuthError("refused", status_code=401)
         if scoring_period_id is None:
             payload = copy.deepcopy(DISCOVERY)
-            payload["status"]["latestScoringPeriod"] = self.latest
+            payload["status"]["latestScoringPeriod"] = self.latest_by_league.get(league_id, self.latest)
             payload["status"]["finalScoringPeriod"] = self.final
             return payload
         payload = copy.deepcopy(ROSTERS)
@@ -65,11 +68,12 @@ class FakeExtractor:
 
 
 class FakeStore:
-    def __init__(self, stored_periods=()):
+    def __init__(self, stored_periods=(), keys=(KEY,)):
         self.days = {}          # (key, period) -> list[TeamDayRecord]
         self.writes = []        # (key, period, nba_date, replace, source)
-        for period in stored_periods:
-            self.days[(KEY, period)] = ["stale"]
+        for key in keys:
+            for period in stored_periods:
+                self.days[(key, period)] = ["stale"]
 
     def stored_periods(self, key, low, high):
         return {p for (k, p) in self.days if k == key and low <= p <= high}
@@ -170,6 +174,21 @@ class TestNightlyCapture:
         with pytest.raises(DataNotReady):
             pipeline.execute(ctx())
         assert pipeline.store.writes == []
+
+    def test_a_league_espn_has_not_rolled_keeps_the_run_waiting_once_the_others_are_stored(self, pipeline, monkeypatch):
+        teams(monkeypatch, team_row(1), team_row(3, league_id=555))
+        pipeline.store = FakeStore(stored_periods=range(46, 60), keys=(KEY, OTHER))
+        pipeline.espn_extractor = FakeExtractor(latest=61, latest_by_league={555: 60})   # 555 is still on day 60
+        # a failed run, so the next poll retries it: a success would be deduped for the night
+        with pytest.raises(DataNotReady, match="for 1 of 2 league"):
+            pipeline.execute(ctx())
+        assert [w[:2] for w in pipeline.store.writes] == [(KEY, 60)]        # the rolled league's day is kept
+
+        pipeline.espn_extractor = FakeExtractor(latest=61)                  # the next poll: ESPN rolled for both
+        c = ctx()
+        pipeline.execute(c)
+        assert [w[:2] for w in pipeline.store.writes] == [(KEY, 60), (OTHER, 60)]
+        assert c.records_processed == 3 and c.records_failed == 0
 
     def test_preseason_is_skipped_not_waited_for(self, pipeline, monkeypatch, alerts):
         teams(monkeypatch, team_row(1))
