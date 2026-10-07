@@ -1246,6 +1246,11 @@
             "title": "Error Streak",
             "type": "integer"
           },
+          "force_on_run": {
+            "default": false,
+            "title": "Force On Run",
+            "type": "boolean"
+          },
           "is_running": {
             "default": false,
             "title": "Is Running",
@@ -1329,7 +1334,8 @@
           "last_success_at",
           "is_running",
           "error_streak",
-          "accepts_date"
+          "accepts_date",
+          "force_on_run"
         ],
         "title": "PipelineHealthEntry",
         "type": "object"
@@ -1392,6 +1398,11 @@
             "title": "Espn Gated",
             "type": "boolean"
           },
+          "force_on_run": {
+            "default": false,
+            "title": "Force On Run",
+            "type": "boolean"
+          },
           "is_running": {
             "default": false,
             "title": "Is Running",
@@ -1429,6 +1440,7 @@
           "target_table",
           "trigger_endpoint",
           "accepts_date",
+          "force_on_run",
           "cron_job",
           "depends_on",
           "allow_concurrent",
@@ -5501,6 +5513,57 @@
           }
         ],
         "summary": "Trigger Preseason Market",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/scheduled-pickups": {
+      "post": {
+        "description": "Trigger the scheduled-pickups pipeline \u2014 the executor tick for usr.scheduled_pickups.\n\nCalled every minute by the 'scheduled-pickups' cron job. Gates on whether any\npickup is due (one EXISTS query, no run row); when one is, asks the backend to\nattempt the due rows and emails each outcome. The backend owns the retry\nrules, so a tick that finds nothing due costs one query.",
+        "operationId": "trigger_scheduled_pickups_v1_internal_pipelines_scheduled_pickups_post",
+        "parameters": [
+          {
+            "description": "Run even when no pickup is due (the dashboard's Run button).",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Run even when no pickup is due (the dashboard's Run button).",
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Scheduled Pickups",
         "tags": [
           "pipelines"
         ]

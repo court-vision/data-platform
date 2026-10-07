@@ -26,6 +26,7 @@ CRON_RUNNER_JOBS = {
     "schedule-sync",
     "playoffs",
     "preseason-market",
+    "scheduled-pickups",
 }
 
 # SCHEDULED pipelines that no cron-runner job fires (manual trigger only).
@@ -110,6 +111,11 @@ class TestCronJobs:
         assert config.cron_job_name == "preseason-market"
         assert trigger_endpoint(config) == "/v1/internal/pipelines/preseason-market"
 
+    def test_scheduled_pickups_picks_up_its_cron_runs(self):
+        config = PIPELINE_REGISTRY["scheduled_pickups"].config
+        assert config.cron_job_name == "scheduled-pickups"
+        assert trigger_endpoint(config) == "/v1/internal/pipelines/scheduled-pickups"
+
 
 @pytest.mark.api
 class TestDateOverride:
@@ -137,3 +143,28 @@ class TestDateOverride:
             category=PipelineCategory.SCHEDULED,
         )
         assert trigger_accepts_date(config) is False
+
+
+FORCED = [(n, c) for n, c in REGISTERED if c.config.force_on_run]
+
+
+@pytest.mark.api
+class TestForceOnRun:
+    """`force_on_run` makes the dashboard's Run button post ?force=true."""
+
+    @pytest.fixture(scope="class")
+    def public_paths(self):
+        return main_public.app.openapi()["paths"]
+
+    @pytest.mark.parametrize("name,cls", FORCED)
+    def test_the_route_takes_force(self, name, cls, public_paths):
+        # FastAPI ignores a query parameter the route does not declare, so a
+        # flag on a route without one would make Run silently do nothing new.
+        params = public_paths[trigger_endpoint(cls.config)]["post"].get("parameters", [])
+        assert any(p["name"] == "force" and p["in"] == "query" for p in params), name
+
+    def test_only_the_scheduled_pickups_run_is_forced(self):
+        # Its route skips a cron tick with no pickup due, which made the Run
+        # button a no-op. cv-projection's route takes `force` too, but there it
+        # means "outside the preseason window" - not what a Run click means.
+        assert [name for name, _ in FORCED] == ["scheduled_pickups"]

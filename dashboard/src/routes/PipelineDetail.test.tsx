@@ -38,6 +38,7 @@ function payload(runs: PipelineRun[], pipeline: Partial<PipelineInfo> = {}, summ
       target_table: "usr.notifications",
       trigger_endpoint: "/v1/internal/pipelines/lineup-alerts",
       accepts_date: false,
+      force_on_run: false,
       cron_job: "pre-game",
       depends_on: [],
       allow_concurrent: false,

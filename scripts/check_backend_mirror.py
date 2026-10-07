@@ -67,6 +67,7 @@ MIRRORED = [
     "db/models/nba/teams.py",
     "db/models/notifications.py",
     "db/models/provider_connections.py",
+    "db/models/scheduled_pickups.py",     # backend writes, dp reads (trigger gate + freshness)
     "db/models/stats/cumulative_player_stats.py",
     "db/models/stats/daily_matchup_score.py",
     "db/models/stats/daily_player_stats.py",

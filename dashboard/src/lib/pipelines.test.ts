@@ -17,6 +17,7 @@ function pipeline(overrides: Partial<PipelineHealth> = {}): PipelineHealth {
     is_running: false,
     error_streak: 0,
     accepts_date: true,
+    force_on_run: false,
     ...overrides,
   }
 }

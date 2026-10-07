@@ -972,6 +972,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/scheduled-pickups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Scheduled Pickups
+         * @description Trigger the scheduled-pickups pipeline — the executor tick for usr.scheduled_pickups.
+         *
+         *     Called every minute by the 'scheduled-pickups' cron job. Gates on whether any
+         *     pickup is due (one EXISTS query, no run row); when one is, asks the backend to
+         *     attempt the due rows and emails each outcome. The backend owns the retry
+         *     rules, so a tick that finds nothing due costs one query.
+         */
+        post: operations["trigger_scheduled_pickups_v1_internal_pipelines_scheduled_pickups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/season-history": {
         parameters: {
             query?: never;
@@ -1582,6 +1607,11 @@ export interface components {
              */
             error_streak: number;
             /**
+             * Force On Run
+             * @default false
+             */
+            force_on_run: boolean;
+            /**
              * Is Running
              * @default false
              */
@@ -1630,6 +1660,11 @@ export interface components {
              * @default false
              */
             espn_gated: boolean;
+            /**
+             * Force On Run
+             * @default false
+             */
+            force_on_run: boolean;
             /**
              * Is Running
              * @default false
@@ -3580,6 +3615,38 @@ export interface operations {
                 date?: string | null;
                 /** @description Override the ESPN league to pull from (must be rolled to the target season). */
                 league_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_scheduled_pickups_v1_internal_pipelines_scheduled_pickups_post: {
+        parameters: {
+            query?: {
+                /** @description Run even when no pickup is due (the dashboard's Run button). */
+                force?: boolean;
             };
             header?: never;
             path?: never;

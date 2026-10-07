@@ -209,6 +209,11 @@ class TestPipelineInfo:
         alerts = dashboard.pipeline_info("lineup_alerts")
         assert alerts.accepts_date is False and alerts.cron_job == "pre-game"
 
+    def test_the_run_button_forces_the_scheduled_pickups_tick(self):
+        # Its route skips when no pickup is due; the page's Run must still run.
+        assert dashboard.pipeline_info("scheduled_pickups").force_on_run is True
+        assert dashboard.pipeline_info("lineup_alerts").force_on_run is False
+
     def test_the_pre_game_window_is_the_one_the_gate_uses(self, monkeypatch):
         # trigger_pre_game falls back to the setting, which the environment
         # can change; the page used to print a literal 150 for it.
