@@ -19,7 +19,7 @@ from datetime import timedelta
 
 from core.logging import get_correlation_id
 from core.settings import settings
-from db.models.notifications import NotificationPreference
+from db.models.notifications import NotificationPreference, NotificationTeamPreference
 from db.models.teams import Team
 from db.models.users import User
 from pipelines.base import BasePipeline
@@ -35,12 +35,23 @@ SETTLED_OUTCOMES = frozenset({"executed", "skipped", "failed", "expired"})
 
 
 def _lookup_recipient(user_id: int, team_id: int):
-    """(user, team, prefs) for an email, or None when the row's owner is gone."""
+    """
+    (user, team, prefs) for an email, or None when the row's owner is gone.
+
+    The address is the one lineup alerts use for the team: the team's override
+    email where it sets one (non-null wins, LineupAlertsPipeline._get_effective_prefs),
+    else the global preference's, else (NotificationService._recipient) the account's.
+    """
     user = User.get_or_none(User.user_id == user_id)
     team = Team.get_or_none(Team.team_id == team_id)
     if user is None or team is None:
         return None
     prefs = NotificationPreference.get_or_none(NotificationPreference.user == user_id)
+    team_pref = NotificationTeamPreference.get_or_none(
+        (NotificationTeamPreference.user == user_id) & (NotificationTeamPreference.team_id == team_id)
+    )
+    if team_pref is not None and team_pref.email is not None:
+        prefs = team_pref  # the notification service reads only prefs.email
     return user, team, prefs
 
 

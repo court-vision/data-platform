@@ -2,18 +2,27 @@
 `pipelines.scheduled_pickups`: one backend call per tick, then a counter and (for
 a settled row) an email per result. The backend client, the recipient lookup and
 the notification service are fakes; the context is real so the counters are the
-ones the run record and `pipeline_partial` read.
+ones the run record and `pipeline_partial` read. The recipient lookup itself runs
+against the real models bound to in-memory SQLite (schema stripped).
 """
 
+import json
 from types import SimpleNamespace
 
 import pytest
+from peewee import SqliteDatabase
 
+from db.models.notifications import NotificationPreference, NotificationTeamPreference
+from db.models.provider_connections import ProviderConnection
+from db.models.teams import Team
+from db.models.users import User
 from pipelines import scheduled_pickups as module
 from pipelines.context import PipelineContext
 from pipelines.scheduled_pickups import ScheduledPickupsPipeline
 from services.backend_client import PickupExecution, PickupsRun
-from services.notification_service import NotificationResult
+from services.notification_service import NotificationResult, NotificationService
+
+MODELS = [User, ProviderConnection, Team, NotificationPreference, NotificationTeamPreference]
 
 
 def execution(pickup_id, outcome, reason=None, **over):
@@ -117,3 +126,65 @@ def test_an_empty_tick_does_nothing(pipeline):
     ctx = run(pipeline, PickupsRun(ok=True, due=0, results=[]))
     assert (ctx.records_processed, ctx.records_skipped, ctx.records_failed) == (0, 0, 0)
     assert pipeline.notification_service.sent == []
+
+
+# ---- the recipient lookup, against the real models -------------------------------------
+
+
+@pytest.fixture
+def sqlite_models():
+    """Bind the real models to in-memory SQLite (schema stripped) for the test."""
+    saved = {model: model._meta.schema for model in MODELS}
+    for model in MODELS:
+        model._meta.schema = None
+    db = SqliteDatabase(":memory:")
+    try:
+        with db.bind_ctx(MODELS):
+            db.create_tables(MODELS)
+            yield db
+    finally:
+        for model, schema in saved.items():
+            model._meta.schema = schema
+
+
+def make_team(user):
+    return Team.create(user_id=user.user_id, team_identifier="t",
+                       league_info=json.dumps({"provider": "espn", "league_id": 1, "team_name": "GloatingSoap369"}))
+
+
+def address(user, team):
+    """Where the pickup email for `team` goes: the lookup, then the service's own fallback."""
+    found_user, found_team, prefs = module._lookup_recipient(user.user_id, team.team_id)
+    assert (found_user.user_id, found_team.team_id) == (user.user_id, team.team_id)
+    return NotificationService._recipient(found_user, prefs)
+
+
+@pytest.mark.unit
+def test_the_teams_own_email_wins_over_the_global_override_and_the_account(sqlite_models):
+    user = User.create(email="fan@example.com")
+    team = make_team(user)
+    NotificationPreference.create(user=user.user_id, email="global@example.com")
+    NotificationTeamPreference.create(user=user.user_id, team_id=team.team_id, email="team@example.com")
+
+    assert address(user, team) == "team@example.com"
+
+
+@pytest.mark.unit
+def test_without_a_team_email_the_global_override_then_the_account_email_is_used(sqlite_models):
+    user = User.create(email="fan@example.com")
+    team, other = make_team(user), make_team(user)
+    NotificationTeamPreference.create(user=user.user_id, team_id=other.team_id, email="other@example.com")
+    NotificationTeamPreference.create(user=user.user_id, team_id=team.team_id, auto_lineup_enabled=True)  # no email
+    assert address(user, team) == "fan@example.com"
+
+    NotificationPreference.create(user=user.user_id, email="global@example.com")
+    assert address(user, team) == "global@example.com"
+    assert address(user, other) == "other@example.com"
+
+
+@pytest.mark.unit
+def test_a_row_whose_owner_or_team_is_gone_has_no_recipient(sqlite_models):
+    user = User.create(email="fan@example.com")
+    team = make_team(user)
+    assert module._lookup_recipient(user.user_id + 1, team.team_id) is None
+    assert module._lookup_recipient(user.user_id, team.team_id + 1) is None
