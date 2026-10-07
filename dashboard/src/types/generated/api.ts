@@ -681,6 +681,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/lineup-snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Lineup Snapshots
+         * @description Trigger the lineup snapshots pipeline.
+         *
+         *     Captures every ESPN team's lineup for each finished scoring period
+         *     (usr.lineup_snapshots). Production reaches it through the post-game batch,
+         *     where it waits for daily_matchup_scores (whose ESPN gate is what waits for
+         *     ESPN's nightly flip); this direct trigger skips that dependency.
+         *     Pass ?date=YYYY-MM-DD to re-capture one day — the stored rows are replaced
+         *     and any difference is logged as `lineup_snapshot_drift`.
+         */
+        post: operations["trigger_lineup_snapshots_v1_internal_pipelines_lineup_snapshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/live-stats": {
         parameters: {
             query?: never;
@@ -3274,6 +3301,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+        };
+    };
+    trigger_lineup_snapshots_v1_internal_pipelines_lineup_snapshots_post: {
+        parameters: {
+            query?: {
+                /** @description Capture exactly this NBA date's ESPN day for every league, replacing what is stored (YYYY-MM-DD). Omit for the nightly catch-up. */
+                date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
