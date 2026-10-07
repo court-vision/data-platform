@@ -120,13 +120,14 @@ class SnapshotStore:
             & (LineupSnapshot.season == key.season)
         )
 
-    def newest_period(self, key: LeagueKey) -> Optional[int]:
-        value = (
-            LineupSnapshot.select(fn.MAX(LineupSnapshot.scoring_period_id))
-            .where(self._league_rows(key))
-            .scalar()
+    def stored_periods(self, key: LeagueKey, low: int, high: int) -> set[int]:
+        """The league's days in [low, high] that have rows."""
+        query = (
+            LineupSnapshot.select(LineupSnapshot.scoring_period_id)
+            .where(self._league_rows(key) & LineupSnapshot.scoring_period_id.between(low, high))
+            .distinct()
         )
-        return int(value) if value is not None else None
+        return {period for (period,) in query.tuples()}
 
     def write_day(
         self,
@@ -400,12 +401,13 @@ class LineupSnapshotsPipeline(BasePipeline):
     # ---- which days ----
 
     def _missing_periods(self, key: LeagueKey, latest: int, final: Optional[int]) -> list[int]:
-        """Finished days not yet stored, ascending: [max(1, newest+1, L-14) .. min(L-1, final)].
+        """Finished days not yet stored, ascending: every day in
+        [max(1, L-14) .. min(L-1, final)] with no rows.
 
-        Days are captured in ascending order and a failure aborts the league,
-        so the stored days are always contiguous up to the newest one.
+        Every day of the window is checked, not just those after the newest
+        stored one: the stored days need not be contiguous (a `?date=` capture
+        can land past a gap), and a gap must still heal within the lookback.
         """
-        newest = self.store.newest_period(key)
         high = latest - 1
         if final is None:
             try:
@@ -414,8 +416,11 @@ class LineupSnapshotsPipeline(BasePipeline):
                 final = None
         if final is not None:
             high = min(high, final)
-        low = max(1, (newest or 0) + 1, latest - GAP_FILL_PERIODS)
-        return list(range(low, high + 1))
+        low = max(1, latest - GAP_FILL_PERIODS)
+        if low > high:
+            return []
+        stored = self.store.stored_periods(key, low, high)
+        return [period for period in range(low, high + 1) if period not in stored]
 
     # ---- write ----
 

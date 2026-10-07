@@ -36,7 +36,7 @@ def test_write_then_replace_reports_drift_and_leaves_no_orphans(integration_db):
                                            record(2, [player(3, 11)], opponent=1)],
                             replace=False, source="pipeline", pipeline_run_id=None)
     assert first.stored == 2 and first.drift == []
-    assert store.newest_period(KEY) == 60
+    assert store.stored_periods(KEY, 1, 200) == {60}
     assert LineupSnapshotPlayer.select().count() == 3
 
     # a second nightly write of the same day is a no-op
@@ -58,10 +58,14 @@ def test_write_then_replace_reports_drift_and_leaves_no_orphans(integration_db):
 
 
 @pytest.mark.integration
-def test_newest_period_is_per_league(integration_db):
+def test_stored_periods_are_the_leagues_own_days_within_the_bounds(integration_db):
     store = SnapshotStore()
     other = LeagueKey(provider_league_id="1", season=2027)
-    store.write_day(KEY, 5, DAY, [record(1, [player(1, 0)])], replace=False, source="pipeline", pipeline_run_id=None)
-    store.write_day(other, 9, DAY, [record(1, [player(1, 0)])], replace=False, source="pipeline", pipeline_run_id=None)
-    assert store.newest_period(KEY) == 5 and store.newest_period(other) == 9
-    assert store.newest_period(LeagueKey(provider_league_id="1", season=2026)) is None
+    for period in (5, 9):
+        store.write_day(KEY, period, DAY, [record(1, [player(1, 0)]), record(2, [player(2, 0)])],
+                        replace=False, source="pipeline", pipeline_run_id=None)
+    store.write_day(other, 7, DAY, [record(1, [player(1, 0)])], replace=False, source="pipeline", pipeline_run_id=None)
+    assert store.stored_periods(KEY, 1, 14) == {5, 9}      # one entry per day, whatever the team count
+    assert store.stored_periods(KEY, 6, 9) == {9}          # bounds are inclusive
+    assert store.stored_periods(other, 1, 14) == {7}
+    assert store.stored_periods(LeagueKey(provider_league_id="1", season=2026), 1, 14) == set()

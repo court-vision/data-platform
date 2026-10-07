@@ -71,9 +71,8 @@ class FakeStore:
         for period in stored_periods:
             self.days[(KEY, period)] = ["stale"]
 
-    def newest_period(self, key):
-        periods = [p for (k, p) in self.days if k == key]
-        return max(periods) if periods else None
+    def stored_periods(self, key, low, high):
+        return {p for (k, p) in self.days if k == key and low <= p <= high}
 
     def write_day(self, key, scoring_period_id, nba_date, records, *, replace, source, pipeline_run_id):
         self.writes.append((key, scoring_period_id, nba_date, replace, source))
@@ -129,10 +128,18 @@ class TestNightlyCapture:
 
     def test_fills_every_missing_day_ascending_within_the_lookback(self, pipeline, monkeypatch):
         teams(monkeypatch, team_row(1))
-        pipeline.store = FakeStore(stored_periods=[55])
+        pipeline.store = FakeStore(stored_periods=range(46, 56))   # through day 55
         pipeline.espn_extractor = FakeExtractor(latest=61)
         pipeline.execute(ctx())
         assert [w[1] for w in pipeline.store.writes] == [56, 57, 58, 59, 60]
+
+    def test_a_later_day_stored_first_does_not_hide_the_earlier_gap(self, pipeline, monkeypatch):
+        # `?date=` captured day 60 before any nightly run; the next night is day 61
+        teams(monkeypatch, team_row(1))
+        pipeline.store = FakeStore(stored_periods=[60])
+        pipeline.espn_extractor = FakeExtractor(latest=62)
+        pipeline.execute(ctx(nba_date=schedule_service.date_for_espn_scoring_period(61)))
+        assert [w[1] for w in pipeline.store.writes] == [p for p in range(62 - GAP_FILL_PERIODS, 62) if p != 60]
 
     def test_lookback_is_bounded_when_nothing_is_stored(self, pipeline, monkeypatch):
         teams(monkeypatch, team_row(1))
@@ -142,7 +149,7 @@ class TestNightlyCapture:
 
     def test_never_past_the_seasons_last_day(self, pipeline, monkeypatch):
         teams(monkeypatch, team_row(1))
-        pipeline.store = FakeStore(stored_periods=[165])
+        pipeline.store = FakeStore(stored_periods=range(161, 166))      # through day 165
         pipeline.espn_extractor = FakeExtractor(latest=175, final=167)   # playoffs: L runs past final
         pipeline.execute(ctx(nba_date=schedule_service.date_for_espn_scoring_period(167)))
         assert [w[1] for w in pipeline.store.writes] == [166, 167]
