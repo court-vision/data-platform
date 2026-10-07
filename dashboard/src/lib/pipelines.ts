@@ -3,8 +3,24 @@ import type { PipelineHealth } from "@/hooks/useDashboardStatus"
 export type PipelineState = "running" | "stuck" | "failed" | "success" | "never"
 
 /** What it takes to run a pipeline from a button: the Overview's rows and the
- * detail page's PipelineInfo both have these four. */
-export type Runnable = Pick<PipelineHealth, "display_name" | "is_running" | "trigger_endpoint" | "accepts_date">
+ * detail page's PipelineInfo both have these five. */
+export type Runnable = Pick<
+  PipelineHealth,
+  "display_name" | "is_running" | "trigger_endpoint" | "accepts_date" | "force_on_run"
+>
+
+/**
+ * Where the Run button posts: the trigger route, with `?date=` for a backfill,
+ * and `?force=true` where the route skips a cron tick with nothing to do
+ * (scheduled pickups) — an operator's Run should still run.
+ */
+export function triggerUrl(pipeline: Runnable, date?: string): string {
+  const params = new URLSearchParams()
+  if (date) params.set("date", date)
+  if (pipeline.force_on_run) params.set("force", "true")
+  const query = params.toString()
+  return query ? `${pipeline.trigger_endpoint}?${query}` : pipeline.trigger_endpoint
+}
 
 /**
  * One word for a pipeline's health; `running` wins over whatever ran last.

@@ -3,7 +3,7 @@ import { toast } from "sonner"
 
 import { RUNS_KEY } from "@/hooks/usePipelineRuns"
 import { apiFetch, type Schemas } from "@/lib/api"
-import type { Runnable } from "@/lib/pipelines"
+import { triggerUrl, type Runnable } from "@/lib/pipelines"
 
 interface TriggerArgs {
   pipeline: Runnable
@@ -23,6 +23,11 @@ export function refreshAfterRun(queryClient: QueryClient) {
   ])
 }
 
+/** POST the pipeline's trigger route, with `?date=` / `?force=true` as `triggerUrl` adds them. */
+export function triggerPipeline({ pipeline, date }: TriggerArgs) {
+  return apiFetch<Schemas["PipelineResponse"]>(triggerUrl(pipeline, date), { method: "POST" })
+}
+
 /**
  * Run one pipeline. The trigger routes are synchronous — the request returns
  * when the pipeline has finished — so `isPending` is "running", and the toast
@@ -32,12 +37,7 @@ export function refreshAfterRun(queryClient: QueryClient) {
 export function useTriggerPipeline() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ pipeline, date }: TriggerArgs) => {
-      const url = date
-        ? `${pipeline.trigger_endpoint}?date=${encodeURIComponent(date)}`
-        : pipeline.trigger_endpoint
-      return apiFetch<Schemas["PipelineResponse"]>(url, { method: "POST" })
-    },
+    mutationFn: triggerPipeline,
     onSuccess: (response, { pipeline, date }) => {
       const label = date ? `${pipeline.display_name} for ${date}` : pipeline.display_name
       if (response.status === "success") toast.success(label, { description: response.message })

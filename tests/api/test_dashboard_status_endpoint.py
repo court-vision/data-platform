@@ -4,8 +4,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from peewee import SqliteDatabase
 
 from api.v1 import dashboard
+from db.models.nba.cron_job_run import CronJobRun
+from db.models.pipeline_run import PipelineRun
 
 
 class _FakeJobManager:
@@ -128,6 +131,27 @@ def test_dashboard_status_returns_expected_payload(monkeypatch) -> None:
     assert len(body["data"]["recent_quality_runs"]) == 1
     assert body["data"]["recent_quality_runs"][0]["failed_checks"] == 1
     assert body["data"]["quality_failed_checks"][0]["check_name"] == "player_game_stats_non_negative_minutes"
+
+
+@pytest.mark.api
+def test_the_overview_rows_tell_the_run_button_to_force_only_the_scheduled_pickups_tick() -> None:
+    # The Overview's Run button posts what its row says. The scheduled-pickups
+    # route skips a tick with no pickup due, so without ?force=true Run did nothing.
+    # The run tables are bound to in-memory SQLite (schema stripped), empty.
+    models = [PipelineRun, CronJobRun]
+    saved = {model: model._meta.schema for model in models}
+    for model in models:
+        model._meta.schema = None
+    db = SqliteDatabase(":memory:")
+    try:
+        with db.bind_ctx(models):
+            db.create_tables(models)
+            rows = dashboard._build_pipeline_health()
+    finally:
+        for model, schema in saved.items():
+            model._meta.schema = schema
+
+    assert [row.name for row in rows if row.force_on_run] == ["scheduled_pickups"]
 
 
 # --- GET /v1/dashboard/services -------------------------------------------

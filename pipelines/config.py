@@ -58,6 +58,8 @@ class PipelineConfig:
         trigger_slug: Last segment of this pipeline's own trigger route
         cron_job: cron-runner job that fires this pipeline, when it is not the
             category's batch job
+        force_on_run: The dashboard's Run button posts ?force=true to the
+            trigger route (one that skips a cron tick with nothing to do)
     """
 
     name: str
@@ -111,6 +113,13 @@ class PipelineConfig:
     # batch job. SCHEDULED pipelines set it, or leave it None when nothing
     # schedules them. Read it through `cron_job_name`.
     cron_job: Optional[str] = None
+
+    # The dashboard's Run button posts ?force=true to the trigger route. For a
+    # route that gates on whether there is work and skips an idle cron tick
+    # without a run row (scheduled_pickups), so an operator's Run still runs;
+    # cron-runner posts the bare route and stays gated. Not for a route whose
+    # `force` means something else (cv-projection: outside the preseason window).
+    force_on_run: bool = False
 
     def __post_init__(self):
         """Validate configuration."""

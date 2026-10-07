@@ -295,6 +295,7 @@ def pipeline_info(name: str, *, is_running: bool = False) -> PipelineInfo:
         target_table=config.target_table,
         trigger_endpoint=trigger_endpoint(config),
         accepts_date=trigger_accepts_date(config),
+        force_on_run=config.force_on_run,
         cron_job=config.cron_job_name,
         depends_on=list(config.depends_on),
         allow_concurrent=config.allow_concurrent,
@@ -867,6 +868,7 @@ def _build_pipeline_health() -> list[PipelineHealthEntry]:
             is_running=is_running,
             error_streak=error_streak,
             accepts_date=trigger_accepts_date(config),
+            force_on_run=config.force_on_run,
         )
         entries.append(entry)
 

@@ -30,6 +30,7 @@ from pipelines.playoff_bracket import PlayoffBracketPipeline
 from pipelines.preseason_market import PreseasonMarketPipeline
 from pipelines.season_history import SeasonHistoryPipeline
 from pipelines.cv_projection import CVProjectionPipeline
+from pipelines.scheduled_pickups import ScheduledPickupsPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -61,6 +62,8 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "season_history": SeasonHistoryPipeline,
     # After preseason_market: it reads the day's ESPN projection.
     "cv_projection": CVProjectionPipeline,
+    # The executor tick for usr.scheduled_pickups (every minute; its route gates on a due row).
+    "scheduled_pickups": ScheduledPickupsPipeline,
 }
 
 

@@ -31,6 +31,9 @@ class PipelineHealthEntry(ApiModel):
     # The trigger route takes ?date=YYYY-MM-DD (a backfill). Most do; the live,
     # lineup-alerts and playoffs routes run for "now" only.
     accepts_date: bool = False
+    # The Run button posts ?force=true: the route skips a cron tick with nothing
+    # to do (scheduled-pickups), and an operator's Run should still run.
+    force_on_run: bool = False
 
 
 class QualityRunEntry(ApiModel):
@@ -160,6 +163,7 @@ class PipelineInfo(ApiModel):
     target_table: str
     trigger_endpoint: str
     accepts_date: bool
+    force_on_run: bool = False                # the Run button posts ?force=true (the route skips idle ticks)
     cron_job: Optional[str] = None            # cron-runner job that fires it
     depends_on: list[str] = Field(default_factory=list)
     allow_concurrent: bool = False

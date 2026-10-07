@@ -1,5 +1,6 @@
 """
-Backend internal API client — the lineup-alerts pipeline's one call per team.
+Backend internal API client — the lineup-alerts pipeline's one call per team, and
+the scheduled-pickups pipeline's one call per tick.
 
     POST {BACKEND_INTERNAL_URL}/v1/internal/jobs/lineup/evaluate
     Authorization: Bearer <PIPELINE_API_TOKEN>      (the token both services share)
@@ -23,12 +24,19 @@ One request per call, **no retry**: the pipeline already re-polls, and an
 `already_applied_today` guard, not a client retry, is what makes that safe.
 Runs in the pipeline thread (`BasePipeline.run` uses `asyncio.to_thread`), so
 the synchronous `requests` call is fine here. The token is never logged.
+
+`execute_pickups` is the second route, POST /v1/internal/jobs/pickups/execute with
+`{"limit": int}`: the backend attempts up to that many due scheduled pickups and
+answers one `PickupResult` per row (`executed | skipped | failed | expired |
+deferred`). Same contract — one request, no retry (the backend's claim lease and
+its re-read before every attempt make a lost answer safe), transport problems
+come back as a `PickupsRun` that is not `ok`.
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any, Optional
 
@@ -38,12 +46,15 @@ from core.logging import get_logger
 from core.settings import settings as default_settings
 
 EVALUATE_PATH = "/v1/internal/jobs/lineup/evaluate"
+EXECUTE_PICKUPS_PATH = "/v1/internal/jobs/pickups/execute"
 CONNECT_TIMEOUT_SECONDS = 5.0
 
 # Outcomes the backend returns for a 200.
 BACKEND_OUTCOMES = frozenset({"planned", "applied", "noop", "rejected", "failed", "skipped"})
 # Client-side outcome: the backend could not be asked (or did not answer usably).
 OUTCOME_UNAVAILABLE = "unavailable"
+# Outcomes the backend returns per scheduled pickup.
+PICKUP_OUTCOMES = frozenset({"executed", "skipped", "failed", "expired", "deferred"})
 
 _ERROR_EXCERPT_CHARS = 300
 
@@ -93,13 +104,98 @@ def _excerpt(text: Optional[str]) -> str:
     return text if len(text) <= _ERROR_EXCERPT_CHARS else text[: _ERROR_EXCERPT_CHARS - 1] + "…"
 
 
+@dataclass(frozen=True)
+class PickupExecution:
+    """One scheduled pickup's outcome this run — the backend's PickupResult."""
+
+    pickup_id: int
+    team_id: int
+    user_id: int
+    outcome: str
+    reason: Optional[str] = None
+    detail: Optional[str] = None
+    team_name: str = ""
+    add: dict = field(default_factory=dict)       # {player_id, name, team}
+    drop: Optional[dict] = None
+    nba_date: Optional[str] = None                 # ISO date the pickup is for
+    scoring_period_id: Optional[int] = None
+    seated_slot: Optional[str] = None              # executed: "UT", "PG", ...; None = bench
+    verified: Optional[bool] = None
+    audit_id: Optional[int] = None
+    next_attempt_at: Optional[str] = None          # deferred: ISO datetime
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, item: Any) -> Optional["PickupExecution"]:
+        """Build from one `results` entry; None when it is not a usable result."""
+        if not isinstance(item, dict) or item.get("outcome") not in PICKUP_OUTCOMES:
+            return None
+        try:
+            return cls(
+                pickup_id=int(item["pickup_id"]),
+                team_id=int(item["team_id"]),
+                user_id=int(item["user_id"]),
+                outcome=item["outcome"],
+                reason=item.get("reason"),
+                detail=item.get("detail"),
+                team_name=item.get("team_name") or "",
+                add=item["add"] if isinstance(item.get("add"), dict) else {},
+                drop=item["drop"] if isinstance(item.get("drop"), dict) else None,
+                nba_date=item.get("nba_date"),
+                scoring_period_id=item.get("scoring_period_id"),
+                seated_slot=item.get("seated_slot"),
+                verified=item.get("verified"),
+                audit_id=item.get("audit_id"),
+                next_attempt_at=item.get("next_attempt_at"),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+@dataclass(frozen=True)
+class PickupsRun:
+    """The backend's answer to one executor tick, or why there is none (`ok` False)."""
+
+    ok: bool
+    due: int = 0
+    results: list[PickupExecution] = field(default_factory=list)
+    reason: Optional[str] = None
+    error: Optional[str] = None
+
+    @classmethod
+    def unavailable(cls, reason: str, error: Optional[str] = None) -> "PickupsRun":
+        return cls(ok=False, reason=reason, error=error)
+
+    @classmethod
+    def from_payload(cls, data: Any) -> "PickupsRun":
+        """Build from the envelope's `data`; anything malformed is unavailable."""
+        if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        results: list[PickupExecution] = []
+        for item in data["results"]:
+            parsed = PickupExecution.from_payload(item)
+            if parsed is None:
+                return cls.unavailable(reason="malformed_response", error=f"unexpected result: {_excerpt(repr(item))}")
+            results.append(parsed)
+        try:
+            due = int(data.get("due") or 0)
+        except (TypeError, ValueError):
+            due = len(results)
+        return cls(ok=True, due=due, results=results)
+
+
 class BackendClient:
     """Talks to the backend's pipeline-token routes. Disabled when no base URL is configured."""
 
-    def __init__(self, base_url: Optional[str], token: str, timeout_seconds: float):
+    def __init__(self, base_url: Optional[str], token: str, timeout_seconds: float,
+                 pickups_timeout_seconds: Optional[float] = None):
         self._base_url = (base_url or "").strip().rstrip("/")
         self._token = token
         self._timeout = (CONNECT_TIMEOUT_SECONDS, float(timeout_seconds))
+        # A pickups tick is several ESPN round trips per row, so it gets its own read timeout.
+        self._pickups_timeout = (CONNECT_TIMEOUT_SECONDS, float(pickups_timeout_seconds or timeout_seconds))
         self._log = get_logger("backend_client")
 
     @property
@@ -174,6 +270,76 @@ class BackendClient:
         )
         return evaluation
 
+    def execute_pickups(self, *, limit: int = 4, correlation_id: Optional[str] = None) -> PickupsRun:
+        """Ask the backend to attempt up to `limit` due scheduled pickups.
+
+        Never raises: transport and protocol failures come back as a run that is not `ok`.
+        """
+        if not self.enabled:
+            return PickupsRun.unavailable(reason="backend_not_configured")
+
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+        body = {"limit": int(limit)}
+
+        started = time.monotonic()
+        status_code: Optional[int] = None
+        try:
+            response = requests.post(
+                f"{self._base_url}{EXECUTE_PICKUPS_PATH}",
+                json=body,
+                headers=headers,
+                timeout=self._pickups_timeout,
+            )
+            status_code = response.status_code
+            run = self._parse_pickups_response(response)
+        except requests.Timeout as exc:
+            run = PickupsRun.unavailable(reason="timeout", error=_excerpt(str(exc)))
+        except requests.RequestException as exc:
+            run = PickupsRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+        except Exception as exc:  # a client bug must degrade the tick, not the run
+            run = PickupsRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        log = self._log.info if run.ok else self._log.warning
+        log(
+            "backend_execute_pickups",
+            limit=limit,
+            ok=run.ok,
+            due=run.due,
+            results=len(run.results),
+            reason=run.reason,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            error=run.error,
+        )
+        return run
+
+    @staticmethod
+    def _parse_pickups_response(response: requests.Response) -> PickupsRun:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if status == 200:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            return PickupsRun.from_payload(data)
+
+        if status == 401:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            return PickupsRun.unavailable(reason="unauthorized", error=_excerpt(str(detail or response.text)))
+
+        detail: Optional[str] = None
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
+        return PickupsRun.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
+
     @staticmethod
     def _parse_response(response: requests.Response) -> LineupEvaluation:
         status = response.status_code
@@ -212,4 +378,5 @@ def backend_client_from_settings(settings: Any = default_settings) -> BackendCli
         base_url=settings.backend_internal_url,
         token=settings.pipeline_api_token.get_secret_value(),
         timeout_seconds=settings.backend_timeout_seconds,
+        pickups_timeout_seconds=getattr(settings, "pickups_backend_timeout_seconds", None),
     )
