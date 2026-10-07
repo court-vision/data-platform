@@ -27,7 +27,7 @@ from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
 from services.alert_service import AlertEvent, get_alert_service
 from services.backend_client import PickupExecution, PickupsRun, backend_client_from_settings
-from services.notification_service import NotificationService
+from services.notification_service import NotificationResult, NotificationService
 
 BACKEND_UNAVAILABLE_ALERT_DEDUPE = timedelta(hours=6)
 # Outcomes that end a row — and get an email. A deferred row waits silently.
@@ -120,14 +120,19 @@ class ScheduledPickupsPipeline(BasePipeline):
         )
 
     def _email(self, ctx: PipelineContext, result: PickupExecution) -> None:
-        found = _lookup_recipient(result.user_id, result.team_id)
-        if found is None:
-            ctx.log.warning("scheduled_pickup_email_no_recipient", pickup_id=result.pickup_id,
-                            user_id=result.user_id, team_id=result.team_id)
-            ctx.increment_skipped(1, "email_no_recipient")
-            return
-        user, team, prefs = found
-        sent = self.notification_service.send_scheduled_pickup_result(user, team, result.as_dict(), prefs=prefs)
+        """Email the row's owner. Never raises: the pickup has settled whatever happens
+        here, so an error costs this row its email, not the rows after it theirs."""
+        try:
+            found = _lookup_recipient(result.user_id, result.team_id)
+            if found is None:
+                ctx.log.warning("scheduled_pickup_email_no_recipient", pickup_id=result.pickup_id,
+                                user_id=result.user_id, team_id=result.team_id)
+                ctx.increment_skipped(1, "email_no_recipient")
+                return
+            user, team, prefs = found
+            sent = self.notification_service.send_scheduled_pickup_result(user, team, result.as_dict(), prefs=prefs)
+        except Exception as exc:  # the recipient lookup's queries, or rendering the email
+            sent = NotificationResult(success=False, error=f"{type(exc).__name__}: {exc}")
         if not sent.success:
             ctx.log.warning("scheduled_pickup_email_failed", pickup_id=result.pickup_id, error=sent.error)
             ctx.increment_skipped(1, "email_failed")

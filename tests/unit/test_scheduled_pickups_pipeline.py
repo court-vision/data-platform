@@ -10,7 +10,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from peewee import SqliteDatabase
+from peewee import OperationalError, SqliteDatabase
 
 from db.models.notifications import NotificationPreference, NotificationTeamPreference
 from db.models.provider_connections import ProviderConnection
@@ -46,11 +46,14 @@ class FakeBackendClient:
 
 
 class FakeNotificationService:
-    def __init__(self, succeed=True):
+    def __init__(self, succeed=True, raise_for=()):
         self.succeed = succeed
+        self.raise_for = set(raise_for)   # pickup ids whose email raises while rendering
         self.sent = []
 
     def send_scheduled_pickup_result(self, user, team, result, prefs=None):
+        if result["pickup_id"] in self.raise_for:
+            raise KeyError("name")
         self.sent.append(dict(user=user, team=team, result=result, prefs=prefs))
         return NotificationResult(success=True, message_id="m") if self.succeed else NotificationResult(success=False, error="resend down")
 
@@ -107,6 +110,28 @@ def test_a_missing_recipient_or_a_bounced_email_is_counted_not_raised(pipeline):
     ]))
     assert (ctx.records_processed, ctx.records_skipped) == (2, 2)   # email_failed + email_no_recipient
     assert len(pipeline.notification_service.sent) == 1
+
+
+@pytest.mark.unit
+def test_an_email_that_raises_costs_that_row_its_email_and_not_the_run(pipeline, monkeypatch):
+    user, team, prefs = pipeline.recipient
+
+    def lookup(user_id, team_id):
+        if user_id == 12:
+            raise OperationalError("server closed the connection unexpectedly")
+        return user, team, prefs
+
+    monkeypatch.setattr(module, "_lookup_recipient", lookup)
+    pipeline.notification_service = FakeNotificationService(raise_for={2})
+    ctx = run(pipeline, PickupsRun(ok=True, due=3, results=[
+        execution(1, "executed", user_id=12),        # the recipient lookup raises
+        execution(2, "skipped", "unavailable"),      # rendering the email raises
+        execution(3, "expired", "deadline"),
+    ]))
+
+    assert [s["result"]["pickup_id"] for s in pipeline.notification_service.sent] == [3]
+    assert (ctx.records_processed, ctx.records_skipped, ctx.records_failed) == (1, 4, 0)
+    assert ctx.skip_reasons["email_failed"] == 2
 
 
 @pytest.mark.unit
