@@ -123,9 +123,15 @@ class PickupExecution:
     verified: Optional[bool] = None
     audit_id: Optional[int] = None
     next_attempt_at: Optional[str] = None          # deferred: ISO datetime
+    lane: Optional[dict] = None                    # a stream lane's pickup: {lane_id, notify, projected, why}
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+    @property
+    def desk_only(self) -> bool:
+        """A stream lane's pickup whose lane doesn't email."""
+        return bool(self.lane) and self.lane.get("notify") == "desk"
 
     @classmethod
     def from_payload(cls, item: Any) -> Optional["PickupExecution"]:
@@ -149,6 +155,53 @@ class PickupExecution:
                 verified=item.get("verified"),
                 audit_id=item.get("audit_id"),
                 next_attempt_at=item.get("next_attempt_at"),
+                lane=item["lane"] if isinstance(item.get("lane"), dict) else None,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+LANE_NOTICE_ACTIONS = frozenset({"paused", "blocked"})
+
+
+@dataclass(frozen=True)
+class LaneNotice:
+    """A stream lane decision the user hears about — the backend's LaneNotice: the lane paused
+    (`reason`: holder_gone, auth_expired, ...), or a day passed without a decision (blocked, missed)."""
+
+    lane_id: int
+    team_id: int
+    user_id: int
+    action: str
+    reason: str
+    notify: str = "email"                           # desk: no email
+    detail: Optional[str] = None
+    team_name: str = ""
+    holder: dict = field(default_factory=dict)      # {player_id, name, team}
+    nba_date: Optional[str] = None
+    scoring_period_id: Optional[int] = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_payload(cls, item: Any) -> Optional["LaneNotice"]:
+        """Build from one `lanes` entry; None when it is not a usable notice."""
+        if not isinstance(item, dict) or item.get("action") not in LANE_NOTICE_ACTIONS:
+            return None
+        try:
+            return cls(
+                lane_id=int(item["lane_id"]),
+                team_id=int(item["team_id"]),
+                user_id=int(item["user_id"]),
+                action=item["action"],
+                reason=str(item["reason"]),
+                notify=item.get("notify") or "email",
+                detail=item.get("detail"),
+                team_name=item.get("team_name") or "",
+                holder=item["holder"] if isinstance(item.get("holder"), dict) else {},
+                nba_date=item.get("nba_date"),
+                scoring_period_id=item.get("scoring_period_id"),
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -161,6 +214,7 @@ class PickupsRun:
     ok: bool
     due: int = 0
     results: list[PickupExecution] = field(default_factory=list)
+    lanes: list[LaneNotice] = field(default_factory=list)   # stream lane decisions to tell
     reason: Optional[str] = None
     error: Optional[str] = None
 
@@ -179,11 +233,17 @@ class PickupsRun:
             if parsed is None:
                 return cls.unavailable(reason="malformed_response", error=f"unexpected result: {_excerpt(repr(item))}")
             results.append(parsed)
+        lanes: list[LaneNotice] = []
+        for item in data.get("lanes") or []:      # absent from a backend that predates stream lanes
+            notice = LaneNotice.from_payload(item)
+            if notice is None:
+                return cls.unavailable(reason="malformed_response", error=f"unexpected lane notice: {_excerpt(repr(item))}")
+            lanes.append(notice)
         try:
             due = int(data.get("due") or 0)
         except (TypeError, ValueError):
             due = len(results)
-        return cls(ok=True, due=due, results=results)
+        return cls(ok=True, due=due, results=results, lanes=lanes)
 
 
 class BackendClient:

@@ -154,3 +154,55 @@ def test_stub_send_reports_success_without_a_resend_key(monkeypatch):
     monkeypatch.setattr(settings, "resend_api_key", None)
     result = NotificationService().send_lineup_alert(USER, TEAM, MOVES[:2], [], time(19, 30))
     assert result.success and result.message_id == "stub-fan@example.com"
+
+
+# ---- stream lanes ----------------------------------------------------------------------------
+
+
+def _pickup(outcome="executed", reason=None, lane=None):
+    return {"outcome": outcome, "reason": reason, "add": {"name": "Kawhi Leonard"}, "drop": {"name": "Anthony Edwards"},
+            "nba_date": "2026-11-17", "seated_slot": "UT", "verified": True, "lane": lane}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("projected, why, line", [
+    ("Kawhi Leonard", "as_projected", "This was the move the lane had projected."),
+    ("Joel Embiid", "projected_gone", "The lane had projected Joel Embiid for this day, but Joel Embiid was no longer "
+                                      "available, so it picked Kawhi Leonard."),
+    ("Joel Embiid", "replanned", "The lane had projected Joel Embiid for this day; with the latest projections "
+                                 "Kawhi Leonard was the better pick."),
+    ("Anthony Edwards", "replanned", "The lane had projected keeping Anthony Edwards for this day; with the latest "
+                                     "projections Kawhi Leonard was the better pick."),
+])
+def test_a_lane_pickup_says_how_it_compares_with_the_projection(projected, why, line):
+    subject, body = NotificationService._build_pickup_email(
+        "Hoop Dreams", _pickup(lane={"lane_id": 7, "notify": "email", "projected": {"name": projected}, "why": why}))
+    assert subject == "Stream lane picked up Kawhi Leonard for Hoop Dreams"
+    assert "Your stream lane made this move" in body and line in body
+
+
+@pytest.mark.unit
+def test_a_lane_pickup_that_did_not_go_through_and_a_users_own_pickup():
+    subject, body = NotificationService._build_pickup_email(
+        "Hoop Dreams", _pickup("skipped", "unavailable", lane={"lane_id": 7, "notify": "email"}))
+    assert subject == "Stream lane skipped Kawhi Leonard for Hoop Dreams"
+    assert "re-plans before the next day" in body and "made this move" not in body
+    subject, body = NotificationService._build_pickup_email("Hoop Dreams", _pickup())
+    assert subject == "Court Vision picked up Kawhi Leonard for Hoop Dreams" and "stream lane" not in body
+
+
+@pytest.mark.unit
+def test_lane_notices(service):
+    holder = {"name": "Anthony Edwards"}
+    result = service.send_stream_lane_notice(USER, TEAM, {"action": "paused", "reason": "holder_gone", "holder": holder})
+    assert result.success
+    _, subject, body = service.sent[0]
+    assert subject == "Stream lane paused for Hoop Dreams"
+    assert "Anthony Edwards is no longer on your roster" in body and "won't change anything else" in body
+    _, _, body = service.sent[-1] if service.send_stream_lane_notice(
+        USER, TEAM, {"action": "paused", "reason": "auth_expired", "holder": holder}) else (None, None, None)
+    assert "reconnect it on Court Vision" in body and "until you resume it" in body
+    service.send_stream_lane_notice(USER, TEAM, {"action": "blocked", "reason": "missed", "nba_date": "2026-11-17",
+                                                 "holder": holder})
+    _, subject, body = service.sent[-1]
+    assert subject == "Stream lane missed a day for Hoop Dreams" and "Tue, Nov 17" in body

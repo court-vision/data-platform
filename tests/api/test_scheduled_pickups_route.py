@@ -75,6 +75,7 @@ def test_requires_bearer_token(run_calls, monkeypatch):
 
 
 @pytest.mark.api
-def test_the_gate_query_reads_only_due_pending_rows():
+def test_the_gate_query_reads_only_due_pending_rows_and_due_lane_decisions():
     sql = pipelines_api.DUE_PICKUPS_SQL
     assert "status = 'pending'" in sql and "not_before_at <= now()" in sql and "next_attempt_at IS NULL" in sql
+    assert "usr.stream_lanes WHERE status = 'active' AND next_decision_at <= now()" in sql
