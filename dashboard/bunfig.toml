@@ -1,0 +1,3 @@
+[test]
+# CSS modules: bun's runtime has no loader for them, so tests see each class as its own name.
+preload = ["./src/test-setup.ts"]

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter, Route, Routes } from "react-router"
@@ -6,6 +8,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { qualityOverviewQuery } from "@/hooks/useQuality"
 import type { QualityCheckRow, QualityOverview, QualityRun } from "@/lib/quality"
 import { Quality } from "@/routes/Quality"
+import { pressed } from "@/test-helpers"
 
 // No DOM and no network: the page is rendered to markup from a query cache
 // filled by hand, and read as text.
@@ -112,7 +115,7 @@ describe("Quality", () => {
     expect(matrixRow(html, "ranges_valid")).toContain("critical · 2 runs")
     const warning = matrixRow(html, "ownership_ran_within_24h")
     expect(warning).toContain("warning · 1 run")
-    expect(warning).toContain("text-status-projected")
+    expect(warning).toContain('data-tone="warn"')
   })
 
   test("a streak that fills a full window is at least that long, and says so", () => {
@@ -135,18 +138,23 @@ describe("Quality", () => {
 
   test("on a narrow screen a name wraps in full with its streak beneath, not cut short to fit beside it", () => {
     const row = matrixRow(render(DATA), "ranges_valid")
-    // No DOM here, so this reads the classes: stacked and wrapping until md, one truncated line from there.
-    const label = row.match(/<span class="([^"]*)"><span class="([^"]*)" title="ranges_valid"/)
-    expect(label?.[1].split(" ")).toEqual(expect.arrayContaining(["flex-col", "md:flex-row"]))
-    expect(label?.[2].split(" ")).toEqual(expect.arrayContaining(["break-all", "md:truncate"]))
-    expect(label?.[2].split(" ")).not.toContain("truncate")
+    // No DOM here, so this reads the markup and the stylesheet: stacked and wrapping until md, one cut line from there.
+    expect(row).toMatch(/<span class="matrixLabel"><span class="matrixName" title="ranges_valid">ranges_valid<\/span><span class="streak"/)
+    const css = readFileSync(join(import.meta.dir, "../components/quality.module.css"), "utf8")
+    const base = css.slice(0, css.indexOf("@media (min-width: 768px)"))
+    const wide = css.slice(css.indexOf("@media (min-width: 768px)"))
+    expect(base).toMatch(/\.matrixLabel \{[^}]*flex-direction: column/)
+    expect(base).toMatch(/\.matrixName \{[^}]*word-break: break-all/)
+    expect(base).not.toMatch(/\.matrixName \{[^}]*text-overflow/)
+    expect(wide).toMatch(/\.matrixLabel \{[^}]*flex-direction: row/)
+    expect(wide).toMatch(/\.matrixName \{[^}]*text-overflow: ellipsis/)
   })
 
   test("the tiles read the newest run, split by severity", () => {
     const html = render(DATA)
     expect(html).toContain(">0/2<") // passing
-    expect(html).toMatch(/Critical failing<\/dt><dd[^>]*text-status-loss[^>]*>1</)
-    expect(html).toMatch(/Warnings failing<\/dt><dd[^>]*text-status-projected[^>]*>1</)
+    expect(html).toMatch(/Critical failing<\/dt><dd[^>]*data-tone="down"[^>]*>1</)
+    expect(html).toMatch(/Warnings failing<\/dt><dd[^>]*data-tone="warn"[^>]*>1</)
     expect(html).toContain("failed · dashboard")
   })
 
@@ -176,8 +184,8 @@ describe("Quality", () => {
   })
 
   test("the limit in the URL is the pressed button", () => {
-    expect(render({ ...DATA, limit: 50 }, "?limit=50")).toMatch(/aria-pressed="true"[^>]*>50</)
-    expect(render(DATA)).toMatch(/aria-pressed="true"[^>]*>20</)
+    expect(render({ ...DATA, limit: 50 }, "?limit=50")).toMatch(pressed("50"))
+    expect(render(DATA)).toMatch(pressed("20"))
   })
 
   test("before the first answer it is a skeleton, not an empty page", () => {

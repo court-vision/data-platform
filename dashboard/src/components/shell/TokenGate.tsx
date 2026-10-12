@@ -1,15 +1,16 @@
-import { KeyRound } from "lucide-react"
+import { KeyRound, Loader2 } from "lucide-react"
 import { useState, type FormEvent } from "react"
 
-import { Wordmark } from "@/components/shell/Wordmark"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { usePageContext } from "@/components/shell/pageContext"
+import { ThemePicker } from "@/desk/ThemePicker"
 import { ApiError, tokenIsValid } from "@/lib/api"
 import { setToken } from "@/lib/token"
+import dk from "@/desk/desk.module.css"
+import s from "./shell.module.css"
 
 /** Shown instead of the app until a pipeline token is saved. */
 export function TokenGate() {
+  usePageContext(null)
   const [value, setValue] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
@@ -39,46 +40,50 @@ export function TokenGate() {
   }
 
   return (
-    <div className="flex h-full items-center justify-center p-4">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <Wordmark />
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <KeyRound className="size-4 text-primary" aria-hidden />
-              Pipeline token
-            </CardTitle>
-            <CardDescription>
-              The same bearer token cron-runner uses. It is kept in this browser&rsquo;s
-              local storage and sent only to this origin.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={submit} className="flex flex-col gap-3">
-              <Input
-                type="password"
-                autoFocus
-                autoComplete="off"
-                spellCheck={false}
-                aria-label="Pipeline token"
-                aria-invalid={error !== null}
-                placeholder="PIPELINE_API_TOKEN"
-                className="font-mono"
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-              />
-              {error && (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
-              )}
-              <Button type="submit" disabled={checking || value.trim() === ""}>
-                {checking ? "Checking…" : "Continue"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+    <div className={s.gate}>
+      <div className={s.gateCorner}>
+        <ThemePicker />
       </div>
+      <form onSubmit={submit} className={s.gateCard} aria-labelledby="gate-title">
+        <div className={s.gateMark} aria-hidden>
+          <span className={dk.mark}>
+            COURT<span className={dk.markAccent}>VISION</span>
+          </span>
+          <span className={dk.label}>Data platform</span>
+        </div>
+        <div className={dk.dialogBody}>
+          <h1 id="gate-title" className={`${dk.dialogTitle} ${s.gateTitle}`}>
+            <KeyRound size={15} aria-hidden /> Pipeline token
+          </h1>
+          <p className={dk.dialogText}>
+            The same bearer token cron-runner uses. It is kept in this browser&rsquo;s local storage and sent only to
+            this origin.
+          </p>
+          <input
+            type="password"
+            autoFocus
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Pipeline token"
+            aria-invalid={error !== null}
+            placeholder="PIPELINE_API_TOKEN"
+            className={`${dk.input} ${s.gateInput}`}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+          {error && (
+            <p role="alert" className={dk.error}>
+              {error}
+            </p>
+          )}
+        </div>
+        <div className={dk.dialogFoot}>
+          <button type="submit" className={`${dk.btn} ${dk.btnPrimary}`} disabled={checking || value.trim() === ""}>
+            {checking ? <Loader2 size={13} className={dk.spin} aria-hidden /> : null}
+            {checking ? "Checking" : "Continue"}
+          </button>
+        </div>
+      </form>
     </div>
   )
 }

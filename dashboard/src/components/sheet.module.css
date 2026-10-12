@@ -1,0 +1,825 @@
+/*
+ * The console's sheet: what every page is built from, in the manner of the
+ * frontend's Developer and Scout desks. A page is a head, then full-width
+ * blocks ruled off from one another (no cards), each a mono title over its
+ * table, chart or facts. Tokens, type and the shared primitives (chips,
+ * buttons, rails, menus) come from the desk shell.
+ */
+
+.page {
+  --gutter: 20px;
+  padding-bottom: 56px;
+}
+
+@media (max-width: 639.98px) {
+  .page {
+    --gutter: 16px;
+  }
+}
+
+/* ---------------------------------------------------------------- head */
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  padding: 18px var(--gutter) 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.headBody {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  color: var(--text-3);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.back:hover {
+  color: var(--accent);
+}
+
+.headTitleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.headTitle {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.headMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.sep {
+  color: var(--text-3);
+}
+
+.headSub {
+  max-width: 720px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.headActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.headButtons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* "updated 12s ago · next in 18s": the poll, made visible. */
+.refresh {
+  margin: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- notice */
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px var(--gutter);
+  border-bottom: 1px solid color-mix(in srgb, var(--down) 35%, var(--line));
+  background: color-mix(in srgb, var(--down) 8%, transparent);
+  color: var(--down);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.notice svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ---------------------------------------------------------------- tiles */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  margin: 0;
+  padding: 14px var(--gutter);
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 767.98px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 12px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.tileLabel {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.tileValue {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.tileNote {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+[data-tone="up"] {
+  --tone: var(--up);
+}
+
+[data-tone="down"] {
+  --tone: var(--down);
+}
+
+[data-tone="warn"] {
+  --tone: var(--warn);
+}
+
+[data-tone="live"] {
+  --tone: var(--live);
+}
+
+[data-tone="quiet"] {
+  --tone: var(--text-3);
+}
+
+.tileValue[data-tone] {
+  color: var(--tone);
+}
+
+/* ---------------------------------------------------------------- blocks */
+
+.block {
+  padding: 14px var(--gutter) 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.blockHead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 24px;
+  margin-bottom: 10px;
+}
+
+.blockTitle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.blockCount {
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-3);
+}
+
+.blockCount[data-tone] {
+  color: var(--tone);
+}
+
+.blockNote {
+  min-width: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.blockRight {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.blockText {
+  max-width: 820px;
+  margin: -4px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+
+/* Two blocks side by side when there is room, ruled between. */
+.two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  border-bottom: 1px solid var(--line);
+}
+
+.two > .block {
+  border-bottom: 0;
+}
+
+@media (min-width: 820px) {
+  .two > .block + .block {
+    border-left: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 819.98px) {
+  .two > .block + .block {
+    border-top: 1px solid var(--line);
+  }
+}
+
+.empty {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* ---------------------------------------------------------------- tables */
+
+/* Edge to edge inside a block: the rows' rules meet the sheet's sides, and a wide table scrolls here, not the page. */
+.bleed {
+  margin: 0 calc(var(--gutter) * -1);
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th,
+.table td {
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+}
+
+.table thead th {
+  height: 30px;
+  padding-top: 0;
+  padding-bottom: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.table tbody th {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.table td {
+  color: var(--text-2);
+}
+
+.table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.table tr > :first-child {
+  padding-left: var(--gutter);
+}
+
+.table tr > :last-child {
+  padding-right: var(--gutter);
+}
+
+.table .num {
+  text-align: right;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.table .top {
+  vertical-align: top;
+}
+
+.mono {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* A second line under a cell's value: the raw name, the relative time. */
+.under {
+  display: block;
+  margin-top: 1px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.nameLink {
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.nameLink:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.textLink {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.textLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.textLink:focus-visible,
+.nameLink:focus-visible,
+.back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---------------------------------------------------------------- chips and tags */
+
+.chips {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* A running state: the live chip with its pulse. */
+.chipLive {
+  gap: 5px;
+}
+
+/* What a thing is (its group, its severity): outlined, so it never reads as a result. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.tag[data-tone] {
+  border-color: color-mix(in srgb, var(--tone) 55%, transparent);
+  color: var(--tone);
+}
+
+/* ---------------------------------------------------------------- facts */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 2px;
+  margin: 0;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px 9px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.factKey {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.factVal {
+  margin: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.factVal[data-tone] {
+  color: var(--tone);
+}
+
+/* ---------------------------------------------------------------- code */
+
+.pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-2);
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+
+.preWrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- key */
+
+/* Names each colour a chart uses: status never rides on colour alone. */
+.legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.legend > * {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--tone, var(--text-3));
+}
+
+.swatchRound {
+  border-radius: 50%;
+}
+
+/* ---------------------------------------------------------------- rails in block heads */
+
+.railSmall {
+  min-width: 0;
+  padding: 2px;
+  /* Wider than a phone (Projections' Show): it scrolls sideways, as the desks' toolbars do. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.railSmall > button {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 8px;
+}
+
+.railSmall > button:focus-visible {
+  outline-offset: -2px;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.choice > :first-child {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- popovers */
+
+.pop {
+  width: min(330px, calc(100vw - 16px));
+  padding: 12px 14px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.popTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.popText {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.popForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.popRule {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.dl dt {
+  color: var(--text-3);
+}
+
+.dl dd {
+  margin: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.dl dd[data-tone] {
+  color: var(--tone);
+}
+
+.input {
+  width: 100%;
+  height: 30px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- loading */
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px var(--gutter);
+}
+
+.skelTiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 14px var(--gutter);
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 767.98px) {
+  .skelTiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.skelTiles .skelTile,
+.skelBox {
+  height: 66px;
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------- not found */
+
+.lost {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px var(--gutter);
+  text-align: center;
+  color: var(--text-2);
+}
+
+.lostCode {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+}
+
+.lostTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- utilities */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* One line, cut with an ellipsis: the title attribute carries the rest. */
+.clip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- check definition */
+
+.definition {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.definitionText {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------- folds */
+
+/* A long error: its first line, and the rest one click away. */
+.fold > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.foldHint {
+  color: var(--text-3);
+}
+
+.fold[open] .foldHint {
+  display: none;
+}
+
+.alignRight {
+  text-align: right;
+}
+
+.lineBlock {
+  display: block;
+  margin-top: 4px;
+}
+
+/* A control with nowhere to go (the oldest run's Older). */
+.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Text in its data-tone's colour. */
+.toned {
+  color: var(--tone);
+}
+
+/* A row's name where it is the subject: a service, a check. */
+.title {
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* A run's error: wraps anywhere (paths, SQL), and its full text scrolls past a screenful. */
+.errorCell {
+  max-width: 28rem;
+  overflow-wrap: anywhere;
+}
+
+.errorFull {
+  max-height: 16rem;
+  margin-top: 6px;
+}
+
+/* ---------------------------------------------------------------- state colours */
+
+/*
+ * Last, and doubled: a state colour is put beside an element's own class (a
+ * table cell, an under-line, a hint, a fact) and must beat that class's
+ * colour, whichever module declares it and in whatever order the modules load.
+ */
+.muted.muted {
+  color: var(--text-3);
+}
+
+.strong.strong {
+  color: var(--text);
+}
+
+.bad.bad {
+  color: var(--down);
+}
+
+.warn.warn {
+  color: var(--warn);
+}
+
+.good.good {
+  color: var(--up);
+}

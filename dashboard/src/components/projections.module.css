@@ -1,0 +1,380 @@
+/*
+ * The Projections page: the players table, a row opened onto its lines and
+ * its adjustment, and the editor. Desk tokens only.
+ */
+
+.search {
+  width: 220px;
+  height: 30px;
+  font-size: 12px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-bottom: 12px;
+}
+
+.ranksLine {
+  flex-basis: 100%;
+}
+
+/* ---------------------------------------------------------------- table */
+
+.table {
+  min-width: 72rem;
+}
+
+.table td,
+.table tbody th {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.table .row:hover > * {
+  background: var(--hover);
+}
+
+.table .row[data-open="true"] > * {
+  background: var(--accent-soft);
+}
+
+.table .wideGap {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--text-3);
+  transition: transform 120ms ease;
+}
+
+.toggle[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.adjustment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- the opened row */
+
+.table .detailRow > td {
+  padding: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-2);
+}
+
+.detail {
+  display: grid;
+  gap: 20px;
+  padding: 16px var(--gutter) 20px;
+}
+
+@media (min-width: 1280px) {
+  .detail {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  }
+}
+
+.detailSide {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sectionLabel {
+  margin: 0 0 6px;
+  font-weight: 400;
+}
+
+.miniWrap {
+  overflow-x: auto;
+}
+
+.mini {
+  width: 100%;
+  min-width: 34rem;
+  border-collapse: collapse;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini th,
+.mini td {
+  padding: 5px 8px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.mini thead th {
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.mini tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.mini th:first-child {
+  padding-left: 0;
+  text-align: left;
+}
+
+.mini tbody th {
+  font-family: var(--desk-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.mini td {
+  color: var(--text-2);
+}
+
+.mini .final {
+  color: var(--accent);
+}
+
+/* Where the adjustment moved the blend. */
+.mini td[data-moved="true"] {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.versions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.versionLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.versionNote {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+/* ---------------------------------------------------------------- the editor */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.editorHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.editorHead h3 {
+  margin: 0;
+  font-weight: 400;
+}
+
+.hint {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.fieldBox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  padding: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.field {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.field[aria-invalid="true"] {
+  border-color: var(--down);
+}
+
+.rates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rates legend {
+  margin-bottom: 4px;
+}
+
+.rate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rate select {
+  width: auto;
+  min-width: 7rem;
+}
+
+.multiplier {
+  width: 5rem;
+}
+
+.addRate {
+  width: fit-content;
+  height: 26px;
+  padding: 0 8px;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.textarea {
+  width: 100%;
+  height: auto;
+  min-height: 56px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.sourceRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 639.98px) {
+  .sourceRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.retire {
+  margin-left: auto;
+}
+
+.blocker {
+  flex-basis: 100%;
+}
+
+.confirm {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* ---------------------------------------------------------------- preview */
+
+.preview {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line));
+  background: var(--accent-soft);
+}
+
+.previewHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 6px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.previewTitle {
+  font-family: var(--desk-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  color: var(--text);
+}

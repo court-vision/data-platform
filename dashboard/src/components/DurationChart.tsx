@@ -2,19 +2,13 @@ import { useCallback, useState, type KeyboardEvent } from "react"
 
 import { chartGeometry, columnPath, roveIndex, tickLabel, ticks, type Bar, type PipelineRun } from "@/lib/runs"
 import { formatCentralLong, formatDuration } from "@/lib/time"
-import { cn } from "@/lib/utils"
+import s from "./sheet.module.css"
+import c from "./chart.module.css"
 
 const PLOT_WIDTH = 756
 const PLOT_HEIGHT = 120
 const PLOT_TOP = 8 // room for the top tick's label
 const HEIGHT = PLOT_TOP + PLOT_HEIGHT + 4
-
-const TONE: Record<string, string> = {
-  success: "fill-status-win",
-  failed: "fill-status-loss",
-  running: "fill-signal-live stroke-signal-live",
-  stuck: "fill-status-loss stroke-status-loss",
-}
 
 /** A run with no end yet, or none it will ever have: drawn dashed and hollow. */
 const UNFINISHED = new Set(["running", "stuck"])
@@ -53,7 +47,7 @@ export function DurationChart({ runs, now }: { runs: PipelineRun[]; now: number 
   }, [])
 
   if (runs.length === 0) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">No runs recorded.</p>
+    return <p className={s.empty}>No runs recorded.</p>
   }
 
   const { bars } = geometry
@@ -72,18 +66,14 @@ export function DurationChart({ runs, now }: { runs: PipelineRun[]; now: number 
   }
 
   return (
-    <figure className="flex flex-col gap-2">
-      <div className="flex">
+    <figure className={c.figure}>
+      <div className={c.plotRow}>
         {/* The tick labels are HTML beside the plot, not text inside it: the
-            svg scales with the card, and on a phone 10px of its viewBox is
+            svg scales with the page, and on a phone 10px of its viewBox is
             under 4px of screen. */}
-        <div className="relative w-11 shrink-0 font-mono text-[10px] leading-none text-muted-foreground" aria-hidden>
+        <div className={c.axis} aria-hidden>
           {gridlines.map((value) => (
-            <span
-              key={value}
-              className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap"
-              style={{ top: `${(gridlineY(value, geometry.top) / HEIGHT) * 100}%` }}
-            >
+            <span key={value} className={c.axisLabel} style={{ top: `${(gridlineY(value, geometry.top) / HEIGHT) * 100}%` }}>
               {tickLabel(value)}
             </span>
           ))}
@@ -94,36 +84,27 @@ export function DurationChart({ runs, now }: { runs: PipelineRun[]; now: number 
           role="group"
           tabIndex={-1} // Chrome makes an outer <svg> a tab stop; the bar under the cursor is the stop
           aria-label={`Duration of the last ${runs.length} runs, oldest first. Arrow keys move between runs.`}
-          className="h-auto min-w-0 flex-1"
+          className={c.plot}
+          data-hovering={hovered ? "true" : undefined}
           onMouseLeave={() => setHovered(null)}
         >
           {gridlines.map((value) => {
             const y = gridlineY(value, geometry.top)
-            return (
-              <line
-                key={value}
-                x1={0}
-                x2={PLOT_WIDTH}
-                y1={y}
-                y2={y}
-                className="stroke-border"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-              />
-            )
+            return <line key={value} x1={0} x2={PLOT_WIDTH} y1={y} y2={y} className={c.gridline} strokeWidth={1} vectorEffect="non-scaling-stroke" />
           })}
           <g transform={`translate(0 ${PLOT_TOP})`} onKeyDown={onKeyDown}>
             {bars.map((bar, index) => {
-              const active = hovered === bar.run.id
               const unfinished = UNFINISHED.has(bar.run.status)
               return (
                 <g
                   key={bar.run.id}
                   data-run={bar.run.id}
+                  data-status={bar.run.status}
+                  data-active={hovered === bar.run.id ? "true" : undefined}
                   role="img"
                   tabIndex={index === tabStop ? 0 : -1}
                   aria-label={describe(bar)}
-                  className="outline-none"
+                  className={c.bar}
                   onMouseEnter={() => setHovered(bar.run.id)}
                 >
                   {/* The hit target is the whole slot, wider than the bar; focusable so the
@@ -131,15 +112,13 @@ export function DurationChart({ runs, now }: { runs: PipelineRun[]; now: number 
                   <rect x={bar.x - 1} y={0} width={bar.width + 2} height={PLOT_HEIGHT} fill="transparent" />
                   <path
                     d={columnPath(bar.x, bar.y, bar.width, bar.height, PLOT_HEIGHT)}
-                    className={cn(TONE[bar.run.status] ?? "fill-muted-foreground", active && "opacity-100", hovered && !active && "opacity-50")}
+                    className={c.column}
                     strokeDasharray={unfinished ? "3 2" : undefined}
                     strokeWidth={unfinished ? 1.5 : 0}
                     fillOpacity={unfinished ? 0.35 : 1}
                   />
                   {/* A finished run past the axis: a break in the bar says it goes on. */}
-                  {bar.over && !unfinished && (
-                    <rect x={bar.x - 1} y={5} width={bar.width + 2} height={2.5} className="fill-card" />
-                  )}
+                  {bar.over && !unfinished && <rect x={bar.x - 1} y={5} width={bar.width + 2} height={2.5} className={c.break} />}
                 </g>
               )
             })}
@@ -147,15 +126,13 @@ export function DurationChart({ runs, now }: { runs: PipelineRun[]; now: number 
         </svg>
       </div>
 
-      <figcaption className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+      <figcaption className={c.caption}>
         <span>{hoveredBar ? describe(hoveredBar) : `${formatCentralLong(oldest.started_at)} → ${formatCentralLong(newest.started_at)}`}</span>
-        <span className="flex items-center gap-3" aria-label="Key">
-          <Key className="bg-status-win" label="success" />
-          <Key className="bg-status-loss" label="failed" />
-          <Key className="border border-dashed border-signal-live bg-signal-live/35" label="running (so far)" />
-          {bars.some((bar) => bar.run.status === "stuck") && (
-            <Key className="border border-dashed border-status-loss bg-status-loss/35" label="stuck" />
-          )}
+        <span className={s.legend} aria-label="Key">
+          <Key status="success" label="success" />
+          <Key status="failed" label="failed" />
+          <Key status="running" label="running (so far)" />
+          {bars.some((bar) => bar.run.status === "stuck") && <Key status="stuck" label="stuck" />}
         </span>
       </figcaption>
     </figure>
@@ -177,10 +154,10 @@ function describe(bar: Bar): string {
   return `${started} · ${run.status} · ${formatDuration(bar.seconds)}${scale}${records}${error}`
 }
 
-function Key({ className, label }: { className: string; label: string }) {
+function Key({ status, label }: { status: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <span className={cn("inline-block size-2.5 rounded-sm", className)} aria-hidden />
+    <span>
+      <span className={c.keySwatch} data-status={status} aria-hidden />
       {label}
     </span>
   )

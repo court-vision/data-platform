@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 import { ClusterDetail, clusterSummary, SchedulerTimeline } from "@/components/SchedulerTimeline"
 import { clusterBuckets, clusterRuns, parseRange, rangeMs, RANGES, type CronRun, type RunBucket } from "@/lib/timeline"
+import { pressed } from "@/test-helpers"
 
 const now = Date.parse("2026-09-24T18:00:00Z")
 
@@ -42,10 +43,10 @@ describe("SchedulerTimeline", () => {
   test("the range buttons mark the one in use, and a longer range reaches further back", () => {
     const yesterday = run({ id: "y", job_name: "post-game", triggered_at: "2026-09-23T20:00:00" })
     const short = renderToStaticMarkup(<SchedulerTimeline runs={[yesterday]} now={now} onRangeChange={() => {}} />)
-    expect(short).toMatch(/aria-pressed="true"[^>]*>6h</)
+    expect(short).toMatch(pressed("6h"))
     expect(short).not.toContain("post-game success at")
     const long = renderToStaticMarkup(<SchedulerTimeline runs={[yesterday]} now={now} range={parseRange("3d")} onRangeChange={() => {}} />)
-    expect(long).toMatch(/aria-pressed="true"[^>]*>3d</)
+    expect(long).toMatch(pressed("3d"))
     expect(long).toContain("last 3 days")
     expect(long).toContain("post-game success at Sep 23, 3:00:00 PM")
     expect(long).toContain(">Thu 1 PM<") // day-and-hour ticks, ending at now
@@ -68,9 +69,9 @@ describe("SchedulerTimeline", () => {
   test("on a narrow screen every range keeps its right-end label, and drops every other one before it", () => {
     for (const range of RANGES) {
       const html = renderToStaticMarkup(<SchedulerTimeline runs={[]} now={now} range={range} />)
-      // No DOM here, so this reads the classes: a label that waits for lg is "hidden lg:inline".
-      const labels = [...html.matchAll(/<span class="(absolute whitespace-nowrap[^"]*)" style="left:([\d.]+)%"/g)]
-      const waits = labels.map(([, classes]) => classes.split(" ").includes("hidden"))
+      // No DOM here, so this reads the markup: a label that waits for a wide screen is data-minor.
+      const labels = [...html.matchAll(/<span class="tick"([^>]*) style="left:([\d.]+)%"/g)]
+      const waits = labels.map(([, attributes]) => attributes.includes('data-minor="true"'))
       expect(labels.at(-1)?.[2]).toBe("100")
       // 7d has eight labels: counted from the left, the one at "now" was hidden.
       expect(waits.slice(-3)).toEqual([false, true, false])
