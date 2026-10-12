@@ -81,13 +81,14 @@ def test_overview_payload(monkeypatch) -> None:
     first, second = data["checks"][0], data["checks"][1]
     assert first["results"] == ["failed", "passed"] and second["results"] == [None, None]
     # The definition is on the wire: what it asserts, what it guards, the SQL.
-    assert first["table"] == "nba.player_game_stats" and first["pipelines"] == ["player_game_stats"]
+    # Both writers of the table: the nightly pipeline and the game-history load.
+    assert first["table"] == "nba.player_game_stats" and first["pipelines"] == ["player_game_stats", "game_history"]
     assert first["sql"].startswith("SELECT") and first["failure_message"]
     assert {check["group"] for check in data["checks"]} == {"structural", "consistency", "timing"}
     # A consistency check names what it is compared against, and both sides' writers.
     paced = next(c for c in data["checks"] if c["name"] == "player_season_stats_games_keep_pace_with_game_log")
     assert (paced["table"], paced["against"]) == ("nba.player_season_stats", ["nba.player_game_stats"])
-    assert paced["pipelines"] == ["player_season_stats", "player_game_stats"]
+    assert paced["pipelines"] == ["player_season_stats", "player_game_stats", "game_history"]
     assert first["against"] == []
 
 

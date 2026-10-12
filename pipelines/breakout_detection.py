@@ -493,6 +493,7 @@ class BreakoutDetectionPipeline(BasePipeline):
                 & (PlayerGameStats.game_date >= start_date)
                 & (PlayerGameStats.game_date < as_of_date)
                 & (PlayerGameStats.min >= min_threshold)
+                & PlayerGameStats.for_fantasy()
             )
         )
 

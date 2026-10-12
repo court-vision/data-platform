@@ -8,6 +8,9 @@ from pipelines.extractors.espn import parse_draft_market_players, rank_type_prov
 from pipelines.gates import preseason_market_window
 from pipelines.preseason_market import projected_gp, projection_line
 
+# No marker kept this file out of CI's `-m "unit or api"` run.
+pytestmark = pytest.mark.unit
+
 
 # ---- window gate -----------------------------------------------------------
 

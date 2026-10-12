@@ -42,6 +42,7 @@ from pipelines import (
     get_pipelines_by_category,
 )
 from pipelines.config import PipelineCategory
+from pipelines.game_logs import GAME_HISTORY_FIRST_YEAR, SEASON_TYPE_PARAMS
 from pipelines.gates import (
     GateDecision,
     espn_batch_gate,
@@ -1869,23 +1870,79 @@ async def trigger_deploy(
 
 # ── Playoffs ──────────────────────────────────────────────────────────────────
 
+# Holds the background runs /playoffs starts, so none is garbage-collected mid-run.
+_POSTSEASON_RUNS: set[asyncio.Task] = set()
+
+
+def _start_in_background(coro) -> None:
+    """Run a coroutine after the response, keeping a reference until it ends."""
+    task = asyncio.create_task(coro)
+    _POSTSEASON_RUNS.add(task)
+    task.add_done_callback(_POSTSEASON_RUNS.discard)
+
+
 @router.post("/playoffs", response_model=PipelineResponse)
 async def trigger_playoffs(
     _: str = Security(verify_pipeline_token),
 ) -> PipelineResponse:
     """
-    Trigger the playoff bracket pipeline.
+    Trigger the playoff bracket pipeline, then the postseason box scores.
 
     Fetches current NBA playoff series standings from NBA Stats API (SeriesStandings)
     and upserts to nba.playoff_series. Called once nightly at ~1 AM ET by the
     'playoffs' cron job in cron-runner.
+
+    Then starts game_history with no options: this season's play-in and
+    playoff games and box scores, reloaded whole, or nothing outside the
+    postseason. It runs in the background because two whole-postseason calls
+    can outlast cron-runner's 30 s request; its run has its own row in
+    nba.pipeline_runs and alerts on failure like any run. The response is
+    the bracket's.
     """
     result = await run_pipeline("playoff_bracket")
+    _start_in_background(run_pipeline("game_history"))
     return PipelineResponse(
         status=result.status,
         message=result.message,
         data=result,
     )
+
+
+@router.post("/game-history", response_model=PipelineResponse)
+async def trigger_game_history(
+    _: str = Security(verify_pipeline_token),
+    seasons: list[str] = Query(
+        default=[],
+        description="Seasons to load, e.g. `seasons=2012-13&seasons=2013-14`. Omit for this season's postseason "
+                    "(a no-op outside it).",
+    ),
+    season_types: list[str] = Query(
+        default=[],
+        description="Any of `regular`, `play_in`, `playoffs`. Omit for all three (with `seasons`).",
+    ),
+) -> PipelineResponse:
+    """
+    Trigger the game-history pipeline.
+
+    Writes whole seasons of games and box scores into nba.games and
+    nba.player_game_stats, one PlayerGameLogs call per season and season type.
+    The history load passes the seasons wanted; a re-run updates rows in place.
+    """
+    for season in seasons:
+        if not _SEASON_RE.match(season) or int(season[5:]) != (int(season[:4]) + 1) % 100:
+            raise HTTPException(status_code=422, detail=f"season must look like 2025-26, got {season!r}")
+        if int(season[:4]) < GAME_HISTORY_FIRST_YEAR:
+            # Older seasons use abbreviations nba.teams has no alias for (SEA, NJN, ...),
+            # so their games would be dropped, not loaded.
+            raise HTTPException(status_code=422, detail=f"game history starts at 2012-13, got {season!r}")
+    unknown = [t for t in season_types if t not in SEASON_TYPE_PARAMS]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"unknown season types {unknown}; use {list(SEASON_TYPE_PARAMS)}")
+    if season_types and not seasons:
+        raise HTTPException(status_code=422, detail="season_types needs seasons")
+    options = {"seasons": seasons, "season_types": season_types} if seasons else None
+    result = await run_pipeline("game_history", options=options)
+    return PipelineResponse(status=result.status, message=result.message, data=result)
 
 
 @router.post("/preseason-market", response_model=PipelineResponse)

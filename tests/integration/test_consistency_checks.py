@@ -304,6 +304,21 @@ class TestRollingAveragesAgainstTheGameLog:
             )
         assert failing() == {}
 
+    def test_a_playoff_line_is_owed_no_rolling_row_and_counts_in_no_average(self, world):
+        # The pipeline averages fantasy rows only (PlayerGameStats.for_fantasy):
+        # the game before the newest rolling rows is in their window, the one
+        # after has none on or after its night. Neither may keep these red.
+        eve, after = NIGHT - timedelta(days=1), NIGHT + timedelta(days=1)
+        for game_id, night in (("0042500101", eve), ("0042500102", after)):
+            Game.create(
+                game_id=game_id, game_date=night, season=SEASON,
+                home_team_id="GSW", away_team_id="LAL", status="final", home_score=30, away_score=28,
+            )
+            _played(CURRY, "GSW", pts=40, night=night, game_id=game_id)
+        assert PlayerGameStats.get(PlayerGameStats.game_id == "0042500101").season_type == "playoffs"
+
+        assert failing(after) == {}
+
 
 class TestTheGameLogAgainstTheSchedule:
     def test_a_game_row_linked_to_no_game(self, world):

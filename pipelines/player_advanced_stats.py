@@ -13,6 +13,15 @@ from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 
 
+
+def _fraction_of_100(value):
+    """A per-100 value as a fraction (6.9 -> 0.069); None stays None."""
+    try:
+        return round(float(value) / 100, 4)
+    except (TypeError, ValueError):
+        return None
+
+
 class PlayerAdvancedStatsPipeline(BasePipeline):
     """
     Fetch advanced player stats and insert into player_advanced_stats.
@@ -83,7 +92,10 @@ class PlayerAdvancedStatsPipeline(BasePipeline):
                 "reb_pct": player.get("REB_PCT"),
                 "oreb_pct": player.get("OREB_PCT"),
                 "dreb_pct": player.get("DREB_PCT"),
-                "tov_pct": player.get("TM_TOV_PCT"),
+                # TM_TOV_PCT comes as turnovers per 100 plays (6.9), while
+                # every other percentage here comes as a fraction (0.323):
+                # stored as a fraction like them (migration 0031 fixed the old rows).
+                "tov_pct": _fraction_of_100(player.get("TM_TOV_PCT")),
                 "pace": player.get("PACE"),
                 "pie": player.get("PIE"),
                 "poss": player.get("POSS"),

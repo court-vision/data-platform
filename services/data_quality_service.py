@@ -139,9 +139,11 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
             WHERE pts < 0 OR reb < 0 OR ast < 0
                OR stl < 0 OR blk < 0 OR tov < 0
                OR fgm > fga OR fg3m > fg3a OR ftm > fta
-               OR min > 60
+               -- A real line passes 60 in a quadruple-overtime game, which
+               -- the history since 2012-13 has; 80 is past any NBA game since 1951.
+               OR min > 80
         """,
-        failure_message="player_game_stats contains out-of-range values (negative stats, made > attempted, or minutes > 60)",
+        failure_message="player_game_stats contains out-of-range values (negative stats, made > attempted, or minutes > 80)",
     ),
     # Business correctness — season totals should roughly match summed game log.
     # Tolerance of 50 pts handles mid-season corrections and data source lag.
@@ -169,6 +171,10 @@ STRUCTURAL_CHECKS: tuple[SQLQualityCheck, ...] = (
                 JOIN nba.player_game_stats pgs
                   ON pgs.player_id = pss.player_id
                  AND pgs.game_date >= (SPLIT_PART(pss.season, '-', 1) || '-10-01')::date
+                 -- That season's fantasy rows only: the table also holds the
+                 -- history and the playoffs since migration 0031.
+                 AND (pgs.season = pss.season OR pgs.season IS NULL)
+                 AND (pgs.season_type IN ('regular', 'cup_final') OR pgs.season_type IS NULL)
                 GROUP BY pss.player_id, pss.pts, pss.gp
                 HAVING pss.gp >= 5
                    AND ABS(pss.pts - SUM(pgs.pts)) > 50

@@ -18,6 +18,7 @@ import pytest
 from core.settings import settings
 from db.base import db
 from db.models.nba import DraftMarket, PlayerProjection
+from db.models.nba.player_profiles import PlayerProfile
 from db.models.nba.players import Player
 from pipelines.extractors.espn import parse_draft_market_players
 from pipelines.preseason_market import PreseasonMarketPipeline, adopt_espn_id
@@ -41,8 +42,13 @@ def clean_market_tables(market_tables, clean_integration_tables):
     yield
 
 
-def _player(pid: int, name: str, espn_id: int | None = None) -> Player:
-    return Player.create(id=pid, name=name, name_normalized=name.lower(), espn_id=espn_id)
+def _player(pid: int, name: str, espn_id: int | None = None, in_play: bool = True) -> Player:
+    """A player; `in_play` gives him the PlayerIndex profile today's players have
+    (the game-history load's retired players have none)."""
+    player = Player.create(id=pid, name=name, name_normalized=name.lower(), espn_id=espn_id)
+    if in_play:
+        PlayerProfile.create(player=pid)
+    return player
 
 
 def _espn(espn_id: int, name: str, rank: int) -> dict:
@@ -125,6 +131,22 @@ def test_a_second_run_finds_adopted_players_by_id():
     assert result.status == ApiStatus.SUCCESS
     assert _espn_id(1643407) == 5142698
     assert 1643407 in _market_players()
+
+
+def test_a_retired_namesake_neither_takes_the_id_nor_the_market_row():
+    """nba.players holds every player since 2012-13 (the game-history load). A
+    retired player who shares a market name is not the market's player."""
+    _player(203183, "Tony Mitchell", in_play=False)      # left the league in 2014
+    _player(1643407, "AJ Dybantsa")
+    _player(203502, "AJ Dybantsa", in_play=False)         # a retired namesake
+
+    result = _run([_espn(9001, "Tony Mitchell", 400), _espn(5142698, "AJ Dybantsa", 79)])
+
+    assert result.status == ApiStatus.SUCCESS
+    assert _espn_id(203183) is None and 203183 not in _market_players()
+    # The current player is still found, and the namesake does not make his name ambiguous.
+    assert _espn_id(1643407) == 5142698 and _espn_id(203502) is None
+    assert _market_players() == {1643407}
 
 
 class _Log:

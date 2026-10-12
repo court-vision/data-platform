@@ -4686,6 +4686,75 @@
         ]
       }
     },
+    "/v1/internal/pipelines/game-history": {
+      "post": {
+        "description": "Trigger the game-history pipeline.\n\nWrites whole seasons of games and box scores into nba.games and\nnba.player_game_stats, one PlayerGameLogs call per season and season type.\nThe history load passes the seasons wanted; a re-run updates rows in place.",
+        "operationId": "trigger_game_history_v1_internal_pipelines_game_history_post",
+        "parameters": [
+          {
+            "description": "Seasons to load, e.g. `seasons=2012-13&seasons=2013-14`. Omit for this season's postseason (a no-op outside it).",
+            "in": "query",
+            "name": "seasons",
+            "required": false,
+            "schema": {
+              "default": [],
+              "description": "Seasons to load, e.g. `seasons=2012-13&seasons=2013-14`. Omit for this season's postseason (a no-op outside it).",
+              "items": {
+                "type": "string"
+              },
+              "title": "Seasons",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Any of `regular`, `play_in`, `playoffs`. Omit for all three (with `seasons`).",
+            "in": "query",
+            "name": "season_types",
+            "required": false,
+            "schema": {
+              "default": [],
+              "description": "Any of `regular`, `play_in`, `playoffs`. Omit for all three (with `seasons`).",
+              "items": {
+                "type": "string"
+              },
+              "title": "Season Types",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Game History",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/game-schedule": {
       "post": {
         "description": "Trigger the game schedule pipeline.\n\nFetches NBA game schedule and results and upserts to nba.games.\nPass ?date=YYYY-MM-DD to backfill a specific date.",
@@ -5277,7 +5346,7 @@
     },
     "/v1/internal/pipelines/playoffs": {
       "post": {
-        "description": "Trigger the playoff bracket pipeline.\n\nFetches current NBA playoff series standings from NBA Stats API (SeriesStandings)\nand upserts to nba.playoff_series. Called once nightly at ~1 AM ET by the\n'playoffs' cron job in cron-runner.",
+        "description": "Trigger the playoff bracket pipeline, then the postseason box scores.\n\nFetches current NBA playoff series standings from NBA Stats API (SeriesStandings)\nand upserts to nba.playoff_series. Called once nightly at ~1 AM ET by the\n'playoffs' cron job in cron-runner.\n\nThen starts game_history with no options: this season's play-in and\nplayoff games and box scores, reloaded whole, or nothing outside the\npostseason. It runs in the background because two whole-postseason calls\ncan outlast cron-runner's 30 s request; its run has its own row in\nnba.pipeline_runs and alerts on failure like any run. The response is\nthe bracket's.",
         "operationId": "trigger_playoffs_v1_internal_pipelines_playoffs_post",
         "responses": {
           "200": {
