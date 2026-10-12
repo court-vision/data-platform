@@ -1,0 +1,287 @@
+/*
+ * The Overview's own pieces: the scheduler's lanes, the quality summary and
+ * the batch jobs' progress bars. Desk tokens only.
+ */
+
+/* ---------------------------------------------------------------- scheduler */
+
+.scroller {
+  overflow-x: auto;
+}
+
+.timeline {
+  min-width: 40rem;
+}
+
+.axisRow,
+.lane {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: 8px;
+}
+
+.axisRow {
+  align-items: end;
+}
+
+.axis {
+  position: relative;
+  height: 16px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.tick {
+  position: absolute;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* The end labels sit inside the lane; centred, a day-and-hour label runs past its edge. */
+.tick[data-edge="start"] {
+  transform: none;
+}
+
+.tick[data-edge="end"] {
+  transform: translateX(-100%);
+}
+
+/* Every other label gives way on a narrow screen, counted from the right: "now" always stays. */
+@media (max-width: 1023.98px) {
+  .tick[data-minor="true"] {
+    display: none;
+  }
+}
+
+.lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lane {
+  align-items: center;
+}
+
+.laneName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.laneTrack {
+  position: relative;
+  height: 28px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+
+.laneTrack::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--line);
+}
+
+.laneEmpty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+[data-tone="success"] {
+  --tone: var(--up);
+}
+
+[data-tone="retried"] {
+  --tone: var(--warn);
+}
+
+[data-tone="failure"] {
+  --tone: var(--down);
+}
+
+/* One run: a dot in its result's colour, ringed in the ground so close neighbours stay apart. */
+.mark {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--tone, var(--text-3));
+  box-shadow: 0 0 0 2px var(--bg);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.mark:hover,
+.mark:focus-visible {
+  transform: translate(-50%, -50%) scale(1.3);
+  outline: none;
+}
+
+.mark:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+/* Several runs in one column: a bar as wide as their span, in the worst colour among them. */
+.cluster {
+  height: 12px;
+  min-width: 8px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--bg);
+}
+
+.cluster:hover,
+.cluster:focus-visible {
+  transform: translate(-50%, -50%) scaleY(1.5);
+}
+
+.legendBar {
+  width: 16px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-3) 60%, transparent);
+}
+
+.legendWrap {
+  margin-top: 12px;
+}
+
+.snippet {
+  max-height: 8rem;
+  margin-top: 8px;
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.runList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.runError {
+  display: block;
+  color: var(--down);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- quality summary */
+
+.subhead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+/* The quality summary's parts: the latest run, its failures, the runs before it. */
+.panelPart + .panelPart {
+  margin-top: 18px;
+}
+
+/* The label's own muted ink; the accent says it opens. */
+.subheadLink {
+  text-decoration: none;
+}
+
+.subheadLink:hover {
+  color: var(--accent);
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rows > li {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.rows > li:last-child {
+  border-bottom: 0;
+}
+
+.rowLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+/* Check names are long mono words; on a phone this row must wrap. */
+.checkName {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.rowNote {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.pushRight {
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------- job progress */
+
+.progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progressTrack {
+  display: block;
+  width: 96px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-2);
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--tone, var(--up));
+}
+
+/* The row's subject: it takes the line, and its tags wrap below it on a phone. */
+.rowMain {
+  flex: 1 1 16rem;
+  min-width: 0;
+}

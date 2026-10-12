@@ -1,86 +1,75 @@
 import { Link } from "react-router"
 
+import { Block } from "@/components/blocks"
 import { RunPipelineButton } from "@/components/RunPipelineButton"
 import { StateBadge } from "@/components/StateBadge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { pipelineState, type CategoryGroup } from "@/lib/pipelines"
 import { formatCentral, formatDuration, relativeTime } from "@/lib/time"
+import s from "./sheet.module.css"
 
 export function PipelineSection({ group, now }: { group: CategoryGroup; now: number }) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-baseline gap-2 text-base">
-          {group.label}
-          <span className="font-mono text-xs font-normal text-muted-foreground">{group.pipelines.length}</span>
-        </CardTitle>
-        <CardDescription>{group.description}</CardDescription>
-      </CardHeader>
-      <CardContent className="overflow-x-auto px-0 pb-2">
+    <Block title={group.label} count={group.pipelines.length} text={group.description}>
+      <div className={s.bleed}>
         {/* Fixed widths: every category's columns line up with the others'. */}
-        <table className="w-full min-w-[44rem] table-fixed text-sm">
+        <table className={s.table} style={{ minWidth: "46rem", tableLayout: "fixed" }}>
           <colgroup>
-            <col className="w-[26%]" />
-            <col className="w-[14%]" />
-            <col className="w-[13%]" />
-            <col className="w-[13%]" />
-            <col className="w-[10%]" />
-            <col className="w-[10%]" />
-            <col className="w-[14%]" />
+            <col style={{ width: "27%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "13%" }} />
           </colgroup>
           <thead>
-            <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <th scope="col" className="px-6 py-2 font-medium">Pipeline</th>
-              <th scope="col" className="px-3 py-2 font-medium">State</th>
-              <th scope="col" className="px-3 py-2 font-medium">Last run</th>
-              <th scope="col" className="px-3 py-2 font-medium">Last success</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Duration</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Records</th>
-              <th scope="col" className="px-6 py-2 text-right font-medium">
-                <span className="sr-only">Run</span>
+            <tr>
+              <th scope="col">Pipeline</th>
+              <th scope="col">State</th>
+              <th scope="col">Last run</th>
+              <th scope="col">Last success</th>
+              <th scope="col" className={s.num}>Duration</th>
+              <th scope="col" className={s.num}>Records</th>
+              <th scope="col" className={s.num}>
+                <span className={s.srOnly}>Run</span>
               </th>
             </tr>
           </thead>
           <tbody>
             {group.pipelines.map((pipeline) => (
-              <tr key={pipeline.name} className="border-b border-border/50 last:border-0">
-                <th scope="row" className="px-6 py-2.5 text-left font-medium">
-                  <Link to={`/pipelines/${pipeline.name}`} className="hover:text-primary hover:underline underline-offset-4">
+              <tr key={pipeline.name}>
+                <th scope="row">
+                  <Link to={`/pipelines/${pipeline.name}`} className={s.nameLink}>
                     {pipeline.display_name}
                   </Link>
-                  <span className="block font-mono text-xs font-normal text-muted-foreground">{pipeline.name}</span>
+                  <span className={s.under}>{pipeline.name}</span>
                 </th>
-                <td className="px-3 py-2.5">
-                  <StateBadge state={pipelineState(pipeline)} />
-                  {pipeline.error_streak > 1 && (
-                    <span
-                      className="ml-2 font-mono text-xs text-status-loss"
-                      title={`${pipeline.error_streak} consecutive failures`}
-                    >
-                      ×{pipeline.error_streak}
-                    </span>
-                  )}
+                <td>
+                  <span className={s.chips}>
+                    <StateBadge state={pipelineState(pipeline)} />
+                    {pipeline.error_streak > 1 && (
+                      <span className={`${s.mono} ${s.bad}`} title={`${pipeline.error_streak} consecutive failures`}>
+                        ×{pipeline.error_streak}
+                      </span>
+                    )}
+                  </span>
                 </td>
-                <td className="px-3 py-2.5 font-mono text-xs" title={formatCentral(pipeline.last_run_at)}>
+                <td className={s.mono} title={formatCentral(pipeline.last_run_at)}>
                   {relativeTime(pipeline.last_run_at, now)}
                 </td>
-                <td className="px-3 py-2.5 font-mono text-xs" title={formatCentral(pipeline.last_success_at)}>
+                <td className={`${s.mono} ${pipeline.last_success_at ? "" : s.muted}`} title={formatCentral(pipeline.last_success_at)}>
                   {pipeline.last_success_at ? relativeTime(pipeline.last_success_at, now) : "never"}
                 </td>
-                <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">
-                  {formatDuration(pipeline.last_duration_seconds)}
-                </td>
-                <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">
-                  {pipeline.last_records_processed?.toLocaleString() ?? "—"}
-                </td>
-                <td className="whitespace-nowrap px-6 py-2.5 text-right">
+                <td className={s.num}>{formatDuration(pipeline.last_duration_seconds)}</td>
+                <td className={s.num}>{pipeline.last_records_processed?.toLocaleString() ?? "—"}</td>
+                <td className={s.num}>
                   <RunPipelineButton pipeline={pipeline} />
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </CardContent>
-    </Card>
+      </div>
+    </Block>
   )
 }

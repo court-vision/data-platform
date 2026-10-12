@@ -1,0 +1,151 @@
+/*
+ * The console's frame around the desk shell (desk/desk.module.css): the page
+ * tabs, the scrolling sheet between bar and status line, the service line and
+ * the token gate. Only desk tokens here.
+ */
+
+/* ---------------------------------------------------------------- bar */
+
+.tab {
+  gap: 7px;
+}
+
+/* Phones: the page's icon stands in for its word, so four tabs fit beside the mark. */
+.tabIcon {
+  display: none;
+  flex-shrink: 0;
+}
+
+@media (max-width: 639.98px) {
+  .tabIcon {
+    display: inline-block;
+  }
+
+  .tabLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+.context {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+/* ---------------------------------------------------------------- sheet */
+
+/* The page: everything between the bar and the status line, and the only thing that scrolls. */
+.sheet {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  outline: none;
+}
+
+/* ---------------------------------------------------------------- status line */
+
+/* The keys give way first: on a phone the status line is what is deployed. */
+@media (max-width: 767.98px) {
+  .keys {
+    display: none;
+  }
+}
+
+.services {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.service {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.uptime {
+  color: var(--text-3);
+}
+
+@media (max-width: 1023.98px) {
+  .uptime {
+    display: none;
+  }
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.dot[data-state="ok"] {
+  background: var(--live);
+}
+
+.dot[data-state="down"] {
+  background: var(--down);
+}
+
+/* ---------------------------------------------------------------- token gate */
+
+.gate {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.gateCorner {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.gateCard {
+  width: min(400px, 100%);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+}
+
+.gateMark {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.gateTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gateTitle svg {
+  color: var(--accent);
+}
+
+.gateInput {
+  width: 100%;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+}

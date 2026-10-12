@@ -1,0 +1,100 @@
+/*
+ * The duration chart: one column per run, coloured by its status, in the desk
+ * tokens. Unfinished runs (running, stuck) are hollow and dashed.
+ */
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.plotRow {
+  display: flex;
+}
+
+.axis {
+  position: relative;
+  width: 44px;
+  flex-shrink: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+.axisLabel {
+  position: absolute;
+  right: 6px;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+.plot {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+}
+
+.gridline {
+  stroke: var(--line);
+}
+
+[data-status="success"] {
+  --run: var(--up);
+}
+
+[data-status="failed"],
+[data-status="stuck"] {
+  --run: var(--down);
+}
+
+[data-status="running"] {
+  --run: var(--live);
+}
+
+.bar {
+  outline: none;
+}
+
+.column {
+  fill: var(--run, var(--text-3));
+  stroke: var(--run, var(--text-3));
+  transition: opacity 120ms ease;
+}
+
+/* While one run is pointed at, the rest step back. */
+.plot[data-hovering="true"] .bar:not([data-active="true"]) .column {
+  opacity: 0.45;
+}
+
+/* The ground showing through: a run past the top of the scale. */
+.break {
+  fill: var(--bg);
+}
+
+.caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.keySwatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--run, var(--text-3));
+}
+
+.keySwatch[data-status="running"],
+.keySwatch[data-status="stuck"] {
+  border: 1px dashed var(--run);
+  background: color-mix(in srgb, var(--run) 35%, transparent);
+}
