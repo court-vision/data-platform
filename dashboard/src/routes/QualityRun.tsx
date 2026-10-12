@@ -19,9 +19,10 @@ export function QualityRun() {
   const now = useNow()
   const query = useQualityRun(runId)
   const data = query.data
-  usePageContext(data ? `Quality run · ${formatCentralLong(data.run.started_at)}` : "Quality run")
+  const missing = query.error instanceof ApiError && query.error.status === 404
+  usePageContext(missing ? "Not found" : data ? `Quality run · ${formatCentralLong(data.run.started_at)}` : "Quality run")
 
-  if (query.error instanceof ApiError && query.error.status === 404) {
+  if (missing) {
     return <Lost title="No quality run with that id" back={{ to: "/quality", label: "Back to quality" }} />
   }
 

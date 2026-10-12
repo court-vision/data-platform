@@ -53,11 +53,14 @@
   color: var(--accent);
 }
 
-.headTitle {
+.headTitleRow {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 10px;
+}
+
+.headTitle {
   margin: 0;
   font-size: 21px;
   font-weight: 600;
@@ -384,26 +387,6 @@
   white-space: nowrap;
 }
 
-.muted {
-  color: var(--text-3);
-}
-
-.strong {
-  color: var(--text);
-}
-
-.bad {
-  color: var(--down);
-}
-
-.warn {
-  color: var(--warn);
-}
-
-.good {
-  color: var(--up);
-}
-
 /* A second line under a cell's value: the raw name, the relative time. */
 .under {
   display: block;
@@ -589,6 +572,10 @@
   padding: 0 8px;
 }
 
+.railSmall > button:focus-visible {
+  outline-offset: -2px;
+}
+
 .choice {
   display: inline-flex;
   align-items: center;
@@ -689,10 +676,10 @@
   }
 }
 
-.skelTiles .skelTile {
+.skelTiles .skelTile,
+.skelBox {
   height: 66px;
   border-radius: 6px;
-  background: var(--surface-2);
 }
 
 /* ---------------------------------------------------------------- not found */
@@ -808,4 +795,31 @@
 .errorFull {
   max-height: 16rem;
   margin-top: 6px;
+}
+
+/* ---------------------------------------------------------------- state colours */
+
+/*
+ * Last, and doubled: a state colour is put beside an element's own class (a
+ * table cell, an under-line, a hint, a fact) and must beat that class's
+ * colour, whichever module declares it and in whatever order the modules load.
+ */
+.muted.muted {
+  color: var(--text-3);
+}
+
+.strong.strong {
+  color: var(--text);
+}
+
+.bad.bad {
+  color: var(--down);
+}
+
+.warn.warn {
+  color: var(--warn);
+}
+
+.good.good {
+  color: var(--up);
 }

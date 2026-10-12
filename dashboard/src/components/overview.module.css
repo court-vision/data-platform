@@ -204,8 +204,8 @@
   margin-top: 18px;
 }
 
+/* The label's own muted ink; the accent says it opens. */
 .subheadLink {
-  color: inherit;
   text-decoration: none;
 }
 

@@ -16,15 +16,16 @@ import s from "@/components/sheet.module.css"
 
 export function PipelineDetail() {
   const { name = "" } = useParams()
-  usePageContext(name)
   const [params, setParams] = useSearchParams()
   const limit = parseLimit(params.get("limit"))
   const now = useNow()
   const query = usePipelineRuns(name, limit)
   const data = query.data
+  const missing = query.error instanceof ApiError && query.error.status === 404
+  usePageContext(missing ? "Not found" : name)
   const limitRail = <LimitRail limit={limit} onChange={(size) => setParams(size === 50 ? {} : { limit: String(size) })} />
 
-  if (query.error instanceof ApiError && query.error.status === 404) {
+  if (missing) {
     return <Lost title={`No pipeline called ${name}`} back={{ to: "/", label: "Back to the overview" }} />
   }
 

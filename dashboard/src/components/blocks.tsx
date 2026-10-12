@@ -43,10 +43,10 @@ export function Head({
             <ArrowLeft size={11} aria-hidden /> {back.label}
           </Link>
         )}
-        <h1 className={s.headTitle}>
-          {title}
+        <div className={s.headTitleRow}>
+          <h1 className={s.headTitle}>{title}</h1>
           {chips}
-        </h1>
+        </div>
         {meta && <div className={s.headMeta}>{meta}</div>}
         {sub && <p className={s.headSub}>{sub}</p>}
       </div>

@@ -41,7 +41,7 @@
   background: var(--accent-soft);
 }
 
-.wideGap {
+.table .wideGap {
   color: var(--warn);
   font-weight: 600;
 }

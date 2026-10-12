@@ -13,8 +13,8 @@ export function ServiceCards() {
     <Block title="Services" note="what is deployed, read from each service's /health">
       {services.isPending ? (
         <div className={s.facts} aria-busy="true" aria-label="Loading services">
-          <span className={`${s.fact} ${dk.skel}`} style={{ height: 62 }} />
-          <span className={`${s.fact} ${dk.skel}`} style={{ height: 62 }} />
+          <span className={`${dk.skel} ${s.skelBox}`} />
+          <span className={`${dk.skel} ${s.skelBox}`} />
         </div>
       ) : services.isError ? (
         <p className={s.empty}>Services: {services.error.message}</p>

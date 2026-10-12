@@ -6,19 +6,21 @@ import { DEFAULT_DARK, isDeskTheme, themePair, themeScheme, type DeskScheme, typ
 // a theme is remembered per browser, per site.
 const THEME_KEY = "cv.desk.theme"
 
-// The choice when storage refuses it (site data blocked): until reload.
+// The choice when storage refuses it (site data blocked, quota): until reload.
+// Only set then, so a pick in another tab still repaints this one.
 let memoryTheme: DeskThemeId | null = null
 
 const listeners = new Set<() => void>()
 
 function read(): DeskThemeId {
+  if (memoryTheme) return memoryTheme
   try {
     const stored = localStorage.getItem(THEME_KEY)
     if (isDeskTheme(stored)) return stored
   } catch {
-    // storage refused: fall through to memory
+    // storage refused: the default
   }
-  return memoryTheme ?? DEFAULT_DARK
+  return DEFAULT_DARK
 }
 
 function emit() {
@@ -26,11 +28,12 @@ function emit() {
 }
 
 export function setDeskTheme(id: DeskThemeId) {
-  memoryTheme = id
   try {
     localStorage.setItem(THEME_KEY, id)
+    memoryTheme = null
   } catch {
-    // kept in memory
+    // Storage refused the write (it may still read an older pick): memory wins until reload.
+    memoryTheme = id
   }
   emit()
 }
