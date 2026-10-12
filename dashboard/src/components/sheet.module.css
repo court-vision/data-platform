@@ -576,10 +576,15 @@
 /* ---------------------------------------------------------------- rails in block heads */
 
 .railSmall {
+  min-width: 0;
   padding: 2px;
+  /* Wider than a phone (Projections' Show): it scrolls sideways, as the desks' toolbars do. */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .railSmall > button {
+  flex-shrink: 0;
   height: 24px;
   padding: 0 8px;
 }
@@ -588,6 +593,13 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.choice > :first-child {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- popovers */
