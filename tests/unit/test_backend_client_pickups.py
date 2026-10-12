@@ -177,3 +177,32 @@ def test_a_lane_notice_says_whether_the_lane_ended_with_it():
     run = _client().execute_pickups()
     assert run.ok and [notice.ended for notice in run.lanes] == [True, False]     # absent: a lane that goes on
     assert run.lanes[0].as_dict()["ended"] is True
+
+
+@pytest.mark.unit
+@responses.activate
+def test_lane_notices_that_are_not_a_list_and_unhashable_actions_are_malformed():
+    for lanes in (1, {"lane_id": 7}):
+        body = _envelope()
+        body["data"]["lanes"] = lanes
+        responses.post(URL, json=body, status=200)
+        run = _client().execute_pickups()
+        assert (run.ok, run.reason) == (False, "malformed_response") and "unexpected lane notices" in run.error
+        responses.reset()
+    body = _envelope()
+    body["data"]["lanes"] = [_notice(action=["paused"])]
+    responses.post(URL, json=body, status=200)
+    assert _client().execute_pickups().reason == "malformed_response"
+    responses.reset()
+    responses.post(URL, json=_envelope(_result(outcome=["executed"])), status=200)
+    run = _client().execute_pickups()
+    assert (run.ok, run.reason) == (False, "malformed_response") and "unexpected result" in run.error
+
+
+@pytest.mark.unit
+@responses.activate
+def test_a_lane_pickups_projection_that_is_not_a_player_is_dropped_not_the_pickup():
+    lane = {"lane_id": 7, "notify": "email", "projected": "Kawhi Leonard", "why": "replanned", "last_day": True}
+    responses.post(URL, json=_envelope(_result(lane=lane)), status=200)
+    run = _client().execute_pickups()
+    assert run.ok and run.results[0].lane == {**lane, "projected": None}

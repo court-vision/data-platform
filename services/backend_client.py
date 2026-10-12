@@ -136,7 +136,7 @@ class PickupExecution:
     @classmethod
     def from_payload(cls, item: Any) -> Optional["PickupExecution"]:
         """Build from one `results` entry; None when it is not a usable result."""
-        if not isinstance(item, dict) or item.get("outcome") not in PICKUP_OUTCOMES:
+        if not isinstance(item, dict) or not isinstance(item.get("outcome"), str) or item["outcome"] not in PICKUP_OUTCOMES:
             return None
         try:
             return cls(
@@ -155,10 +155,20 @@ class PickupExecution:
                 verified=item.get("verified"),
                 audit_id=item.get("audit_id"),
                 next_attempt_at=item.get("next_attempt_at"),
-                lane=item["lane"] if isinstance(item.get("lane"), dict) else None,
+                lane=_pickup_lane(item.get("lane")),
             )
         except (KeyError, TypeError, ValueError):
             return None
+
+
+def _pickup_lane(value: Any) -> Optional[dict]:
+    """A pickup's `lane`, or None. A `projected` that is not a player is dropped, so the email
+    renders without the projection rather than not at all."""
+    if not isinstance(value, dict):
+        return None
+    if value.get("projected") is not None and not isinstance(value["projected"], dict):
+        return {**value, "projected": None}
+    return value
 
 
 LANE_NOTICE_ACTIONS = frozenset({"paused", "blocked"})
@@ -188,7 +198,7 @@ class LaneNotice:
     @classmethod
     def from_payload(cls, item: Any) -> Optional["LaneNotice"]:
         """Build from one `lanes` entry; None when it is not a usable notice."""
-        if not isinstance(item, dict) or item.get("action") not in LANE_NOTICE_ACTIONS:
+        if not isinstance(item, dict) or not isinstance(item.get("action"), str) or item["action"] not in LANE_NOTICE_ACTIONS:
             return None
         try:
             return cls(
@@ -235,8 +245,11 @@ class PickupsRun:
             if parsed is None:
                 return cls.unavailable(reason="malformed_response", error=f"unexpected result: {_excerpt(repr(item))}")
             results.append(parsed)
+        raw_lanes = data.get("lanes") or []        # absent from a backend that predates stream lanes
+        if not isinstance(raw_lanes, list):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected lane notices: {_excerpt(repr(raw_lanes))}")
         lanes: list[LaneNotice] = []
-        for item in data.get("lanes") or []:      # absent from a backend that predates stream lanes
+        for item in raw_lanes:
             notice = LaneNotice.from_payload(item)
             if notice is None:
                 return cls.unavailable(reason="malformed_response", error=f"unexpected lane notice: {_excerpt(repr(item))}")
