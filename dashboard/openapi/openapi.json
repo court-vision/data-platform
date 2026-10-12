@@ -5520,7 +5520,7 @@
     },
     "/v1/internal/pipelines/scheduled-pickups": {
       "post": {
-        "description": "Trigger the scheduled-pickups pipeline \u2014 the executor tick for usr.scheduled_pickups.\n\nCalled every minute by the 'scheduled-pickups' cron job. Gates on whether any\npickup is due (one EXISTS query, no run row); when one is, asks the backend to\nattempt the due rows and emails each outcome. The backend owns the retry\nrules, so a tick that finds nothing due costs one query.",
+        "description": "Trigger the scheduled-pickups pipeline \u2014 the executor tick for usr.scheduled_pickups.\n\nCalled every minute by the 'scheduled-pickups' cron job. Gates on whether any\npickup or stream lane decision is due (one query, no run row); when one is,\nasks the backend to make the decisions and attempt the due rows, and emails\neach outcome. The backend owns the retry rules, so a tick that finds nothing\ndue costs one query.",
         "operationId": "trigger_scheduled_pickups_v1_internal_pipelines_scheduled_pickups_post",
         "parameters": [
           {

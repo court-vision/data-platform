@@ -4,9 +4,12 @@ Scheduled Pickups Pipeline — the executor tick for usr.scheduled_pickups.
 Asks the backend to attempt every due scheduled pickup (POST
 /v1/internal/jobs/pickups/execute; the backend owns the ESPN reads, the retry
 rules, the writes and the audit) and emails each user what became of theirs.
-This pipeline owns the cadence — cron-runner fires its trigger every minute and
-the route gates on one EXISTS over the table, so an idle tick never reaches
-here — the run log, and the emails.
+The same call makes the stream lane decisions that are due (a lane's switch is
+a pickup, emailed like one with what the lane had projected); a lane that
+paused or missed a day comes back as a notice, emailed too. A desk-only lane
+emails nothing. This pipeline owns the cadence — cron-runner fires its trigger
+every minute and the route gates on one query over the pickups and the lanes,
+so an idle tick never reaches here — the run log, and the emails.
 
 Counters: an executed pickup is a processed record; skipped / failed / expired /
 deferred ones are skipped records with their reason. A business outcome is not a
@@ -26,7 +29,7 @@ from pipelines.base import BasePipeline
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
 from services.alert_service import AlertEvent, get_alert_service
-from services.backend_client import PickupExecution, PickupsRun, backend_client_from_settings
+from services.backend_client import LaneNotice, PickupExecution, PickupsRun, backend_client_from_settings
 from services.notification_service import NotificationResult, NotificationService
 
 BACKEND_UNAVAILABLE_ALERT_DEDUPE = timedelta(hours=6)
@@ -59,9 +62,11 @@ class ScheduledPickupsPipeline(BasePipeline):
     """
     One tick of the scheduled-pickup executor.
 
-    1. Asks the backend to attempt the due rows (it claims them with a lease)
+    1. Asks the backend to make the due lane decisions and attempt the due rows (it
+       claims both with a lease)
     2. Counts each outcome
-    3. Emails the owner of every row that settled this tick
+    3. Emails the owner of every row that settled this tick, and of every lane notice
+       (desk-only lanes excepted)
     """
 
     config = PipelineConfig(
@@ -92,11 +97,15 @@ class ScheduledPickupsPipeline(BasePipeline):
             self._alert_backend_unavailable(ctx, run)
             return
 
-        ctx.log.info("scheduled_pickups_backend_run", due=run.due, results=len(run.results))
+        ctx.log.info("scheduled_pickups_backend_run", due=run.due, results=len(run.results), lanes=len(run.lanes))
         for result in run.results:
             self._record(ctx, result)
-            if result.outcome in SETTLED_OUTCOMES:
+            if result.outcome in SETTLED_OUTCOMES and not result.desk_only:
                 self._email(ctx, result)
+        for notice in run.lanes:
+            self._record_lane(ctx, notice)
+            if notice.notify != "desk":
+                self._email_lane(ctx, notice)
 
     # ---- per result ----
 
@@ -119,6 +128,21 @@ class ScheduledPickupsPipeline(BasePipeline):
             seated_slot=result.seated_slot,
             verified=result.verified,
             next_attempt_at=result.next_attempt_at,
+            lane_id=(result.lane or {}).get("lane_id"),
+        )
+
+    @staticmethod
+    def _record_lane(ctx: PipelineContext, notice: LaneNotice) -> None:
+        """A lane that couldn't act is a skipped record with its reason, like a skipped pickup."""
+        ctx.increment_skipped(1, f"lane_{notice.action}:{notice.reason}")
+        ctx.log.info(
+            "stream_lane_notice",
+            lane_id=notice.lane_id,
+            team_id=notice.team_id,
+            user_id=notice.user_id,
+            action=notice.action,
+            reason=notice.reason,
+            notify=notice.notify,
         )
 
     def _email(self, ctx: PipelineContext, result: PickupExecution) -> None:
@@ -137,6 +161,23 @@ class ScheduledPickupsPipeline(BasePipeline):
             sent = NotificationResult(success=False, error=f"{type(exc).__name__}: {exc}")
         if not sent.success:
             ctx.log.warning("scheduled_pickup_email_failed", pickup_id=result.pickup_id, error=sent.error)
+            ctx.increment_skipped(1, "email_failed")
+
+    def _email_lane(self, ctx: PipelineContext, notice: LaneNotice) -> None:
+        """Email a lane notice's owner. Never raises, like `_email`."""
+        try:
+            found = _lookup_recipient(notice.user_id, notice.team_id)
+            if found is None:
+                ctx.log.warning("stream_lane_email_no_recipient", lane_id=notice.lane_id,
+                                user_id=notice.user_id, team_id=notice.team_id)
+                ctx.increment_skipped(1, "email_no_recipient")
+                return
+            user, team, prefs = found
+            sent = self.notification_service.send_stream_lane_notice(user, team, notice.as_dict(), prefs=prefs)
+        except Exception as exc:
+            sent = NotificationResult(success=False, error=f"{type(exc).__name__}: {exc}")
+        if not sent.success:
+            ctx.log.warning("stream_lane_email_failed", lane_id=notice.lane_id, error=sent.error)
             ctx.increment_skipped(1, "email_failed")
 
     # ---- ops ----
