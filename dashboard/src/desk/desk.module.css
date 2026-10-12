@@ -1,0 +1,1263 @@
+/* Copied from frontend/src/components/desk/desk.module.css by `python scripts/check_frontend_theme.py --write`. Do not edit here: change the frontend's, then re-sync. */
+/*
+ * The desk shell: tokens, type and the primitives every desk shares (bar,
+ * buttons, segmented rails, menus, dialogs, status line, toasts). Scoped to
+ * `.root`, which the (desk) layout renders once: nothing here reads the app
+ * theme, and nothing outside reads these.
+ */
+
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--desk-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Themes. Every desk color is a token, and a theme is one block of them keyed
+ * by `data-theme` on an element carrying `.tokens`: the frame, and each swatch
+ * in the appearance menu (a small preview drawn in its own theme's tokens).
+ * Paper is the base block; the others override it. themes.ts lists them, each
+ * with its scheme and its pair on the other side (what T swaps to); the ids
+ * are what storage remembers, so never rename one.
+ *
+ * Weight, lightest touch first: --bg (rows) · --surface (chrome: bars, heads,
+ * panes) · --surface-2 (chips, inputs, rails) · --pill (the chosen segment).
+ * --raised floats (menus, dialogs, toasts). --line divides rows and --line-2
+ * outlines controls, held near 1.5:1 and above 2:1 against what they sit on:
+ * the first desk palettes, at 1.2:1 and 1.4:1, lost every edge.
+ *
+ * Effects are tokens too: --glow lights the accent marks and --bar-bg paints
+ * the bar (Noon and Midnight use both).
+ */
+.tokens {
+  --bg: #f6f3ec;
+  --surface: #ece7dc;
+  --surface-2: #e3ddcf;
+  --raised: #fcfaf6;
+  --pill: #fcfaf6;
+  --hover: #ece6d9;
+  --hover-col: #f1ede4;
+  --line: #d0c6b3;
+  --line-2: #ada18b;
+  --text: #1e1a15;
+  --text-2: #4c443a;
+  --text-3: #6b6254;
+  --accent: #b4471a;
+  --accent-soft: rgba(180, 71, 26, 0.11);
+  --accent-ink: #ffffff;
+  --up: #17784a;
+  --down: #c0322b;
+  --live: #17784a;
+  --warn: #8f5f00;
+  --preview: #6a45c2;
+  --preview-soft: rgba(106, 69, 194, 0.08);
+  --today: #f9eedb;
+  --today-head: #f0dec2;
+  --shadow: 0 14px 40px rgba(60, 45, 25, 0.16), 0 0 0 1px var(--line-2);
+  --overlay: rgba(40, 32, 20, 0.32);
+  --glow: none;
+  color-scheme: light;
+}
+
+.tokens[data-theme="noon"] {
+  --bg: #eef3fa;
+  --surface: #e1e9f4;
+  --surface-2: #d5dfed;
+  --raised: #f8fbff;
+  --pill: #f8fbff;
+  --hover: #e2e9f4;
+  --hover-col: #e7eef8;
+  --line: #bac9de;
+  --line-2: #8fa2be;
+  --text: #0f1a33;
+  --text-2: #33415e;
+  --text-3: #51617e;
+  --accent: #0a6dab;
+  --accent-soft: rgba(10, 109, 171, 0.1);
+  --accent-ink: #ffffff;
+  --up: #0b7a4b;
+  --down: #c42f3b;
+  --live: #0b7a4b;
+  --warn: #8d5700;
+  --preview: #6b45d1;
+  --preview-soft: rgba(107, 69, 209, 0.08);
+  --today: #e1edfb;
+  --today-head: #cfe1f6;
+  --shadow: 0 14px 40px rgba(15, 26, 51, 0.14), 0 0 0 1px var(--line-2);
+  --overlay: rgba(15, 26, 51, 0.3);
+  --glow: 0 0 10px rgba(10, 109, 171, 0.3);
+  --bar-bg: linear-gradient(180deg, #e9f0f9, #e1e9f4);
+}
+
+.tokens[data-theme="ember"] {
+  --bg: #1b1815;
+  --surface: #24201c;
+  --surface-2: #2e2a25;
+  --raised: #2c2823;
+  --pill: #3d3730;
+  --hover: #29251f;
+  --hover-col: #201d19;
+  --line: #3c362f;
+  --line-2: #585047;
+  --text: #f3ede5;
+  --text-2: #c3b9ac;
+  --text-3: #9d9284;
+  --accent: #f5a524;
+  --accent-soft: rgba(245, 165, 36, 0.15);
+  --accent-ink: #1b1206;
+  --up: #4cc38a;
+  --down: #f2685a;
+  --live: #4cc38a;
+  --warn: #ead06b;
+  --preview: #cba4ff;
+  --preview-soft: rgba(203, 164, 255, 0.1);
+  --today: #241e15;
+  --today-head: #31281a;
+  --shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line-2);
+  --overlay: rgba(12, 10, 8, 0.62);
+  color-scheme: dark;
+}
+
+.tokens[data-theme="midnight"] {
+  --bg: #0f1729;
+  --surface: #162039;
+  --surface-2: #1e2a47;
+  --raised: #1c2744;
+  --pill: #2b3a5e;
+  --hover: #1b2541;
+  --hover-col: #131c33;
+  --line: #2a3755;
+  --line-2: #43537a;
+  --text: #e8eef8;
+  --text-2: #adbad2;
+  --text-3: #8696b4;
+  --accent: #5cc8ff;
+  --accent-soft: rgba(92, 200, 255, 0.15);
+  --accent-ink: #04121f;
+  --up: #3ddc97;
+  --down: #ff6b7a;
+  --live: #3ddc97;
+  --warn: #ffc35c;
+  --preview: #c6aaff;
+  --preview-soft: rgba(198, 170, 255, 0.11);
+  --today: #13223d;
+  --today-head: #1a2d50;
+  --shadow: 0 16px 48px rgba(2, 6, 16, 0.6), 0 0 0 1px var(--line-2);
+  --overlay: rgba(4, 8, 18, 0.62);
+  --glow: 0 0 14px rgba(92, 200, 255, 0.45);
+  --bar-bg: linear-gradient(180deg, #1c294a, #162039);
+  color-scheme: dark;
+}
+
+/* A desk's own column: everything between the bar and the status line. */
+.desk {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mono {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.sub {
+  color: var(--text-3);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.right {
+  margin-left: auto;
+  text-align: right;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.divider {
+  width: 1px;
+  height: 18px;
+  background: var(--line-2);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--down);
+}
+
+.link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* ---------------------------------------------------------------- bar */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 46px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bar-bg, var(--surface));
+  flex-shrink: 0;
+}
+
+/* The old UI's wordmark (CommandStrip): Outfit at its heaviest, tracked tight, VISION in the accent. */
+.mark {
+  display: flex;
+  align-items: center;
+  padding-top: 1px;
+  font-family: var(--font-outfit), var(--desk-sans), sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.markAccent {
+  color: var(--accent);
+}
+
+/*
+ * Everything after the desk tabs: the desk's context, then its controls. They
+ * keep their size; when they do not fit, this row scrolls sideways (as the
+ * toolbars under the bar do), so each one can still be reached. The padding,
+ * taken back by the margin, keeps focus rings at either end inside the
+ * scrolling box.
+ */
+.barScroll {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 -4px;
+  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.barScroll > * {
+  flex-shrink: 0;
+}
+
+/* Phones show the initials instead. */
+.markCompact {
+  display: none;
+  font-size: 20px;
+}
+
+/* Phones: the initials alone; the link's label keeps the name for screen readers. */
+@media (max-width: 767.98px) {
+  .markText {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .markCompact {
+    display: inline-flex;
+  }
+}
+
+/* The desks, as tabs: where you are, and the one other place to be. */
+.tabs {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 2px;
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: var(--text-3);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab[aria-current="page"] {
+  color: var(--text);
+}
+
+.tab[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.ghost:disabled {
+  cursor: default;
+}
+
+.chev {
+  color: var(--text-3);
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.iconBtn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* The Developer desk's door: an icon at the bar's end, lit while you are inside. */
+.iconLink {
+  color: var(--text-3);
+  text-decoration: none;
+}
+
+.iconLink[aria-current="page"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* The Account desk's door: the signed-in avatar, lit while you are inside. */
+.avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+
+.avatarInitials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--text-2);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.iconLink[aria-current="page"] .avatar {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.iconLink[aria-current="page"] .avatarInitials {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Something needs doing where this sits: an account the provider rejected. */
+.warnDot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.liveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+  box-shadow: 0 0 0 0 var(--live);
+  animation: pulse 2s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 60%, transparent); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badgeDemo {
+  border-color: color-mix(in srgb, var(--preview) 50%, transparent);
+  color: var(--preview);
+}
+
+/* Something the desk's subject needs before the work can go on; the badge is the way there. */
+.badgeWarn {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  color: var(--warn);
+  font: inherit;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.badgeWarn:hover {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+/* ---------------------------------------------------------------- chips */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.up {
+  color: var(--up);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
+}
+
+.down {
+  color: var(--down);
+  background: color-mix(in srgb, var(--down) 12%, transparent);
+}
+
+.flat {
+  color: var(--text-2);
+  background: var(--hover);
+}
+
+.pv {
+  color: var(--preview);
+  background: var(--preview-soft);
+}
+
+.warnChip {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+/* ---------------------------------------------------------------- segmented rail */
+
+.rail {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.seg {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.seg:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.seg:disabled {
+  color: var(--text-3);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.segOn {
+  color: var(--text);
+}
+
+.segPill {
+  position: absolute;
+  inset: 0;
+  border-radius: 5px;
+  background: var(--pill);
+  box-shadow: 0 0 0 1px var(--line-2), 0 1px 2px rgba(0, 0, 0, 0.3);
+  z-index: 0;
+}
+
+.segLabel {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.btn:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.btnPrimary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--glow);
+}
+
+.btnPrimary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, #ffffff);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.btnDanger {
+  border-color: color-mix(in srgb, var(--down) 55%, var(--line-2));
+  color: var(--down);
+}
+
+.btnSmall {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.toggleOn {
+  border-color: color-mix(in srgb, var(--up) 45%, var(--line-2));
+  color: var(--up);
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid var(--line-2);
+  color: var(--text-3);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.btnPrimary .kbd {
+  border-color: color-mix(in srgb, currentColor 35%, transparent);
+  color: inherit;
+  opacity: 0.75;
+}
+
+.ghost:focus-visible,
+.btn:focus-visible,
+.seg:focus-visible,
+.iconBtn:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---------------------------------------------------------------- inputs */
+
+.input {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.input::placeholder {
+  color: var(--text-3);
+}
+
+/* ---------------------------------------------------------------- status line */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 28px;
+  padding: 0 16px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.keys {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ---------------------------------------------------------------- menus */
+
+.menu {
+  z-index: 80;
+  width: 340px;
+  max-height: min(460px, var(--radix-popover-content-available-height));
+  display: flex;
+  flex-direction: column;
+  border-radius: 9px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12.5px;
+  overflow: hidden;
+  outline: none;
+  transform-origin: var(--radix-popover-content-transform-origin);
+  animation: menuIn 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes menuIn {
+  from { opacity: 0; transform: scale(0.97) translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+.menuWide {
+  width: 430px;
+}
+
+.menuHead {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.menuTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.menuInput {
+  width: 100%;
+  height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.menuInput::placeholder {
+  color: var(--text-3);
+}
+
+.menuList {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+
+.menuItem[data-selected="true"],
+button.menuItem:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.menuItem[data-disabled="true"],
+.menuItem:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.menuItemDanger {
+  color: var(--down);
+}
+
+.menuSep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+
+.menuGroupLabel {
+  padding: 8px 10px 4px;
+}
+
+.menuEmpty {
+  padding: 16px 14px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.menuFoot {
+  padding: 9px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+/* ---------------------------------------------------------------- theme picker */
+
+.themeMenu {
+  width: min(392px, calc(100vw - 16px));
+  max-height: min(760px, var(--radix-popover-content-available-height));
+}
+
+.themeGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 0 4px 6px;
+}
+
+.themeCard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.themeCard:hover {
+  border-color: var(--line-2);
+  background: var(--hover);
+}
+
+.themeCard[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.themeCard:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.themeName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.themeName svg {
+  color: var(--accent);
+}
+
+.themeNote {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* A desk in miniature, drawn in the swatch's own theme tokens. */
+.swatch {
+  display: flex;
+  flex-direction: column;
+  height: 68px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+
+.swatchBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 12px;
+  padding: 0 6px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--bar-bg, var(--surface));
+}
+
+/* The wordmark in miniature: ink, then the accent. */
+.swatchWord {
+  display: flex;
+}
+
+.swatchWord > span {
+  width: 9px;
+  height: 3px;
+  background: var(--text);
+}
+
+.swatchWord > .swatchWordAccent {
+  background: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.swatchTab {
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-2);
+}
+
+.swatchHead,
+.swatchRow {
+  display: grid;
+  grid-template-columns: 1fr 36%;
+  align-items: center;
+  height: 11px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.swatchHead {
+  background: var(--surface);
+}
+
+.swatchToday {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 5px;
+  border-left: 1px solid var(--line);
+  background: var(--today);
+}
+
+.swatchHead .swatchToday {
+  background: var(--today-head);
+  box-shadow: inset 0 1.5px 0 var(--accent);
+}
+
+.swatchText {
+  height: 3px;
+  margin-left: 6px;
+  border-radius: 1px;
+  background: var(--text-3);
+}
+
+.swatchValue {
+  width: 11px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--up);
+}
+
+.swatchValue[data-tone="down"] {
+  background: var(--down);
+}
+
+.swatchFoot {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  background: var(--surface);
+}
+
+.swatchChip {
+  width: 22px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+
+.swatchButton {
+  margin-left: auto;
+  width: 18px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: var(--glow);
+}
+
+/* ---------------------------------------------------------------- dialogs */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+  animation: fadeIn 140ms ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+}
+
+.dialog {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 91;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  outline: none;
+  animation: dialogIn 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes dialogIn {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.98); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.dialogWide {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.dialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 18px 14px;
+  overflow-y: auto;
+}
+
+.dialogTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dialogText {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.dialogFoot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------------------------------------------------------------- states */
+
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.emptyTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.skel {
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--surface-2), var(--hover), var(--surface-2));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+/* ---------------------------------------------------------------- faces */
+
+.face {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+}
+
+.faceInitials {
+  align-self: center;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+/* ---------------------------------------------------------------- team logos */
+
+.logo {
+  flex-shrink: 0;
+  display: inline-block;
+  object-fit: contain;
+  vertical-align: middle;
+}
+
+.logoMark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--text-3);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------- toasts */
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 356px;
+  padding: 11px 14px;
+  border-radius: 9px;
+  background: var(--raised);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--desk-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.toastTitle {
+  font-weight: 500;
+}
+
+.toastDescription {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.toastIcon {
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--text-3);
+}
+
+.toast[data-type="success"] .toastIcon {
+  color: var(--up);
+}
+
+.toast[data-type="error"] .toastIcon {
+  color: var(--down);
+}
+
+.toast[data-type="warning"] .toastIcon {
+  color: var(--warn);
+}
+
+.toastAction {
+  margin-left: auto;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liveDot,
+  .skel,
+  .menu,
+  .dialog,
+  .overlay {
+    animation: none;
+  }
+}

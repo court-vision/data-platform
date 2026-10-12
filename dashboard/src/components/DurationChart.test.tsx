@@ -60,14 +60,14 @@ describe("DurationChart", () => {
     const html = render([run({ duration_seconds: 570 })])
     expect(html).not.toContain("<text")
     const axis = html.slice(0, html.indexOf("<svg"))
-    expect(axis).toContain("text-[10px]")
+    expect(axis).toContain('class="axisLabel"')
     expect([...axis.matchAll(/<span[^>]*>([^<]+)<\/span>/g)].map((match) => match[1])).toEqual(["0s", "5m", "10m"])
   })
 
   test("a run that failed in 50ms still shows its colour above the baseline", () => {
     const html = render([run({ id: "fast", status: "failed", duration_seconds: 0.05 }), run({ id: "slow", duration_seconds: 60 })])
     const fast = bar(html, "fast")
-    expect(fast).toContain("fill-status-loss")
+    expect(fast).toContain('data-status="failed"') // coloured by status: the loss colour
     expect(fast).toMatch(/ d="M[\d.]+,120 V120 Q[\d.]+,118 /)
   })
 
@@ -75,7 +75,7 @@ describe("DurationChart", () => {
     const stuck = run({ id: "hung", status: "stuck", started_at: "2026-03-02T12:00:00", completed_at: null, duration_seconds: null })
     const html = render([run({ id: "ok" }), stuck])
     const hung = bar(html, "hung")
-    expect(hung).toContain("fill-status-loss stroke-status-loss")
+    expect(hung).toContain('data-status="stuck"') // the loss colour, fill and outline
     expect(hung).toContain("stroke-dasharray")
     expect(hung).toContain("stuck · never finished")
     expect(html).toContain(">stuck</span>")
@@ -90,9 +90,9 @@ describe("DurationChart", () => {
   test("a failed run past the axis is broken at the top and says so", () => {
     const swept = run({ id: "swept", status: "failed", duration_seconds: 10_800, error_message: "Interrupted by service restart" })
     const html = render([swept, run({ id: "ok", duration_seconds: 30 })])
-    expect(bar(html, "swept")).toContain("fill-card")
+    expect(bar(html, "swept")).toContain('class="break"')
     expect(bar(html, "swept")).toContain("180m 0s (off the scale)")
-    expect(bar(html, "ok")).not.toContain("fill-card")
+    expect(bar(html, "ok")).not.toContain('class="break"')
   })
 
   test("no runs is a sentence, not an empty plot", () => {

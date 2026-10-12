@@ -165,8 +165,8 @@ describe("QualityRun", () => {
   test("the tiles split this run's failures by severity", () => {
     const html = render(loaded(detail([FAILED, BROKEN, PASSED])))
     expect(html).toMatch(/Checks<\/dt><dd[^>]*>3</)
-    expect(html).toMatch(/Critical failing<\/dt><dd[^>]*text-status-loss[^>]*>1</)
-    expect(html).toMatch(/Warnings failing<\/dt><dd[^>]*text-status-projected[^>]*>1</)
+    expect(html).toMatch(/Critical failing<\/dt><dd[^>]*data-tone="down"[^>]*>1</)
+    expect(html).toMatch(/Warnings failing<\/dt><dd[^>]*data-tone="warn"[^>]*>1</)
   })
 
   test("the header says when, how long, and who triggered it; and steps to the neighbours that exist", () => {

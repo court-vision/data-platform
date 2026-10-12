@@ -9,6 +9,7 @@ import { ApiError, type Schemas } from "@/lib/api"
 import type { QualityCheckRow, QualityOverview } from "@/lib/quality"
 import type { PipelineInfo, PipelineRun } from "@/lib/runs"
 import { PipelineDetail } from "@/routes/PipelineDetail"
+import { pressed } from "@/test-helpers"
 
 // No DOM and no network: the page is rendered to markup from a query cache
 // filled by hand, as the server would render it, and read as text.
@@ -94,9 +95,9 @@ describe("PipelineDetail", () => {
     const stuck = run({ id: "hung", status: "stuck", started_at: "2026-03-02T12:00:00", completed_at: null, duration_seconds: null })
     const html = render(loaded(payload([run({ id: "ok" }), stuck], {}, { stuck: 1 })))
     const row = runsTable(html).split("<tr").find((cells) => cells.includes("Mar 2,"))!
-    expect(row).toContain(">Stuck</div>")
-    expect(row).toContain("text-status-loss") // the loss badge, not the green beacon of a live run
-    expect(row).not.toContain("animate-beacon")
+    expect(row).toContain(">Stuck</span>")
+    expect(row).toContain('data-tone="down"') // the loss chip, not the pulsing one of a live run
+    expect(row).not.toContain('data-tone="live"')
     expect(row).not.toContain("…")
     expect(html).toContain("0 failed · 1 stuck")
   })
@@ -104,7 +105,7 @@ describe("PipelineDetail", () => {
   test("a live run keeps the running badge and the ellipsis", () => {
     const live = run({ id: "live", status: "running", completed_at: null, duration_seconds: null })
     const row = runsTable(render(loaded(payload([live])))).split("<tr").at(-1)!
-    expect(row).toContain("animate-beacon")
+    expect(row).toContain('data-tone="live"')
     expect(row).toContain("…")
   })
 
@@ -127,7 +128,7 @@ describe("PipelineDetail", () => {
 
     expect(html).toContain("Could not refresh: Bad Gateway")
     expect(html).toContain('aria-label="How many runs"')
-    expect(html).toMatch(/aria-pressed="true"[^>]*>100</)
+    expect(html).toMatch(pressed("100"))
   })
 
   describe("the checks on this pipeline's data", () => {

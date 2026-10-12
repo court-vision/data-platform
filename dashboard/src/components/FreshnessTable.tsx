@@ -1,43 +1,37 @@
+import { Block } from "@/components/blocks"
 import { FreshnessBadge } from "@/components/StateBadge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { daysBehind, splitTable, type TableFreshness } from "@/lib/freshness"
 import { formatCentral, formatDay, relativeTime } from "@/lib/time"
+import s from "./sheet.module.css"
 
 /** Every table a pipeline owns: what date it runs through, when it was last written, the verdict. */
 export function FreshnessTable({ tables, now }: { tables: TableFreshness[]; now: number }) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-baseline gap-2 text-base">
-          Tables
-          <span className="font-mono text-xs font-normal text-muted-foreground">{tables.length}</span>
-        </CardTitle>
-        <CardDescription>
-          Nightly tables are judged against the schedule: post-game tables through the last settled night, pre-game tables through the last day whose first tip-off has passed. Live and scheduled
-          writers, and pipelines that only write when there is something to say, are shown but not judged. Two tables keep their own dates: nba.games is the schedule, so it runs through its last game day
-          with a result, and daily_matchup_scores is dated by its run, the morning after the game night.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="overflow-x-auto px-0 pb-2">
-        <table className="w-full min-w-[52rem] table-fixed text-sm">
+    <Block
+      title="Tables"
+      count={tables.length}
+      text="Nightly tables are judged against the schedule: post-game tables through the last settled night, pre-game tables through the last day whose first tip-off has passed. Live and scheduled writers, and pipelines that only write when there is something to say, are shown but not judged. Two tables keep their own dates: nba.games is the schedule, so it runs through its last game day with a result, and daily_matchup_scores is dated by its run, the morning after the game night."
+    >
+      <div className={s.bleed}>
+        <table className={s.table} style={{ minWidth: "52rem", tableLayout: "fixed" }}>
           <colgroup>
-            <col className="w-[26%]" />
-            <col className="w-[15%]" />
-            <col className="w-[20%]" />
-            <col className="w-[16%]" />
-            <col className="w-[12%]" />
-            <col className="w-[11%]" />
+            <col style={{ width: "26%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "20%" }} />
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "11%" }} />
           </colgroup>
           <thead>
-            <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-              <th scope="col" className="py-2 pl-6 pr-3 font-medium">Table</th>
+            <tr>
+              <th scope="col">Table</th>
               {/* The verdict sits beside the name: the table is wider than a
                   phone, and a last column is scrolled out of sight there. */}
-              <th scope="col" className="px-3 py-2 font-medium">State</th>
-              <th scope="col" className="px-3 py-2 font-medium">Written by</th>
-              <th scope="col" className="px-3 py-2 font-medium">Runs through</th>
-              <th scope="col" className="px-3 py-2 font-medium">Last write</th>
-              <th scope="col" className="py-2 pl-3 pr-6 text-right font-medium">Rows</th>
+              <th scope="col">State</th>
+              <th scope="col">Written by</th>
+              <th scope="col">Runs through</th>
+              <th scope="col">Last write</th>
+              <th scope="col" className={s.num}>Rows</th>
             </tr>
           </thead>
           <tbody>
@@ -46,8 +40,8 @@ export function FreshnessTable({ tables, now }: { tables: TableFreshness[]; now:
             ))}
           </tbody>
         </table>
-      </CardContent>
-    </Card>
+      </div>
+    </Block>
   )
 }
 
@@ -55,43 +49,40 @@ function FreshnessRow({ table, now }: { table: TableFreshness; now: number }) {
   const { schema, name } = splitTable(table.table)
   const behind = daysBehind(table)
   return (
-    <tr className="border-b border-border/50 last:border-0">
-      <th scope="row" className="py-2.5 pl-6 pr-3 text-left font-mono text-xs font-medium">
-        <span className="text-muted-foreground">{schema}.</span>
+    <tr>
+      <th scope="row" className={`${s.mono} ${s.top}`}>
+        <span className={s.muted}>{schema}.</span>
         {/* A name too long for the column wraps here, not over the verdict. */}
         <wbr />
         {name}
       </th>
-      <td className="px-3 py-2.5">
+      <td className={s.top}>
         <FreshnessBadge state={table.state} />
         {table.error && (
-          <span className="mt-1 block truncate text-xs text-status-loss" title={table.error}>
+          <span className={`${s.under} ${s.bad} ${s.clip}`} title={table.error}>
             {table.error}
           </span>
         )}
       </td>
-      <td className="px-3 py-2.5 text-xs">
+      <td className={s.top}>
         {table.pipelines.map((pipeline) => (
-          <span key={pipeline.name} className="block truncate" title={pipeline.name}>
+          <span key={pipeline.name} title={pipeline.name} className={s.clip}>
             {pipeline.display_name}
           </span>
         ))}
       </td>
-      <td className="px-3 py-2.5 font-mono text-xs" title={table.date_column ? `max(${table.date_column})` : "no business date"}>
-        {table.date_column ? formatDay(table.latest_date) : <span className="text-muted-foreground">—</span>}
+      <td className={`${s.mono} ${s.top}`} title={table.date_column ? `max(${table.date_column})` : "no business date"}>
+        {table.date_column ? <span className={s.strong}>{formatDay(table.latest_date)}</span> : <span className={s.muted}>—</span>}
         {behind != null && (
-          <span className="block text-status-loss">
+          <span className={`${s.under} ${s.bad}`}>
             expected {formatDay(table.expected_date)} · {behind}d behind
           </span>
         )}
       </td>
-      <td
-        className="px-3 py-2.5 font-mono text-xs"
-        title={`max(${table.write_column ?? "?"}) · ${formatCentral(table.latest_written_at)}`}
-      >
+      <td className={`${s.mono} ${s.top}`} title={`max(${table.write_column ?? "?"}) · ${formatCentral(table.latest_written_at)}`}>
         {relativeTime(table.latest_written_at, now)}
       </td>
-      <td className="py-2.5 pl-3 pr-6 text-right font-mono text-xs tabular-nums" title="Planner estimate, not a count">
+      <td className={`${s.num} ${s.top}`} title="Planner estimate, not a count">
         {table.rows_estimate?.toLocaleString() ?? "—"}
       </td>
     </tr>

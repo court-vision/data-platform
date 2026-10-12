@@ -7,6 +7,7 @@ import { adjustmentHistoryQuery, projectionsQuery } from "@/hooks/useProjections
 import { ApiError } from "@/lib/api"
 import type { AdjustmentEntry, ProjectionLine, ProjectionRow, ProjectionsData } from "@/lib/projections"
 import { Projections } from "@/routes/Projections"
+import { pressed } from "@/test-helpers"
 
 // No DOM and no network: the page is rendered to markup from a query cache
 // filled by hand, as the server would render it, and read as text.
@@ -73,7 +74,7 @@ function render(client: QueryClient, search = ""): string {
 
 /** The player rows of the main table, in order: the text of each row's name button. */
 function names(html: string): string[] {
-  return [...html.matchAll(/<span class="font-medium">([^<]+)<\/span>/g)].map((match) => match[1])
+  return [...html.matchAll(/<span class="name">([^<]+)<\/span>/g)].map((match) => match[1])
 }
 
 describe("Projections", () => {
@@ -87,7 +88,7 @@ describe("Projections", () => {
     const kessler = html.split("<tr").find((cells) => cells.includes("Walker Kessler"))!
     expect(kessler).toContain(">57</td>")
     expect(kessler).toContain(">95</td>")
-    expect(kessler).toMatch(/text-status-projected[^>]*>\+38</)
+    expect(kessler).toMatch(/wideGap[^>]*>\+38</)
     // His adjustment reads as what it sets, and the row shows the final line.
     expect(kessler).toContain("Injury return")
     expect(kessler).toContain("30 min · 64 games")
@@ -100,7 +101,7 @@ describe("Projections", () => {
     const rookie = html.split("<tr").find((cells) => cells.includes("AJ Dybantsa"))!
     expect(rookie).toContain(">110</td>")
     expect(rookie).toContain("No history")
-    expect(html).toMatch(/aria-pressed="true"[^>]*>9-cat</)
+    expect(html).toMatch(pressed("9-cat"))
   })
 
   test("filters, search and sort come from the URL", () => {
@@ -136,7 +137,7 @@ describe("Projections", () => {
     expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/)
     // Both versions, newest first, the old one marked.
     expect(html.indexOf("minutes managed early")).toBeLessThan(html.indexOf("First read."))
-    expect(html).toContain(">superseded</div>")
+    expect(html).toContain(">superseded</span>")
     expect(html).toContain("28 min · 64 games")
     expect(html).toContain('href="https://example.test/kessler"')
   })
@@ -152,7 +153,7 @@ describe("Projections", () => {
     const html = render(loaded(payload({ unpublished: 3 })))
     expect(html).toContain("published Oct 1 · 3 players differ from the published snapshot")
     const tile = html.split("<dt").find((cells) => cells.includes("Unpublished"))!
-    expect(tile).toContain("text-status-projected")
+    expect(tile).toContain('data-tone="warn"')
     expect(tile).toContain(">3</dd>")
   })
 

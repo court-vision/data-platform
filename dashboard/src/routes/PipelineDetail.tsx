@@ -1,130 +1,90 @@
-import { ArrowLeft, TriangleAlert } from "lucide-react"
-import { Link, useParams, useSearchParams } from "react-router"
+import { useParams, useSearchParams } from "react-router"
 
+import { Block, Head, Lost, Notice, Page, Rail, RefreshNote, SheetSkeleton, Tag, Tiles, type Tone } from "@/components/blocks"
 import { DurationChart } from "@/components/DurationChart"
 import { PipelineChecks } from "@/components/PipelineChecks"
-import { RefreshNote } from "@/components/RefreshNote"
 import { RunPipelineButton } from "@/components/RunPipelineButton"
+import { usePageContext } from "@/components/shell/pageContext"
 import { StateBadge, StatusBadge } from "@/components/StateBadge"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/hooks/useNow"
 import { RUNS_REFETCH_MS, usePipelineRuns } from "@/hooks/usePipelineRuns"
 import { ApiError } from "@/lib/api"
 import { CATEGORIES } from "@/lib/pipelines"
 import { formatRate, LIMITS, parseLimit, type Limit, type PipelineInfo, type PipelineRun, type RunsSummary } from "@/lib/runs"
 import { formatCentral, formatCentralLong, formatDuration, relativeTime } from "@/lib/time"
-import { cn } from "@/lib/utils"
+import s from "@/components/sheet.module.css"
 
 export function PipelineDetail() {
   const { name = "" } = useParams()
+  usePageContext(name)
   const [params, setParams] = useSearchParams()
   const limit = parseLimit(params.get("limit"))
   const now = useNow()
   const query = usePipelineRuns(name, limit)
   const data = query.data
-  const limitButtons = (
-    <LimitButtons limit={limit} onChange={(size) => setParams(size === 50 ? {} : { limit: String(size) })} />
-  )
+  const limitRail = <LimitRail limit={limit} onChange={(size) => setParams(size === 50 ? {} : { limit: String(size) })} />
 
   if (query.error instanceof ApiError && query.error.status === 404) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="font-mono text-sm text-muted-foreground">404</p>
-        <h1 className="font-display text-xl font-bold">No pipeline called {name}</h1>
-        <Link to="/" className="text-sm text-primary underline-offset-4 hover:underline">Back to the overview</Link>
-      </div>
-    )
+    return <Lost title={`No pipeline called ${name}`} back={{ to: "/", label: "Back to the overview" }} />
   }
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-4 md:p-8">
-      <Link to="/" className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" aria-hidden /> Overview
-      </Link>
-
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          {data ? (
+    <Page>
+      <Head
+        back={{ to: "/", label: "Overview" }}
+        title={data ? data.pipeline.display_name : name}
+        chips={
+          data && (
             <>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="font-display text-2xl font-bold tracking-tight">{data.pipeline.display_name}</h1>
-                <Badge variant="outline">{categoryLabel(data.pipeline.category)}</Badge>
-                {data.pipeline.is_running && <StatusBadge status="running" />}
-              </div>
-              <p className="font-mono text-xs text-muted-foreground">{data.pipeline.name}</p>
-              <p className="mt-2 max-w-prose text-sm text-muted-foreground">{data.pipeline.description}</p>
+              <Tag>{categoryLabel(data.pipeline.category)}</Tag>
+              {data.pipeline.is_running && <StatusBadge status="running" />}
             </>
-          ) : (
-            <Skeleton className="h-16 w-80 rounded" />
-          )}
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          {data && <RunPipelineButton pipeline={data.pipeline} />}
-          <RefreshNote updatedAt={query.dataUpdatedAt} fetching={query.isFetching} now={now} intervalMs={RUNS_REFETCH_MS} />
-        </div>
-      </header>
+          )
+        }
+        meta={<span>{name}</span>}
+        sub={data?.pipeline.description}
+        actions={
+          <>
+            {data && <RunPipelineButton pipeline={data.pipeline} />}
+            <RefreshNote updatedAt={query.dataUpdatedAt} fetching={query.isFetching} now={now} intervalMs={RUNS_REFETCH_MS} />
+          </>
+        }
+      />
 
       {query.error && (
-        <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-          <span>Could not refresh: {query.error.message}{data && " Showing the last good data."}</span>
-        </div>
+        <Notice>
+          Could not refresh: {query.error.message}
+          {data && " Showing the last good data."}
+        </Notice>
       )}
 
       {!data ? (
         <>
           {/* This limit's fetch failed with nothing to stand in for it. Another
               limit may still be cached, and these are the way back to it. */}
-          {query.error && <div className="flex justify-end">{limitButtons}</div>}
-          <LoadingState />
+          {query.error && <Block title="Runs" right={limitRail} />}
+          <SheetSkeleton label="Loading pipeline" />
         </>
       ) : (
         <>
-          <Facts pipeline={data.pipeline} />
           <SummaryTiles summary={data.summary} now={now} />
+          <Facts pipeline={data.pipeline} />
 
-          <Card>
-            <CardHeader className="flex-row flex-wrap items-start justify-between gap-3 space-y-0 pb-3">
-              <div className="space-y-1.5">
-                <CardTitle className="text-base">Duration</CardTitle>
-                <CardDescription>The last {data.runs.length} runs, oldest on the left.</CardDescription>
-              </div>
-              {limitButtons}
-            </CardHeader>
-            <CardContent>
-              <DurationChart runs={data.runs} now={now} />
-            </CardContent>
-          </Card>
+          <Block title="Duration" note={`the last ${data.runs.length} runs, oldest on the left`} right={limitRail}>
+            <DurationChart runs={data.runs} now={now} />
+          </Block>
 
           <PipelineChecks pipeline={data.pipeline.name} />
 
           <RunsTable runs={data.runs} now={now} />
         </>
       )}
-    </div>
+    </Page>
   )
 }
 
-function LimitButtons({ limit, onChange }: { limit: Limit; onChange: (size: Limit) => void }) {
-  return (
-    <div className="flex gap-1" role="group" aria-label="How many runs">
-      {LIMITS.map((size) => (
-        <Button
-          key={size}
-          size="sm"
-          variant={size === limit ? "secondary" : "ghost"}
-          className="h-7 px-2 font-mono text-xs"
-          onClick={() => onChange(size)}
-          aria-pressed={size === limit}
-        >
-          {size}
-        </Button>
-      ))}
-    </div>
-  )
+function LimitRail({ limit, onChange }: { limit: Limit; onChange: (size: Limit) => void }) {
+  return <Rail label="How many runs" options={LIMITS.map((size) => ({ key: size, label: String(size) }))} value={limit} onChange={onChange} />
 }
 
 function categoryLabel(key: string): string {
@@ -151,118 +111,92 @@ function Facts({ pipeline }: { pipeline: PipelineInfo }) {
   ]
 
   return (
-    <Card variant="panel">
-      <CardContent className="pt-4">
-        <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
-          {rows.map(([label, value]) => (
-            <div key={label} className="min-w-0">
-              <dt className="text-xs uppercase tracking-wider text-muted-foreground">{label}</dt>
-              <dd className="break-words font-mono text-xs">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </CardContent>
-    </Card>
+    <Block title="Registry" note="what the pipeline registry says about it">
+      <dl className={s.facts}>
+        {rows.map(([label, value]) => (
+          <div key={label} className={s.fact}>
+            <dt className={s.factKey}>{label}</dt>
+            <dd className={s.factVal}>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </Block>
   )
 }
 
 function SummaryTiles({ summary, now }: { summary: RunsSummary; now: number }) {
   const rate = summary.success_rate
-  const tiles = [
-    { label: "Runs", value: String(summary.total), tone: "text-foreground", note: summary.oldest_started_at ? `since ${formatCentral(summary.oldest_started_at)}` : "" },
-    { label: "Success rate", value: formatRate(rate), tone: rate == null ? "text-muted-foreground" : rate >= 0.9 ? "text-status-win" : rate >= 0.5 ? "text-status-projected" : "text-status-loss", note: `${summary.failed} failed${summary.stuck > 0 ? ` · ${summary.stuck} stuck` : ""}` },
-    { label: "Median duration", value: formatDuration(summary.median_duration_seconds), tone: "text-foreground", note: summary.max_duration_seconds != null ? `max ${formatDuration(summary.max_duration_seconds)}` : "" },
-    { label: "Last success", value: summary.last_success_at ? relativeTime(summary.last_success_at, now) : "never", tone: summary.last_success_at ? "text-foreground" : "text-status-loss", note: summary.last_success_at ? formatCentral(summary.last_success_at) : "" },
-  ]
+  const rateTone: Tone = rate == null ? "quiet" : rate >= 0.9 ? "up" : rate >= 0.5 ? "warn" : "down"
   return (
-    <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      {tiles.map((tile) => (
-        <Card key={tile.label} variant="panel" className="px-4 py-3">
-          <dt className="text-xs uppercase tracking-wider text-muted-foreground">{tile.label}</dt>
-          <dd className={cn("font-mono text-2xl font-bold", tile.tone)}>{tile.value}</dd>
-          {tile.note && <dd className="font-mono text-[11px] text-muted-foreground">{tile.note}</dd>}
-        </Card>
-      ))}
-    </dl>
+    <Tiles
+      tiles={[
+        { label: "Runs", value: String(summary.total), note: summary.oldest_started_at ? `since ${formatCentral(summary.oldest_started_at)}` : "" },
+        { label: "Success rate", value: formatRate(rate), tone: rateTone, note: `${summary.failed} failed${summary.stuck > 0 ? ` · ${summary.stuck} stuck` : ""}` },
+        { label: "Median duration", value: formatDuration(summary.median_duration_seconds), note: summary.max_duration_seconds != null ? `max ${formatDuration(summary.max_duration_seconds)}` : "" },
+        {
+          label: "Last success",
+          value: summary.last_success_at ? relativeTime(summary.last_success_at, now) : "never",
+          tone: summary.last_success_at ? undefined : "down",
+          note: summary.last_success_at ? formatCentral(summary.last_success_at) : "",
+        },
+      ]}
+    />
   )
 }
 
 function RunsTable({ runs, now }: { runs: PipelineRun[]; now: number }) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Runs</CardTitle>
-        <CardDescription>Newest first. Times in Central.</CardDescription>
-      </CardHeader>
-      <CardContent className="overflow-x-auto px-0 pb-2">
-        {runs.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">No runs recorded.</p>
-        ) : (
-          <table className="w-full min-w-[44rem] text-sm">
+    <Block title="Runs" count={runs.length} note="newest first · Central time">
+      {runs.length === 0 ? (
+        <p className={s.empty}>No runs recorded.</p>
+      ) : (
+        <div className={s.bleed}>
+          <table className={s.table} style={{ minWidth: "44rem" }}>
             <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th scope="col" className="px-6 py-2 font-medium">Started</th>
-                <th scope="col" className="px-3 py-2 font-medium">Status</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">Duration</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">Records</th>
-                <th scope="col" className="px-6 py-2 font-medium">Error</th>
+              <tr>
+                <th scope="col">Started</th>
+                <th scope="col">Status</th>
+                <th scope="col" className={s.num}>Duration</th>
+                <th scope="col" className={s.num}>Records</th>
+                <th scope="col">Error</th>
               </tr>
             </thead>
             <tbody>
               {runs.map((run) => (
-                <tr key={run.id} className="border-b border-border/50 align-top last:border-0">
-                  <td className="whitespace-nowrap px-6 py-2.5 font-mono text-xs">
-                    {formatCentralLong(run.started_at)}
-                    <span className="block text-muted-foreground">{relativeTime(run.started_at, now)}</span>
+                <tr key={run.id}>
+                  <td className={`${s.mono} ${s.nowrap} ${s.top}`}>
+                    <span className={s.strong}>{formatCentralLong(run.started_at)}</span>
+                    <span className={s.under}>{relativeTime(run.started_at, now)}</span>
                   </td>
-                  {/* Stuck is the Overview's word and badge for the same state (lib/pipelines.ts). */}
-                  <td className="px-3 py-2.5">
-                    {run.status === "stuck" ? <StateBadge state="stuck" /> : <StatusBadge status={run.status} />}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">
-                    {run.status === "running" ? "…" : formatDuration(run.duration_seconds)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">
-                    {run.status === "success" ? run.records_processed.toLocaleString() : "—"}
-                  </td>
-                  <td className="max-w-md px-6 py-2.5 text-xs">
+                  {/* Stuck is the Overview's word and chip for the same state (lib/pipelines.ts). */}
+                  <td className={s.top}>{run.status === "stuck" ? <StateBadge state="stuck" /> : <StatusBadge status={run.status} />}</td>
+                  <td className={`${s.num} ${s.top}`}>{run.status === "running" ? "…" : formatDuration(run.duration_seconds)}</td>
+                  <td className={`${s.num} ${s.top}`}>{run.status === "success" ? run.records_processed.toLocaleString() : "—"}</td>
+                  <td className={`${s.top} ${s.errorCell}`}>
                     <ErrorCell message={run.error_message} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </Block>
   )
 }
 
 /** Short errors inline; long ones fold, with the full text one click away. */
 function ErrorCell({ message }: { message: string | null }) {
-  if (!message) return <span className="text-muted-foreground">—</span>
-  if (message.length <= 120) return <span className="break-words text-status-loss">{message}</span>
+  if (!message) return <span className={s.muted}>—</span>
+  if (message.length <= 120) return <span className={s.bad}>{message}</span>
   return (
-    <details className="group">
-      <summary className="cursor-pointer text-status-loss">
-        {message.slice(0, 120)}… <span className="text-muted-foreground group-open:hidden">(show all)</span>
+    <details className={s.fold}>
+      <summary className={s.bad}>
+        {message.slice(0, 120)}… <span className={s.foldHint}>(show all)</span>
       </summary>
-      <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/60 p-2 font-mono text-[11px] text-muted-foreground">
+      <pre className={`${s.pre} ${s.preWrap} ${s.errorFull}`}>
         {message}
       </pre>
     </details>
-  )
-}
-
-function LoadingState() {
-  return (
-    <div className="flex flex-col gap-6" aria-busy="true" aria-label="Loading pipeline">
-      <Skeleton className="h-24 rounded-xl" />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-[4.5rem] rounded-xl" />)}
-      </div>
-      <Skeleton className="h-52 rounded-xl" />
-      <Skeleton className="h-64 rounded-xl" />
-    </div>
   )
 }

@@ -2,7 +2,7 @@ import { createBrowserRouter, RouterProvider } from "react-router"
 
 import { AppShell } from "@/components/shell/AppShell"
 import { TokenGate } from "@/components/shell/TokenGate"
-import { Toaster } from "@/components/ui/sonner"
+import { DeskFrame } from "@/desk/DeskFrame"
 import { useToken } from "@/lib/token"
 import { Freshness } from "@/routes/Freshness"
 import { NotFound } from "@/routes/NotFound"
@@ -35,11 +35,11 @@ const router = createBrowserRouter([
   },
 ])
 
+/** Every page renders inside the desk frame: its tokens, its theme, its toasts. */
 export function App() {
   return (
-    <>
+    <DeskFrame>
       <RouterProvider router={router} />
-      <Toaster />
-    </>
+    </DeskFrame>
   )
 }

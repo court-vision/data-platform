@@ -1,14 +1,16 @@
 """
-Theme-drift guard: the dashboard's copy of the frontend's look.
+Theme-drift guard: the dashboard's copy of the frontend's desk shell.
 
 The React dashboard (`dashboard/`) is built and deployed from this repo alone,
-so it cannot import the frontend's theme; it carries a copy. Two things are
-copied, and each must stay identical to its source:
+so it cannot import the frontend's desks; it carries a copy of the two files
+that make a desk look like one. Each must stay identical to its source, below
+a generated header:
 
-- the `:root` token block of `frontend/src/app/globals.css`
-  -> `dashboard/src/styles/tokens.css`
-- `frontend/tailwind.config.ts`, all but its `content` globs
-  -> `dashboard/tailwind.config.ts`
+- `frontend/src/components/desk/desk.module.css` (the theme tokens and the
+  shared primitives: bar, tabs, buttons, rails, chips, menus, dialogs, status
+  line, toasts) -> `dashboard/src/desk/desk.module.css`
+- `frontend/src/components/desk/themes.ts` (the theme list, its pairs and the
+  default) -> `dashboard/src/desk/themes.ts`
 
     python scripts/check_frontend_theme.py [--frontend ../frontend]
     python scripts/check_frontend_theme.py --write     # re-sync from the frontend
@@ -16,12 +18,12 @@ copied, and each must stay identical to its source:
 Exit codes: 0 clean, 1 drift found, 2 frontend checkout not found (skip, not
 fail, as with check_backend_mirror.py).
 
-The shadcn primitives in `dashboard/src/components/ui/` are copies too, but
-are not watched: they lose `"use client"` on the way in and are expected to
-diverge as the dashboard grows its own variants.
+The rest of `dashboard/src/desk/` (the frame, the bar, the theme store and
+picker) is the dashboard's own port: those files use Next.js, Clerk or zustand
+in the frontend, so they are rewritten rather than copied, and not watched.
 
-Never edit the two copied files by hand. Change the frontend's theme, then run
-this with --write.
+Never edit the two copied files by hand. Change the frontend's desk shell, then
+run this with --write.
 """
 
 from __future__ import annotations
@@ -29,60 +31,23 @@ from __future__ import annotations
 import argparse
 import difflib
 import os
-import re
 import sys
 from pathlib import Path
 
 DP_ROOT = Path(__file__).resolve().parent.parent
+DASHBOARD_DESK = DP_ROOT / "dashboard" / "src" / "desk"
 
-FRONTEND_CSS = "src/app/globals.css"
-FRONTEND_TAILWIND = "tailwind.config.ts"
-DASHBOARD_TOKENS = DP_ROOT / "dashboard" / "src" / "styles" / "tokens.css"
-DASHBOARD_TAILWIND = DP_ROOT / "dashboard" / "tailwind.config.ts"
+# Source (relative to the frontend checkout) -> copy, and the comment syntax of each.
+COPIES = {
+    "src/components/desk/desk.module.css": (DASHBOARD_DESK / "desk.module.css", "/* {} */"),
+    "src/components/desk/themes.ts": (DASHBOARD_DESK / "themes.ts", "// {}"),
+}
 
-DASHBOARD_CONTENT = "content: ['./index.html', './src/**/*.{ts,tsx}'],"
-
-TOKENS_HEADER = """\
-/* Copied from frontend/src/app/globals.css by
-   `python scripts/check_frontend_theme.py --write`. Do not edit here: change
-   the frontend's tokens, then re-sync. */
-"""
-
-_CONTENT_ARRAY = re.compile(r"content:\s*\[.*?\],", re.DOTALL)
+HEADER = "Copied from frontend/{source} by `python scripts/check_frontend_theme.py --write`. Do not edit here: change the frontend's, then re-sync."
 
 
-def root_block(css: str) -> str:
-    """The first top-level-or-layered `:root { ... }` block, dedented."""
-    start = css.index(":root {")
-    depth = 0
-    for i in range(css.index("{", start), len(css)):
-        if css[i] == "{":
-            depth += 1
-        elif css[i] == "}":
-            depth -= 1
-            if depth == 0:
-                block = css[start : i + 1]
-                break
-    else:
-        raise ValueError("unterminated :root block")
-
-    # Dedent by the block's own indentation so layered and bare blocks compare.
-    line_start = css.rfind("\n", 0, start) + 1
-    indent = css[line_start:start]
-    lines = block.split("\n")
-    return "\n".join(
-        line[len(indent):] if line.startswith(indent) else line for line in lines
-    )
-
-
-def dashboard_tokens(frontend_css: str) -> str:
-    return TOKENS_HEADER + root_block(frontend_css) + "\n"
-
-
-def dashboard_tailwind(frontend_config: str) -> str:
-    if len(_CONTENT_ARRAY.findall(frontend_config)) != 1:
-        raise ValueError("expected exactly one `content: [...]` array")
-    return _CONTENT_ARRAY.sub(lambda _: DASHBOARD_CONTENT, frontend_config)
+def copy_of(source: str, text: str, comment: str) -> str:
+    return comment.format(HEADER.format(source=source)) + "\n" + text
 
 
 def _diff(expected: str, actual: str, name: str) -> str:
@@ -111,14 +76,13 @@ def main() -> int:
     args = parser.parse_args()
 
     frontend = Path(args.frontend).resolve()
-    css_path, tailwind_path = frontend / FRONTEND_CSS, frontend / FRONTEND_TAILWIND
-    if not (css_path.exists() and tailwind_path.exists()):
-        print(f"frontend checkout not found at {frontend} — skipping theme check")
+    if not all((frontend / source).exists() for source in COPIES):
+        print(f"frontend checkout (with the desk shell) not found at {frontend} — skipping theme check")
         return 2
 
     expected = {
-        DASHBOARD_TOKENS: dashboard_tokens(css_path.read_text()),
-        DASHBOARD_TAILWIND: dashboard_tailwind(tailwind_path.read_text()),
+        path: copy_of(source, (frontend / source).read_text(), comment)
+        for source, (path, comment) in COPIES.items()
     }
 
     if args.write:
