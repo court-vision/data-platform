@@ -1176,9 +1176,10 @@ async def trigger_scheduled_pickups(
     Trigger the scheduled-pickups pipeline — the executor tick for usr.scheduled_pickups.
 
     Called every minute by the 'scheduled-pickups' cron job. Gates on whether any
-    pickup is due (one EXISTS query, no run row); when one is, asks the backend to
-    attempt the due rows and emails each outcome. The backend owns the retry
-    rules, so a tick that finds nothing due costs one query.
+    pickup or stream lane decision is due (one query, no run row); when one is,
+    asks the backend to make the decisions and attempt the due rows, and emails
+    each outcome. The backend owns the retry rules, so a tick that finds nothing
+    due costs one query.
     """
     if not force and not await _due_pickups_exist():
         return PipelineResponse(status=ApiStatus.SKIPPED, message="No scheduled pickups are due")
@@ -1188,7 +1189,8 @@ async def trigger_scheduled_pickups(
 
 DUE_PICKUPS_SQL = (
     "SELECT EXISTS (SELECT 1 FROM usr.scheduled_pickups WHERE status = 'pending' "
-    "AND not_before_at <= now() AND (next_attempt_at IS NULL OR next_attempt_at <= now()))"
+    "AND not_before_at <= now() AND (next_attempt_at IS NULL OR next_attempt_at <= now())) "
+    "OR EXISTS (SELECT 1 FROM usr.stream_lanes WHERE status = 'active' AND next_decision_at <= now())"
 )
 
 

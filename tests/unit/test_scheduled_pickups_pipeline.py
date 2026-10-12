@@ -19,7 +19,7 @@ from db.models.users import User
 from pipelines import scheduled_pickups as module
 from pipelines.context import PipelineContext
 from pipelines.scheduled_pickups import ScheduledPickupsPipeline
-from services.backend_client import PickupExecution, PickupsRun
+from services.backend_client import LaneNotice, PickupExecution, PickupsRun
 from services.notification_service import NotificationResult, NotificationService
 
 MODELS = [User, ProviderConnection, Team, NotificationPreference, NotificationTeamPreference]
@@ -55,6 +55,10 @@ class FakeNotificationService:
         if result["pickup_id"] in self.raise_for:
             raise KeyError("name")
         self.sent.append(dict(user=user, team=team, result=result, prefs=prefs))
+        return NotificationResult(success=True, message_id="m") if self.succeed else NotificationResult(success=False, error="resend down")
+
+    def send_stream_lane_notice(self, user, team, notice, prefs=None):
+        self.sent.append(dict(user=user, team=team, notice=notice, prefs=prefs))
         return NotificationResult(success=True, message_id="m") if self.succeed else NotificationResult(success=False, error="resend down")
 
 
@@ -213,3 +217,43 @@ def test_a_row_whose_owner_or_team_is_gone_has_no_recipient(sqlite_models):
     team = make_team(user)
     assert module._lookup_recipient(user.user_id + 1, team.team_id) is None
     assert module._lookup_recipient(user.user_id, team.team_id + 1) is None
+
+
+# ---- stream lanes ----------------------------------------------------------------------------
+
+
+def notice(lane_id, action="paused", reason="holder_gone", **over):
+    fields = dict(lane_id=lane_id, team_id=21, user_id=11, action=action, reason=reason, team_name="GloatingSoap369",
+                  holder={"player_id": 4594268, "name": "Anthony Edwards", "team": "MIN"})
+    fields.update(over)
+    return LaneNotice(**fields)
+
+
+@pytest.mark.unit
+def test_lane_notices_are_counted_and_emailed_unless_the_lane_is_desk_only(pipeline):
+    ctx = run(pipeline, PickupsRun(ok=True, due=0, lanes=[
+        notice(7), notice(8, "blocked", "missed", nba_date="2026-11-17"), notice(9, notify="desk"),
+    ]))
+    sent = pipeline.notification_service.sent
+    assert [s["notice"]["lane_id"] for s in sent] == [7, 8]
+    assert sent[1]["notice"]["nba_date"] == "2026-11-17" and sent[0]["prefs"] is pipeline.recipient[2]
+    assert ctx.skip_reasons["lane_paused:holder_gone"] == 2 and ctx.skip_reasons["lane_blocked:missed"] == 1
+    assert ctx.records_failed == 0
+
+
+@pytest.mark.unit
+def test_a_desk_only_lanes_pickup_is_counted_but_not_emailed(pipeline):
+    ctx = run(pipeline, PickupsRun(ok=True, due=2, results=[
+        execution(1, "executed", lane={"lane_id": 7, "notify": "desk"}),
+        execution(2, "executed", lane={"lane_id": 8, "notify": "email", "projected": None, "why": None}),
+    ]))
+    assert ctx.records_processed == 2
+    assert [s["result"]["pickup_id"] for s in pipeline.notification_service.sent] == [2]
+    assert pipeline.notification_service.sent[0]["result"]["lane"]["lane_id"] == 8
+
+
+@pytest.mark.unit
+def test_a_lane_notice_without_a_recipient_or_with_a_bounce_is_counted(pipeline):
+    pipeline.notification_service = FakeNotificationService(succeed=False)
+    ctx = run(pipeline, PickupsRun(ok=True, due=0, lanes=[notice(7), notice(8, user_id=99)]))
+    assert ctx.skip_reasons["email_failed"] == 1 and ctx.skip_reasons["email_no_recipient"] == 1
