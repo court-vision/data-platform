@@ -106,6 +106,12 @@ class TestBuildRows:
         assert lines[0]["oreb"] == 2 and lines[1]["oreb"] is None
         assert set(players) == {1, 2}
 
+    def test_a_repeated_line_is_stored_once(self):
+        """Two lines for one (player, game) in a batch would fail the whole upsert."""
+        rows = [_line(player_id=1), _line(player_id=1, pts=31), _line(team="LAL", matchup="LAL @ GSW", player_id=2)]
+        _, lines, _, skipped = build_rows(rows, {"GSW", "LAL"}, run_id=None)
+        assert [line["player"] for line in lines] == [1, 2] and skipped["duplicate_line"] == 1
+
     def test_unknown_teams_and_players_who_did_not_play_are_counted_not_stored(self):
         rows = [
             _line(team="GSW", matchup="GSW vs. XYZ", player_id=1),

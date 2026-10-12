@@ -320,6 +320,8 @@ def build_consistency_checks(
                   ON r.player_id = pgs.player_id
                  AND r.as_of_date >= pgs.game_date
                 WHERE pgs.game_date BETWEEN win.since AND win.through
+                  -- rolling stats count fantasy rows only (FANTASY_SEASON_TYPES)
+                  AND (pgs.season_type IN ('regular', 'cup_final') OR pgs.season_type IS NULL)
                 GROUP BY pgs.player_id, p.name, pgs.game_date
                 HAVING COUNT(DISTINCT r.window_days) < 3
                 ORDER BY pgs.game_date DESC, pgs.player_id
@@ -345,6 +347,8 @@ def build_consistency_checks(
                 LEFT JOIN nba.player_game_stats pgs
                   ON pgs.player_id = r.player_id
                  AND pgs.game_date BETWEEN r.as_of_date - (r.window_days - 1) AND r.as_of_date
+                 -- what player_rolling_stats aggregates: fantasy rows only
+                 AND (pgs.season_type IN ('regular', 'cup_final') OR pgs.season_type IS NULL)
                 WHERE r.as_of_date >= win.since
                   AND r.as_of_date = (
                       SELECT MAX(newest.as_of_date)

@@ -42,7 +42,7 @@ from pipelines import (
     get_pipelines_by_category,
 )
 from pipelines.config import PipelineCategory
-from pipelines.game_logs import SEASON_TYPE_PARAMS
+from pipelines.game_logs import GAME_HISTORY_FIRST_YEAR, SEASON_TYPE_PARAMS
 from pipelines.gates import (
     GateDecision,
     espn_batch_gate,
@@ -1868,6 +1868,17 @@ async def trigger_deploy(
 
 # ── Playoffs ──────────────────────────────────────────────────────────────────
 
+# Holds the background runs /playoffs starts, so none is garbage-collected mid-run.
+_POSTSEASON_RUNS: set[asyncio.Task] = set()
+
+
+def _start_in_background(coro) -> None:
+    """Run a coroutine after the response, keeping a reference until it ends."""
+    task = asyncio.create_task(coro)
+    _POSTSEASON_RUNS.add(task)
+    task.add_done_callback(_POSTSEASON_RUNS.discard)
+
+
 @router.post("/playoffs", response_model=PipelineResponse)
 async def trigger_playoffs(
     _: str = Security(verify_pipeline_token),
@@ -1879,18 +1890,18 @@ async def trigger_playoffs(
     and upserts to nba.playoff_series. Called once nightly at ~1 AM ET by the
     'playoffs' cron job in cron-runner.
 
-    Then runs game_history with no options: this season's play-in and playoff
-    games and box scores, reloaded whole, or nothing outside the postseason.
-    Its run has its own row in nba.pipeline_runs; the response stays the
-    bracket's, failed if either run failed.
+    Then starts game_history with no options: this season's play-in and
+    playoff games and box scores, reloaded whole, or nothing outside the
+    postseason. It runs in the background because two whole-postseason calls
+    can outlast cron-runner's 30 s request; its run has its own row in
+    nba.pipeline_runs and alerts on failure like any run. The response is
+    the bracket's.
     """
     result = await run_pipeline("playoff_bracket")
-    games = await run_pipeline("game_history")
-    failed = games.status not in (ApiStatus.SUCCESS, ApiStatus.SKIPPED)
-    status = games.status if failed else result.status
+    _start_in_background(run_pipeline("game_history"))
     return PipelineResponse(
-        status=status,
-        message=result.message if status == result.status else f"{result.message}; game_history: {games.message}",
+        status=result.status,
+        message=result.message,
         data=result,
     )
 
@@ -1916,8 +1927,12 @@ async def trigger_game_history(
     The history load passes the seasons wanted; a re-run updates rows in place.
     """
     for season in seasons:
-        if not _SEASON_RE.match(season):
+        if not _SEASON_RE.match(season) or int(season[5:]) != (int(season[:4]) + 1) % 100:
             raise HTTPException(status_code=422, detail=f"season must look like 2025-26, got {season!r}")
+        if int(season[:4]) < GAME_HISTORY_FIRST_YEAR:
+            # Older seasons use abbreviations nba.teams has no alias for (SEA, NJN, ...),
+            # so their games would be dropped, not loaded.
+            raise HTTPException(status_code=422, detail=f"game history starts at 2012-13, got {season!r}")
     unknown = [t for t in season_types if t not in SEASON_TYPE_PARAMS]
     if unknown:
         raise HTTPException(status_code=422, detail=f"unknown season types {unknown}; use {list(SEASON_TYPE_PARAMS)}")

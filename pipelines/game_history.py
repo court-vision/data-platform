@@ -98,6 +98,7 @@ def build_rows(
     now = datetime.utcnow()
     lines: list[dict] = []
     players: dict[int, tuple[str, str]] = {}
+    seen: set[tuple[int, str]] = set()
     for row in rows:
         game_id = str(row.get("GAME_ID") or "").strip()
         if game_id not in by_id:
@@ -116,6 +117,12 @@ def build_rows(
             skipped["did_not_play"] += 1
             continue
         player_id, name, normalized = identity
+        # One line per player per game: a repeat would make the batch's upsert
+        # touch one row twice, which Postgres refuses for the whole batch.
+        if (player_id, game_id) in seen:
+            skipped["duplicate_line"] += 1
+            continue
+        seen.add((player_id, game_id))
         players.setdefault(player_id, (name, normalized))
         game = by_id[game_id]
         lines.append({
@@ -159,7 +166,8 @@ class GameHistoryPipeline(BasePipeline):
         seasons = list(options.get("seasons") or [])
         season_types = list(options.get("season_types") or [])
 
-        if not seasons:
+        nightly = not seasons
+        if nightly:
             season = settings.nba_season
             night = ctx.game_date()
             last_regular = self._last_regular_night(season)
@@ -177,6 +185,7 @@ class GameHistoryPipeline(BasePipeline):
         known_teams = {t.id for t in NBATeam.select(NBATeam.id)}
         ctx.log.info("game_history_start", seasons=seasons, season_types=season_types)
 
+        failed: list[str] = []
         for season in seasons:
             for season_type in season_types:
                 time.sleep(PAUSE_BETWEEN_CALLS)
@@ -186,8 +195,14 @@ class GameHistoryPipeline(BasePipeline):
                     ctx.log.warning("game_history_fetch_failed", season=season, season_type=season_type,
                                     error=f"{type(exc).__name__}: {exc}")
                     ctx.increment_failed(1, f"fetch_failed:{season}:{season_type}")
+                    failed.append(f"{season} {season_type}")
                     continue
                 self._store(ctx, season, season_type, rows, known_teams)
+
+        # The nightly run has no one reading its result: a failed call fails the
+        # run, so it alerts (pipeline_failed) instead of passing as partial.
+        if nightly and failed:
+            raise RuntimeError(f"PlayerGameLogs failed for {', '.join(failed)}")
 
     @staticmethod
     def _last_regular_night(season: str) -> Optional[date]:

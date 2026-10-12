@@ -1,6 +1,7 @@
 """POST /pipelines/game-history threads seasons and season types into the
 pipeline; POST /pipelines/playoffs runs the bracket, then the postseason box scores."""
 
+import asyncio
 import os
 
 import pytest
@@ -63,23 +64,36 @@ def test_no_seasons_means_this_seasons_postseason(run_calls):
     "seasons=2012",                          # not a season
     "seasons=2012-13&season_types=finals",   # not a season type
     "season_types=playoffs",                 # a type with no season
+    "seasons=2012-14",                       # not one season
+    "seasons=2011-12",                       # before the history (SEA, NJN have no alias)
 ])
 def test_bad_input_is_refused_before_any_run(run_calls, query):
     assert _client().post(f"{PATH}?{query}", headers=_auth()).status_code == 422
     assert run_calls == []
 
 
+@pytest.fixture
+def started(monkeypatch):
+    """What /playoffs starts in the background, run here once the response is back."""
+    coros = []
+    monkeypatch.setattr(pipelines_api, "_start_in_background", coros.append)
+    return coros
+
+
 @pytest.mark.api
-def test_playoffs_runs_the_bracket_then_the_postseason_box_scores(run_calls):
+def test_playoffs_answers_for_the_bracket_and_starts_the_postseason_load(run_calls, started):
     res = _client().post("/v1/internal/pipelines/playoffs", headers=_auth())
-    assert res.status_code == 200 and res.json()["status"] == "success"
+    assert res.status_code == 200 and res.json()["message"] == "playoff_bracket ok"
+    assert run_calls == [("playoff_bracket", None)]
+
+    asyncio.run(started[0])   # game_history, with no options: this season's postseason
+
     assert run_calls == [("playoff_bracket", None), ("game_history", None)]
-    assert res.json()["message"] == "playoff_bracket ok"
 
 
 @pytest.mark.api
-def test_playoffs_reports_a_failed_box_score_run(run_calls):
+def test_a_failed_postseason_load_does_not_change_the_bracket_answer(run_calls, started):
     run_calls.outcomes["game_history"] = (ApiStatus.ERROR, "NBA API timeout")
     body = _client().post("/v1/internal/pipelines/playoffs", headers=_auth()).json()
-    assert body["status"] == ApiStatus.ERROR.value
-    assert body["message"] == "playoff_bracket ok; game_history: NBA API timeout"
+    assert body["status"] == "success"   # its own run row and alert carry the failure
+    started[0].close()

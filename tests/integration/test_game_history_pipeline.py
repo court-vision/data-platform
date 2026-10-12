@@ -143,6 +143,16 @@ class TestPostseasonMode:
         assert pipeline.calls == [("2025-26", "PlayIn"), ("2025-26", "Playoffs")]
         assert result.records_processed == 3
 
+    def test_a_failed_call_fails_the_nightly_run_so_it_alerts(self, monkeypatch):
+        monkeypatch.setattr("pipelines.game_history.settings.nba_season", "2025-26")
+        self._season_with_last_regular_night(date(2026, 4, 12))
+        pipeline = _pipeline({("2025-26", "Playoffs"): PLAYOFF_GAME})   # PlayIn raises
+
+        result = pipeline._run_sync(date_override=date(2026, 4, 25))
+
+        assert result.status == ApiStatus.ERROR and "2025-26 play_in" in (result.error or "")
+        assert PlayerGameStats.select().count() == 3   # the playoffs still landed
+
 
 def test_a_finished_game_never_goes_back_to_scheduled():
     """2026-09-28: a stale schedule copy reset 411 finished games."""

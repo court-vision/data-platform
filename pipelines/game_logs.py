@@ -32,6 +32,10 @@ SEASON_TYPE_PARAMS: dict[str, str] = {
 }
 POSTSEASON_TYPES = ("play_in", "playoffs")
 
+# The first season the history load accepts: TEAM_ALIASES covers every
+# abbreviation from here on, and older seasons need more (SEA, NJN, VAN, ...).
+GAME_HISTORY_FIRST_YEAR = 2012
+
 # Abbreviations the NBA used in 2012-13 onward that nba.teams no longer has.
 # Same franchise, so the line is stored under today's team.
 TEAM_ALIASES: dict[str, str] = {
