@@ -85,6 +85,49 @@ class NBAApiExtractor(BaseExtractor):
         max_delay=settings.retry_max_delay,
     )
     @nba_api_circuit
+    def get_season_game_logs(self, season: str, season_type: str) -> list[dict]:
+        """
+        Every player game line of one season and season type, in one call.
+
+        Args:
+            season: Season string like "2025-26"
+            season_type: PlayerGameLogs' SeasonType ("" = regular season and
+                the Cup final, "PlayIn", "Playoffs"); see game_logs.SEASON_TYPE_PARAMS
+
+        Returns:
+            One dict per line, as PlayerGameLogs sends it (about 26,000 for a
+            regular season)
+        """
+        from nba_api.stats.endpoints import playergamelogs
+
+        self.log.debug("season_game_logs_start", season=season, season_type=season_type)
+
+        try:
+            game_logs = playergamelogs.PlayerGameLogs(
+                season_nullable=season,
+                season_type_nullable=season_type,
+                timeout=120,
+            )
+            rows = game_logs.player_game_logs.get_dict()
+            records = [dict(zip(rows["headers"], values)) for values in rows["data"]]
+
+            self.log.info("season_game_logs_complete", season=season, season_type=season_type, record_count=len(records))
+            return records
+
+        except Exception as e:
+            error_str = str(e).lower()
+            if "timeout" in error_str:
+                raise NetworkError(f"NBA API timeout: {e}")
+            if "connection" in error_str:
+                raise NetworkError(f"NBA API connection error: {e}")
+            raise
+
+    @with_retry(
+        max_attempts=settings.retry_max_attempts,
+        base_delay=settings.retry_base_delay,
+        max_delay=settings.retry_max_delay,
+    )
+    @nba_api_circuit
     def get_league_leaders(self, season: str | None = None) -> list[dict]:
         """
         Fetch league leaders from NBA API.

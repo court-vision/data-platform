@@ -30,6 +30,7 @@ from pipelines.lineup_snapshots import LineupSnapshotsPipeline
 from pipelines.playoff_bracket import PlayoffBracketPipeline
 from pipelines.preseason_market import PreseasonMarketPipeline
 from pipelines.season_history import SeasonHistoryPipeline
+from pipelines.game_history import GameHistoryPipeline
 from pipelines.cv_projection import CVProjectionPipeline
 from pipelines.scheduled_pickups import ScheduledPickupsPipeline
 from schemas.pipeline import PipelineResult
@@ -61,6 +62,9 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "player_profiles": PlayerProfilesPipeline,
     "game_start_times": GameStartTimesPipeline,
     "playoff_bracket": PlayoffBracketPipeline,
+    # After playoff_bracket on the `playoffs` job: this season's postseason box
+    # scores, reloaded whole each night; idle outside the postseason.
+    "game_history": GameHistoryPipeline,
     "preseason_market": PreseasonMarketPipeline,
     "season_history": SeasonHistoryPipeline,
     # After preseason_market: it reads the day's ESPN projection.

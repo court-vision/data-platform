@@ -186,3 +186,19 @@ def test_a_sub_minute_appearance_is_a_stored_game(integration_db) -> None:
     assert cameo.min == 0
     assert (cameo.pts, cameo.fg3m, cameo.fpts) == (3, 1, 5)
     assert cameo.game_id == "0022500001"
+
+
+@pytest.mark.integration
+def test_a_playoff_night_is_not_held_for_games_this_pipeline_does_not_fetch(integration_db) -> None:
+    """game_history stores play-in and playoff games; this pipeline's call returns none of them."""
+    game_date = date(2026, 4, 25)
+    _seed_expected_game(game_date, "0042500101")
+
+    pipeline = PlayerGameStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: {}
+    pipeline.nba_extractor.get_game_logs = lambda *_: pd.DataFrame()
+
+    result = pipeline._run_sync(date_override=game_date)
+
+    assert result.status == ApiStatus.SUCCESS
+    assert PlayerGameStats.select().count() == 0

@@ -78,7 +78,7 @@ class PlayerRollingStatsPipeline(BasePipeline):
                     fn.SUM(PlayerGameStats.ftm).alias("total_ftm"),
                     fn.SUM(PlayerGameStats.fta).alias("total_fta"),
                 )
-                .where(PlayerGameStats.game_date.between(cutoff, target_date))
+                .where(PlayerGameStats.game_date.between(cutoff, target_date) & PlayerGameStats.for_fantasy())
                 .group_by(PlayerGameStats.player)
             )
 
@@ -92,7 +92,7 @@ class PlayerRollingStatsPipeline(BasePipeline):
             team_rows = list(
                 PlayerGameStats
                 .select(PlayerGameStats.player, PlayerGameStats.team, PlayerGameStats.game_date)
-                .where(PlayerGameStats.game_date.between(cutoff, target_date))
+                .where(PlayerGameStats.game_date.between(cutoff, target_date) & PlayerGameStats.for_fantasy())
                 .order_by(PlayerGameStats.player, PlayerGameStats.game_date.desc())
             )
             team_map: dict[int, str | None] = {}

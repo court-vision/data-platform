@@ -143,7 +143,7 @@ class TestCheckInfo:
         )
         assert (info.group, info.table) == ("consistency", "nba.player_season_stats")
         assert info.against == ["nba.player_game_stats"]
-        assert info.pipelines == ["player_season_stats", "player_game_stats"]
+        assert info.pipelines == ["player_season_stats", "player_game_stats", "game_history"]
 
     def test_a_check_within_one_table_compares_against_nothing(self):
         assert dashboard.quality_check_info(BY_NAME["games_final_after_game_night"]).against == []
@@ -151,7 +151,8 @@ class TestCheckInfo:
 
     def test_a_structural_checks_pipelines_are_its_tables_writers(self):
         info = dashboard.quality_check_info(BY_NAME["player_game_stats_stat_ranges_valid"])
-        assert (info.table, info.pipelines) == ("nba.player_game_stats", ["player_game_stats"])
+        # The nightly pipeline and the game-history load both write it
+        assert (info.table, info.pipelines) == ("nba.player_game_stats", ["player_game_stats", "game_history"])
         assert (info.severity, info.group) == ("critical", "structural")
 
     def test_a_framework_table_has_no_writer_pipeline(self):

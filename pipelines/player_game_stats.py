@@ -8,14 +8,27 @@ then inserts into the nba schema tables.
 from core.season import season_for_date
 from core.settings import settings
 from db.models.nba import Player, PlayerGameStats
-from db.models.nba.games import Game
+from db.models.nba.games import FANTASY_SEASON_TYPES, Game
 from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
-from pipelines.transformers import normalize_name, calculate_fantasy_points, minutes_to_int
-from pipelines.transformers.minutes import seconds_played
+from pipelines.game_logs import box_score_stats
+from pipelines.transformers import normalize_name
 
+
+
+def _expected_games(game_date) -> list[Game]:
+    """The night's games this pipeline fetches: regular season and the Cup final.
+
+    Play-in and playoff games are stored by game_history, from another call;
+    expecting them here would hold a playoff night as not ready until morning.
+    A game with no season type yet is expected, as every game was before.
+    """
+    return [
+        game for game in Game.get_games_on_date(game_date)
+        if game.season_type is None or game.season_type in FANTASY_SEASON_TYPES
+    ]
 
 class PlayerGameStatsPipeline(BasePipeline):
     """
@@ -45,7 +58,6 @@ class PlayerGameStatsPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         """Execute the daily player stats pipeline."""
-        import pandas as pd
         # The batch's game date: an explicit backfill date, else the date the
         # trigger endpoint gated on, else the 6 AM ET rule. See ctx.game_date().
         game_date = ctx.game_date()
@@ -65,7 +77,7 @@ class PlayerGameStatsPipeline(BasePipeline):
         if stats.empty:
             # Data readiness check: if games exist in the DB for this date but the
             # NBA API returned nothing, the player game log API hasn't updated yet.
-            expected_games = Game.get_games_on_date(game_date)
+            expected_games = _expected_games(game_date)
             if expected_games:
                 raise DataNotReady(
                     f"NBA API returned no stats for {date_str} but "
@@ -84,7 +96,7 @@ class PlayerGameStatsPipeline(BasePipeline):
         # an error so the pipeline is marked as failed and can be retried.
         if "GAME_ID" in stats.columns:
             api_game_ids = set(stats["GAME_ID"].unique())
-            expected_games = Game.get_games_on_date(game_date)
+            expected_games = _expected_games(game_date)
             expected_game_ids = {g.game_id for g in expected_games}
             missing_games = expected_game_ids - api_game_ids
             if missing_games:
@@ -103,18 +115,12 @@ class PlayerGameStatsPipeline(BasePipeline):
 
         # Process each player
         for _, row in stats.iterrows():
-            minutes_value = row["MIN"]
-            if pd.isna(minutes_value) or minutes_value == "" or minutes_value is None:
+            # None for a player who did not play. Someone who took the floor for
+            # less than a minute is kept with `min` 0: the NBA counts that game
+            # and whatever he did in it (pipelines/game_logs.py).
+            line = box_score_stats(row)
+            if line is None:
                 continue
-
-            # Skip only a player who did not play. MIN is minutes as a float
-            # (0.67 for forty seconds), so someone who took the floor for less
-            # than a minute truncates to 0 below. The NBA counts that game and
-            # whatever he did in it, so the row is stored, with `min` 0.
-            if seconds_played(minutes_value) <= 0:
-                continue
-
-            minutes_int = minutes_to_int(minutes_value)
 
             player_id = int(row["PLAYER_ID"])
             player_name = row["PLAYER_NAME"]
@@ -125,23 +131,6 @@ class PlayerGameStatsPipeline(BasePipeline):
             # Get ESPN data if available
             espn_info = espn_data.get(normalized_name)
             espn_id = espn_info["espn_id"] if espn_info else None
-
-            # Calculate stats
-            player_stats = {
-                "pts": int(row["PTS"]),
-                "reb": int(row["REB"]),
-                "ast": int(row["AST"]),
-                "stl": int(row["STL"]),
-                "blk": int(row["BLK"]),
-                "tov": int(row["TOV"]),
-                "fgm": int(row["FGM"]),
-                "fga": int(row["FGA"]),
-                "fg3m": int(row["FG3M"]),
-                "fg3a": int(row["FG3A"]),
-                "ftm": int(row["FTM"]),
-                "fta": int(row["FTA"]),
-            }
-            fpts = calculate_fantasy_points(player_stats)
 
             # Upsert player dimension record
             Player.upsert_player(
@@ -154,11 +143,7 @@ class PlayerGameStatsPipeline(BasePipeline):
             PlayerGameStats.upsert_game_stats(
                 player_id=player_id,
                 game_date=game_date,
-                stats={
-                    "fpts": fpts,
-                    "min": minutes_int,
-                    **player_stats,
-                },
+                stats=line,
                 team_id=team_abbrev,
                 pipeline_run_id=ctx.run_id,
                 # The payload has carried this all along; storing it is what

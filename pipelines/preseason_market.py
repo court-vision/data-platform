@@ -96,7 +96,9 @@ def adopt_espn_id(player: Player, espn_id: int, ctx: PipelineContext) -> bool:
             ctx.log.warning("espn_id_mismatch", player_id=player.id,
                             held_espn_id=player.espn_id, market_espn_id=espn_id)
         return False
-    if Player.select().where(Player.name_normalized == player.name_normalized).count() > 1:
+    # Among players in play: a retired namesake from the game-history load
+    # (migration 0031) can't be the market's player, so it doesn't block him.
+    if Player.select().where((Player.name_normalized == player.name_normalized) & Player.in_play()).count() > 1:
         ctx.log.warning("espn_id_ambiguous_name", player_id=player.id,
                         name_normalized=player.name_normalized, market_espn_id=espn_id)
         return False

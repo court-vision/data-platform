@@ -187,9 +187,13 @@ class ESPNInjuryStatusPipeline(BasePipeline):
         return lookup
 
     def _build_name_lookup(self) -> dict[str, int]:
-        """Build lookup dict mapping normalized name → player_id."""
+        """Build lookup dict mapping normalized name → player_id, current players only.
+
+        nba.players also holds retired players (the game-history load); a
+        namesake of theirs must never receive a current player's injury.
+        """
         lookup = {}
-        for player in Player.select(Player.id, Player.name_normalized):
+        for player in Player.select(Player.id, Player.name_normalized).where(Player.in_play()):
             if player.name_normalized:
                 lookup[player.name_normalized] = player.id
         return lookup

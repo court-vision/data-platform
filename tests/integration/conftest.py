@@ -10,6 +10,7 @@ from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.player_season_stats import PlayerSeasonStats
 from db.models.nba.pipeline_batch import PipelineBatch
+from db.models.nba.player_profiles import PlayerProfile
 from db.models.nba.players import Player
 from db.models.nba.team_stats import TeamStats
 from db.models.nba.teams import NBATeam
@@ -22,6 +23,8 @@ INTEGRATION_MODELS = [
     PipelineBatch,
     NBATeam,
     Player,
+    # Player.in_play() reads it: a profile is what makes a player current.
+    PlayerProfile,
     Game,
     PlayerGameStats,
     PlayerSeasonStats,
