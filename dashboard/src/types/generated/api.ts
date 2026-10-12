@@ -986,9 +986,10 @@ export interface paths {
          * @description Trigger the scheduled-pickups pipeline — the executor tick for usr.scheduled_pickups.
          *
          *     Called every minute by the 'scheduled-pickups' cron job. Gates on whether any
-         *     pickup is due (one EXISTS query, no run row); when one is, asks the backend to
-         *     attempt the due rows and emails each outcome. The backend owns the retry
-         *     rules, so a tick that finds nothing due costs one query.
+         *     pickup or stream lane decision is due (one query, no run row); when one is,
+         *     asks the backend to make the decisions and attempt the due rows, and emails
+         *     each outcome. The backend owns the retry rules, so a tick that finds nothing
+         *     due costs one query.
          */
         post: operations["trigger_scheduled_pickups_v1_internal_pipelines_scheduled_pickups_post"];
         delete?: never;
