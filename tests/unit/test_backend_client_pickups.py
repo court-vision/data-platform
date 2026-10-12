@@ -165,3 +165,15 @@ def test_a_backend_without_lanes_and_a_malformed_notice():
     responses.post(URL, json=body, status=200)
     run = _client().execute_pickups()
     assert (run.ok, run.reason) == (False, "malformed_response")
+
+
+@pytest.mark.unit
+@responses.activate
+def test_a_lane_notice_says_whether_the_lane_ended_with_it():
+    body = _envelope()
+    body["data"]["lanes"] = [_notice(action="blocked", reason="missed", nba_date="2026-11-22", ended=True),
+                             _notice(lane_id=8, action="blocked", reason="missed", nba_date="2026-11-17")]
+    responses.post(URL, json=body, status=200)
+    run = _client().execute_pickups()
+    assert run.ok and [notice.ended for notice in run.lanes] == [True, False]     # absent: a lane that goes on
+    assert run.lanes[0].as_dict()["ended"] is True

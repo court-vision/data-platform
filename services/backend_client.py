@@ -123,7 +123,7 @@ class PickupExecution:
     verified: Optional[bool] = None
     audit_id: Optional[int] = None
     next_attempt_at: Optional[str] = None          # deferred: ISO datetime
-    lane: Optional[dict] = None                    # a stream lane's pickup: {lane_id, notify, projected, why}
+    lane: Optional[dict] = None                    # a stream lane's pickup: {lane_id, notify, projected, why, last_day}
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -180,6 +180,7 @@ class LaneNotice:
     holder: dict = field(default_factory=dict)      # {player_id, name, team}
     nba_date: Optional[str] = None
     scoring_period_id: Optional[int] = None
+    ended: bool = False                             # the lane ended with it: its matchup has no day left
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -202,6 +203,7 @@ class LaneNotice:
                 holder=item["holder"] if isinstance(item.get("holder"), dict) else {},
                 nba_date=item.get("nba_date"),
                 scoring_period_id=item.get("scoring_period_id"),
+                ended=bool(item.get("ended")),       # absent from a backend that predates it
             )
         except (KeyError, TypeError, ValueError):
             return None

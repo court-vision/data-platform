@@ -206,3 +206,29 @@ def test_lane_notices(service):
                                                  "holder": holder})
     _, subject, body = service.sent[-1]
     assert subject == "Stream lane missed a day for Hoop Dreams" and "Tue, Nov 17" in body
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("outcome, reason, line", [
+    ("executed", None, "Your stream lane made this move for the matchup's last day: the lane ends with the matchup."),
+    ("expired", "deadline", "This was your stream lane's pickup for the matchup's last day: the lane ends with the "
+                            "matchup."),
+])
+def test_a_lane_pickup_for_the_matchups_last_day_says_the_lane_ends(outcome, reason, line):
+    _, body = NotificationService._build_pickup_email(
+        "Hoop Dreams", _pickup(outcome, reason, lane={"lane_id": 7, "notify": "email", "last_day": True}))
+    assert line in body
+    assert "carries on" not in body and "before each day" not in body
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ended, line", [
+    (True, "The matchup has no day left, so the lane has ended."),
+    (False, "The lane carries on with the next day."),
+])
+def test_a_missed_day_says_whether_the_lane_ended_with_it(service, ended, line):
+    service.send_stream_lane_notice(USER, TEAM, {"action": "blocked", "reason": "missed", "nba_date": "2026-11-22",
+                                                 "holder": {"name": "Anthony Edwards"}, "ended": ended})
+    _, subject, body = service.sent[-1]
+    assert subject == "Stream lane missed a day for Hoop Dreams"
+    assert line in body and ("carries on" in body) is not ended
