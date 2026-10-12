@@ -561,6 +561,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/game-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Game History
+         * @description Trigger the game-history pipeline.
+         *
+         *     Writes whole seasons of games and box scores into nba.games and
+         *     nba.player_game_stats, one PlayerGameLogs call per season and season type.
+         *     The history load passes the seasons wanted; a re-run updates rows in place.
+         */
+        post: operations["trigger_game_history_v1_internal_pipelines_game_history_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/game-schedule": {
         parameters: {
             query?: never;
@@ -847,11 +871,18 @@ export interface paths {
         put?: never;
         /**
          * Trigger Playoffs
-         * @description Trigger the playoff bracket pipeline.
+         * @description Trigger the playoff bracket pipeline, then the postseason box scores.
          *
          *     Fetches current NBA playoff series standings from NBA Stats API (SeriesStandings)
          *     and upserts to nba.playoff_series. Called once nightly at ~1 AM ET by the
          *     'playoffs' cron job in cron-runner.
+         *
+         *     Then starts game_history with no options: this season's play-in and
+         *     playoff games and box scores, reloaded whole, or nothing outside the
+         *     postseason. It runs in the background because two whole-postseason calls
+         *     can outlast cron-runner's 30 s request; its run has its own row in
+         *     nba.pipeline_runs and alerts on failure like any run. The response is
+         *     the bracket's.
          */
         post: operations["trigger_playoffs_v1_internal_pipelines_playoffs_post"];
         delete?: never;
@@ -3163,6 +3194,40 @@ export interface operations {
             query?: {
                 /** @description Override report date (YYYY-MM-DD). Omit for automatic date. */
                 date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_game_history_v1_internal_pipelines_game_history_post: {
+        parameters: {
+            query?: {
+                /** @description Seasons to load, e.g. `seasons=2012-13&seasons=2013-14`. Omit for this season's postseason (a no-op outside it). */
+                seasons?: string[];
+                /** @description Any of `regular`, `play_in`, `playoffs`. Omit for all three (with `seasons`). */
+                season_types?: string[];
             };
             header?: never;
             path?: never;
