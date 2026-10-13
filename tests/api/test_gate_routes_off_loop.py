@@ -235,6 +235,8 @@ def _live_stats_fakes(blocking: Blocking, *, db_games: bool, stored: StoredFinal
             [{"game_id": "0042500101", "game_status": 2}],
             kind="method",
         )
+    # No live row, so the endpoint goes on to read the stored finals too.
+    blocking.fake(live_game_stats, "live_rows_open", False)
     blocking.fake(live_game_stats, "stored_final_games", stored)
     blocking.fake(NBAApiExtractor, "check_all_games_final", True, kind="method")
     blocking.fake(LivePlayerStats, "finalize_stale_by_time", 0, kind="classmethod")
@@ -272,6 +274,7 @@ def test_live_stats_reads_the_schedule_scoreboard_and_finalizes_off_the_loop(cli
         {
             "Game.get_games_on_date",
             "Game.get_earliest_game_time_on_date",
+            "pipelines.live_game_stats.live_rows_open",
             "pipelines.live_game_stats.stored_final_games",
             "NBAApiExtractor.check_all_games_final",
             "LivePlayerStats.finalize_stale_by_time",
@@ -295,6 +298,7 @@ def test_live_stats_scoreboard_fallback_runs_off_the_loop(client, blocking):
         {
             "Game.get_games_on_date",
             "NBAApiExtractor.get_scoreboard_games",
+            "pipelines.live_game_stats.live_rows_open",
             "pipelines.live_game_stats.stored_final_games",
             "NBAApiExtractor.check_all_games_final",
         },

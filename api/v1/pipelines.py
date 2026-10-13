@@ -1248,7 +1248,7 @@ async def trigger_live_stats(
     from db.models.nba.games import Game
     from db.models.nba.live_player_stats import LivePlayerStats
     from pipelines.extractors.nba_api import NBAApiExtractor
-    from pipelines.live_game_stats import LiveGameStatsPipeline, stored_final_games
+    from pipelines.live_game_stats import LiveGameStatsPipeline, stored_final_night
 
     start_time = time.monotonic()
     eastern = pytz.timezone("US/Eastern")
@@ -1346,9 +1346,10 @@ async def trigger_live_stats(
     # the last final until the cron window closes at 4 AM ET did all of it:
     # 531 runs after the last final of 2026-10-12, each fetching every box
     # score and rewriting every row. No row is still live, so the finalize
-    # calls below would have nothing to do either.
+    # calls below would have nothing to do either. While a row is live the
+    # night cannot be over, and stored_final_night says so from that alone.
     try:
-        stored = await run_in_db_thread(stored_final_games, game_date)
+        stored = await run_in_db_thread(stored_final_night, game_date)
     except Exception as e:
         # A shortcut only: if it cannot be read, the full run below is still right.
         log.warning("live_stats_stored_final_check_failed", error=str(e))

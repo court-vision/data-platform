@@ -133,6 +133,35 @@ def stored_final_games(
     )
 
 
+def live_rows_open(game_date: date) -> bool:
+    """Whether any of `game_date`'s rows is not yet final. Blocking DB.
+
+    The table only ever holds one night's rows (the pipeline deletes older
+    dates first), so this is a read of a few hundred rows at most.
+    """
+    return (
+        LivePlayerStats.select()
+        .where(
+            (LivePlayerStats.game_date == game_date)
+            & (LivePlayerStats.game_status != 3)
+        )
+        .exists()
+    )
+
+
+def stored_final_night(game_date: date) -> StoredFinalGames | None:
+    """`stored_final_games` for the endpoint's is-the-night-over check. Blocking DB.
+
+    None while a row of the date is still live: the night cannot be complete
+    then, and the endpoint asks this on every poll, so the polls while games
+    are on answer it with `live_rows_open` and never run STORED_FINAL_GAMES_SQL
+    here. (The pipeline runs it once a poll, and only once a game is final.)
+    """
+    if live_rows_open(game_date):
+        return None
+    return stored_final_games(game_date)
+
+
 class LiveGameStatsPipeline(BasePipeline):
     """
     Fetch in-progress game box scores from NBA API live endpoints.
@@ -198,11 +227,15 @@ class LiveGameStatsPipeline(BasePipeline):
         # window closes at 4 AM ET: about 138 identical row rewrites every 30 s,
         # half of all DB execution time in prod (2026-10-13 audit). Only a
         # saving: if it cannot be read, every game is read as before.
-        try:
-            settled = stored_final_games(game_date).settled
-        except Exception as e:
-            ctx.log.warning("live_stats_stored_final_check_failed", error=str(e))
-            settled = frozenset()
+        #
+        # Only a game the scoreboard calls final can be skipped, so until one
+        # is (the first hours of every night) the query is not run at all.
+        settled: frozenset[str] = frozenset()
+        if any(game["game_status"] == 3 for game in scoreboard_games):
+            try:
+                settled = stored_final_games(game_date).settled
+            except Exception as e:
+                ctx.log.warning("live_stats_stored_final_check_failed", error=str(e))
 
         ctx.log.info(
             "live_stats_games_found",

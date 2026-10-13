@@ -8,7 +8,8 @@ final: it fetched every box score again and rewrote every row, 531 runs on
 the date has its final box score stored (`stored_final_games`, tested against
 Postgres in tests/integration/test_live_stats_settled.py), the endpoint now
 answers what the scoreboard check would have said, all games complete, without
-running anything.
+running anything. While any row of the date is still live the night cannot be
+over, so that cheaper read (`live_rows_open`) is all the endpoint asks then.
 
 The database and the NBA are faked at the model and extractor boundary: these
 are contract tests for the endpoint's decisions.
@@ -55,8 +56,11 @@ def client():
 @pytest.fixture
 def night(monkeypatch):
     """Two games tonight, first tip 19:00 ET. Returns what the endpoint did."""
-    did = {"stored_reads": [], "runs": [], "scoreboard": 0, "finalize_by_time": 0, "finalize_all": 0}
-    state = {"stored": ONE_STILL_ON, "scoreboard_final": False}
+    did = {
+        "live_row_reads": [], "stored_reads": [], "runs": [],
+        "scoreboard": 0, "finalize_by_time": 0, "finalize_all": 0,
+    }
+    state = {"live_rows": False, "stored": ONE_STILL_ON, "scoreboard_final": False}
 
     async def same_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -65,10 +69,15 @@ def night(monkeypatch):
     monkeypatch.setattr(Game, "get_games_on_date", classmethod(lambda cls, d: [object(), object()]))
     monkeypatch.setattr(Game, "get_earliest_game_time_on_date", classmethod(lambda cls, d: time(19, 0)))
 
+    def live_rows(game_date):
+        did["live_row_reads"].append(game_date)
+        return state["live_rows"]
+
     def stored(game_date, settle_minutes=None):
         did["stored_reads"].append(game_date)
         return state["stored"]
 
+    monkeypatch.setattr(live_game_stats, "live_rows_open", live_rows)
     monkeypatch.setattr(live_game_stats, "stored_final_games", stored)
 
     async def run(self, date_override=None, options=None, nba_date=None):
@@ -122,7 +131,7 @@ def test_a_night_whose_games_are_all_stored_final_is_done_without_a_run(client, 
     assert data["status"] == "skipped" and data["records_processed"] == 0
     assert data["games_total"] == 2
 
-    assert night["stored_reads"] == [GAME_DATE]
+    assert night["live_row_reads"] == night["stored_reads"] == [GAME_DATE]
     assert night["runs"] == []
     assert night["scoreboard"] == 0
     assert night["finalize_by_time"] == night["finalize_all"] == 0
@@ -141,6 +150,27 @@ def test_a_game_still_to_settle_runs_the_pipeline_and_asks_the_scoreboard(client
     assert night["finalize_all"] == 0
     assert body["data"]["status"] == "success" and body["data"]["records_processed"] == 40
     assert body["data"]["all_games_complete"] is False and body["data"]["done"] is False
+
+
+@pytest.mark.api
+def test_while_a_row_is_live_the_stored_finals_are_not_read(client, night):
+    """Games on: the night cannot be over, and one small read says so.
+
+    The stored-final query costs about 11 ms in prod (it reads every snapshot
+    of the night); it used to run on every poll of the night here, and again
+    in the pipeline.
+    """
+    night["state"]["live_rows"] = True
+    night["state"]["stored"] = ALL_STORED  # never consulted
+
+    with freeze_time(DURING_GAMES):
+        body = _post(client)
+
+    assert night["live_row_reads"] == [GAME_DATE]
+    assert night["stored_reads"] == []
+    assert night["runs"] == [GAME_DATE]
+    assert night["scoreboard"] == 1
+    assert body["data"]["all_games_complete"] is False
 
 
 @pytest.mark.api
@@ -179,7 +209,7 @@ def test_before_tip_off_the_live_tables_are_not_read(client, night):
         body = _post(client)
 
     assert body["data"]["all_games_complete"] is False
-    assert night["stored_reads"] == []
+    assert night["live_row_reads"] == night["stored_reads"] == []
     assert night["runs"] == []
 
 
