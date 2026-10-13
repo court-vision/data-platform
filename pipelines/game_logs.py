@@ -21,16 +21,22 @@ from db.models.nba.games import season_for, season_type_for
 from pipelines.transformers import calculate_fantasy_points, minutes_to_int, normalize_name
 from pipelines.transformers.minutes import seconds_played
 
-# Our season types -> PlayerGameLogs' SeasonType parameter. "regular" sends no
-# season type, which is what the nightly pipeline has always sent: it returns
-# the regular season and the NBA Cup final (game id 006). Every stored row is
+# Our season types -> PlayerGameLogs' SeasonType parameter. Every stored row is
 # labelled from its own game id (games.season_type_for), never from this.
+# "regular" is named: for a whole season, no SeasonType returns every type,
+# preseason included (the first production run, 2026-10-13). The nightly
+# pipeline's per-date call sends none, which on a regular-season night is that
+# night's games and the Cup final.
 SEASON_TYPE_PARAMS: dict[str, str] = {
-    "regular": "",
+    "regular": "Regular Season",
     "play_in": "PlayIn",
     "playoffs": "Playoffs",
 }
 POSTSEASON_TYPES = ("play_in", "playoffs")
+
+# What the history load stores. Preseason and All-Star lines never reach these
+# tables (game_start_times skips preseason games for the same reason).
+LOADED_SEASON_TYPES = ("regular", "cup_final", "play_in", "playoffs")
 
 # The first season the history load accepts: TEAM_ALIASES covers every
 # abbreviation from here on, and older seasons need more (SEA, NJN, VAN, ...).
