@@ -1291,6 +1291,7 @@ async def trigger_live_stats(
         # Scoreboard has games not in DB — use status to gate pre-tip-off.
         # game_status: 1=scheduled, 2=in-progress, 3=final
         games_count = len(scoreboard_games)
+        slate = frozenset(g["game_id"] for g in scoreboard_games)
         if all(g["game_status"] == 1 for g in scoreboard_games):
             log.info("live_stats_pregame_scoreboard_fallback", game_date=str(game_date), games=games_count)
             return LiveStatsResponse(
@@ -1310,6 +1311,7 @@ async def trigger_live_stats(
         log.info("live_stats_scoreboard_fallback", game_date=str(game_date), games=games_count)
     else:
         games_count = len(games_today)
+        slate = frozenset(game.game_id for game in games_today)
 
         # Pre-tip-off gate: don't run until 15 min before first game
         earliest_start = await run_in_db_thread(Game.get_earliest_game_time_on_date, game_date)
@@ -1348,8 +1350,13 @@ async def trigger_live_stats(
     # score and rewriting every row. No row is still live, so the finalize
     # calls below would have nothing to do either. While a row is live the
     # night cannot be over, and stored_final_night says so from that alone.
+    #
+    # "Every game" includes the slate gated on above. The store knows only the
+    # games a run has snapshotted, so a game on tonight's schedule that no run
+    # has listed would otherwise never be read: this answer skips the run that
+    # would list it, so every later poll would give the same answer.
     try:
-        stored = await run_in_db_thread(stored_final_night, game_date)
+        stored = await run_in_db_thread(stored_final_night, game_date, slate)
     except Exception as e:
         # A shortcut only: if it cannot be read, the full run below is still right.
         log.warning("live_stats_stored_final_check_failed", error=str(e))
@@ -1366,7 +1373,9 @@ async def trigger_live_stats(
             data=LiveStatsData(
                 pipeline_name="live_game_stats",
                 status="skipped",
-                games_total=games_count,
+                # The games the message names: the slate and any game a run's
+                # scoreboard listed that nba.games does not have.
+                games_total=len(stored.seen),
                 all_games_complete=True,
                 done=True,
                 duration_seconds=round(time.monotonic() - start_time, 3),

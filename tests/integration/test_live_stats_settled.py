@@ -280,6 +280,28 @@ def test_a_game_that_never_tips_keeps_the_night_open(integration_db):
 
 
 @pytest.mark.integration
+def test_a_game_on_the_slate_that_no_run_has_seen_keeps_the_night_open(integration_db):
+    """The store knows only the games a run has snapshotted.
+
+    LAKERS is on the slate the endpoint gated on (nba.games for the date) but
+    on no scoreboard a run has read: added to the night late, say. Every game
+    the store knows is settled, and the night is still not over.
+    """
+    night = Night(KNICKS)
+    night.games[KNICKS].update(status=3, players=[_player(BRUNSON, "Jalen Brunson", 20)])
+    night.poll("2026-03-05T03:00:00")
+    night.poll("2026-03-05T03:20:00")
+    assert stored_final_games(GAME_DATE).complete
+
+    stored = stored_final_night(GAME_DATE, {KNICKS, LAKERS})
+    assert stored.seen == {KNICKS, LAKERS}
+    assert stored.settled == {KNICKS}
+    assert not stored.complete
+
+    assert stored_final_night(GAME_DATE, {KNICKS}).complete
+
+
+@pytest.mark.integration
 def test_another_date_has_nothing_settled(integration_db):
     night = Night(KNICKS)
     night.games[KNICKS].update(status=3, players=[_player(BRUNSON, "Jalen Brunson", 20)])
@@ -299,7 +321,7 @@ def test_live_rows_open_is_any_row_of_the_date_not_yet_final(integration_db):
     night.poll("2026-03-05T03:00:00")
 
     assert live_rows_open(GAME_DATE)
-    assert stored_final_night(GAME_DATE) is None
+    assert stored_final_night(GAME_DATE, {KNICKS, LAKERS}) is None
     assert not live_rows_open(date(2026, 3, 5))
 
     # Both final and past the margin: no live row, and the night is complete.
@@ -307,7 +329,7 @@ def test_live_rows_open_is_any_row_of_the_date_not_yet_final(integration_db):
     night.poll("2026-03-05T03:01:00")
     night.poll("2026-03-05T03:20:00")
     assert not live_rows_open(GAME_DATE)
-    assert stored_final_night(GAME_DATE).complete
+    assert stored_final_night(GAME_DATE, {KNICKS, LAKERS}).complete
 
 
 # One night shaped like 2026-10-12 in prod, the night that measured these

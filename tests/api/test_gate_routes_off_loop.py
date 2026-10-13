@@ -225,7 +225,9 @@ def test_the_dispatched_batch_checks_dependencies_off_the_loop(blocking, monkeyp
 
 def _live_stats_fakes(blocking: Blocking, *, db_games: bool, stored: StoredFinalGames):
     if db_games:
-        blocking.fake(Game, "get_games_on_date", [object(), object()], kind="classmethod")
+        blocking.fake(
+            Game, "get_games_on_date", [Game(game_id="a"), Game(game_id="b")], kind="classmethod"
+        )
         blocking.fake(Game, "get_earliest_game_time_on_date", time(19, 0), kind="classmethod")
     else:
         blocking.fake(Game, "get_games_on_date", [], kind="classmethod")

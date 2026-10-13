@@ -439,7 +439,7 @@ Category endpoints self-gate — the service decides whether work is needed. The
 
 - **pre-game**: checks that current time is within the configured window before tip-off
 - **post-game**: checks that all games are final, then per-pipeline dedup; once the window has *closed*, one poll sweeps the night and alerts on anything that never ran
-- **live-stats**: checks NBA game schedule; returns `all_games_complete: true` when the cron loop should exit. A game whose final box score is stored (`stored_final_games` in `pipelines/live_game_stats.py`: read by a successful run `LIVE_STATS_SETTLE_MINUTES` after it went final, no row still live) is skipped; when every game of the night is, the endpoint answers `all_games_complete: true` without running the pipeline
+- **live-stats**: checks NBA game schedule; returns `all_games_complete: true` when the cron loop should exit. A game whose final box score is stored (`stored_final_games` in `pipelines/live_game_stats.py`: read by a successful run `LIVE_STATS_SETTLE_MINUTES` after it went final, no row still live) is skipped; when every game of the night is (each game in `nba.games` for the date, or on the scoreboard when that has none, and each a run's scoreboard listed), the endpoint answers `all_games_complete: true` without running the pipeline
 
 #### The ESPN batch gate
 

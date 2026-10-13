@@ -9,6 +9,7 @@ Does no time-window gating itself — gating is handled by the trigger
 endpoint (POST /v1/internal/pipelines/live-stats).
 """
 
+from collections.abc import Iterable
 from datetime import date
 from typing import NamedTuple
 
@@ -50,9 +51,12 @@ from pipelines.transformers.minutes import seconds_played
 # far under the threshold; tests/integration/test_live_stats_settled.py holds
 # it there.
 #
-# `seen` is every game the scoreboard has listed for the date (each run records
-# a snapshot of each), so "every game of the night" needs no scoreboard call.
-# `open_rows` is any row of the date not yet final, whichever game it is for.
+# `seen` is every game the scoreboard has listed for the date on a run (each
+# run records a snapshot of each game it does not skip), so "every game of the
+# night" needs no scoreboard call. It knows only what the runs' scoreboards
+# listed, though, so the endpoint's check (stored_final_night) adds the slate it
+# gated on: a game on tonight's schedule that no run has listed keeps the night
+# open. `open_rows` is any row of the date not yet final, whichever game it is for.
 STORED_FINAL_GAMES_SQL = """
     WITH snaps AS (
         SELECT game_id, game_status, captured_at, pipeline_run_id
@@ -112,7 +116,7 @@ class StoredFinalGames(NamedTuple):
 
     @property
     def complete(self) -> bool:
-        """Every game the scoreboard listed is settled and no row is still live."""
+        """Every game seen is settled and no row is still live."""
         return bool(self.seen) and self.seen <= self.settled and not self.open_rows
 
 
@@ -149,8 +153,16 @@ def live_rows_open(game_date: date) -> bool:
     )
 
 
-def stored_final_night(game_date: date) -> StoredFinalGames | None:
+def stored_final_night(game_date: date, slate: Iterable[str]) -> StoredFinalGames | None:
     """`stored_final_games` for the endpoint's is-the-night-over check. Blocking DB.
+
+    `slate` is the night's games as the endpoint gated on them (nba.games for
+    the date, or the scoreboard when that has none), and they count as seen.
+    The store knows only the games a run has snapshotted, so without them a
+    game on tonight's schedule that no run has listed would leave every game
+    the store knows settled: the endpoint would call the night complete and
+    skip the run, and since only a run snapshots a game, so would every later
+    poll. The game would never be read.
 
     None while a row of the date is still live: the night cannot be complete
     then, and the endpoint asks this on every poll, so the polls while games
@@ -159,7 +171,8 @@ def stored_final_night(game_date: date) -> StoredFinalGames | None:
     """
     if live_rows_open(game_date):
         return None
-    return stored_final_games(game_date)
+    stored = stored_final_games(game_date)
+    return stored._replace(seen=stored.seen | frozenset(slate))
 
 
 class LiveGameStatsPipeline(BasePipeline):

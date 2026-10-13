@@ -11,6 +11,11 @@ answers what the scoreboard check would have said, all games complete, without
 running anything. While any row of the date is still live the night cannot be
 over, so that cheaper read (`live_rows_open`) is all the endpoint asks then.
 
+"Every game of the date" is every game the scoreboard listed on a poll (each
+run snapshots each) and every game of the slate the endpoint gated on
+(nba.games, or the scoreboard when the schedule has none), so a game no run
+has seen yet keeps the night open.
+
 The database and the NBA are faked at the model and extractor boundary: these
 are contract tests for the endpoint's decisions.
 """
@@ -60,13 +65,21 @@ def night(monkeypatch):
         "live_row_reads": [], "stored_reads": [], "runs": [],
         "scoreboard": 0, "finalize_by_time": 0, "finalize_all": 0,
     }
-    state = {"live_rows": False, "stored": ONE_STILL_ON, "scoreboard_final": False}
+    state = {
+        "live_rows": False, "stored": ONE_STILL_ON, "scoreboard_final": False,
+        # The slate: nba.games for the date, and the scoreboard when that is empty.
+        "schedule": ["g1", "g2"], "scoreboard_games": [],
+    }
 
     async def same_thread(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
     monkeypatch.setattr(pipelines_api, "run_in_db_thread", same_thread)
-    monkeypatch.setattr(Game, "get_games_on_date", classmethod(lambda cls, d: [object(), object()]))
+    monkeypatch.setattr(
+        Game,
+        "get_games_on_date",
+        classmethod(lambda cls, d: [Game(game_id=game_id) for game_id in state["schedule"]]),
+    )
     monkeypatch.setattr(Game, "get_earliest_game_time_on_date", classmethod(lambda cls, d: time(19, 0)))
 
     def live_rows(game_date):
@@ -94,6 +107,9 @@ def night(monkeypatch):
         return state["scoreboard_final"]
 
     monkeypatch.setattr(NBAApiExtractor, "check_all_games_final", scoreboard)
+    monkeypatch.setattr(
+        NBAApiExtractor, "get_scoreboard_games", lambda self, game_date: state["scoreboard_games"]
+    )
 
     def by_time(cls, game_date, stale_minutes=30):
         did["finalize_by_time"] += 1
@@ -135,6 +151,59 @@ def test_a_night_whose_games_are_all_stored_final_is_done_without_a_run(client, 
     assert night["runs"] == []
     assert night["scoreboard"] == 0
     assert night["finalize_by_time"] == night["finalize_all"] == 0
+
+
+@pytest.mark.api
+def test_a_scheduled_game_no_run_has_seen_keeps_the_night_open(client, night):
+    """g3 is on tonight's schedule but in no snapshot: the night is not over.
+
+    Every game the store knows is settled, so the store alone says complete.
+    Answering that would skip the run that would list g3, and so would every
+    later poll: g3 would never be read.
+    """
+    night["state"]["schedule"] = ["g1", "g2", "g3"]
+    night["state"]["stored"] = ALL_STORED
+
+    with freeze_time(DURING_GAMES):
+        body = _post(client)
+
+    assert night["runs"] == [GAME_DATE]
+    assert night["scoreboard"] == 1
+    data = body["data"]
+    assert data["all_games_complete"] is False and data["done"] is False
+    assert data["games_total"] == 3
+
+
+@pytest.mark.api
+def test_a_scoreboard_game_no_run_has_seen_keeps_the_night_open(client, night):
+    """No games in nba.games: the scoreboard read for the gate is the slate."""
+    night["state"]["schedule"] = []
+    night["state"]["scoreboard_games"] = [
+        {"game_id": game_id, "game_status": 3} for game_id in ("g1", "g2", "g3")
+    ]
+    night["state"]["stored"] = ALL_STORED
+
+    with freeze_time(DURING_GAMES):
+        body = _post(client)
+
+    assert night["runs"] == [GAME_DATE]
+    assert body["data"]["games_total"] == 3
+
+
+@pytest.mark.api
+def test_the_count_reported_is_every_game_named_as_stored(client, night):
+    """g3 was on the scoreboard but is not in nba.games: it is still one of the night's games."""
+    night["state"]["stored"] = StoredFinalGames(
+        frozenset({"g1", "g2", "g3"}), frozenset({"g1", "g2", "g3"}), False
+    )
+
+    with freeze_time(DURING_GAMES):
+        body = _post(client)
+
+    assert night["runs"] == []
+    assert body["message"] == f"All 3 games final and stored for {GAME_DATE}"
+    assert body["data"]["games_total"] == 3
+    assert body["data"]["all_games_complete"] is True
 
 
 @pytest.mark.api
