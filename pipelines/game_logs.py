@@ -125,11 +125,42 @@ def _opponent(matchup: str) -> tuple[Optional[str], Optional[bool]]:
     return None, None
 
 
-def games_from_logs(rows: Iterable[Mapping[str, Any]]) -> tuple[list[dict], list[str]]:
+def _sides(teams: set[str], claims: dict[str, set[bool]], known: Optional[tuple[str, str]]) -> Optional[tuple[str, str]]:
+    """(home, away) for a game's two teams, or None if there aren't exactly two.
+
+    The lines usually agree ("LAL vs. BOS" and "BOS @ LAL"). At a neutral site
+    (Mexico City, Paris, Berlin, London, the Cup semifinals in Las Vegas) both
+    teams' lines can claim the same side. Then the schedule's sides are used
+    when nba.games has the game, and otherwise the teams in alphabetical order:
+    there is no home team to read, and the scores still go to the right team.
+    """
+    if len(teams) != 2:
+        return None
+    home_claims = {t for t in teams if claims.get(t) == {True}}
+    away_claims = {t for t in teams if claims.get(t) == {False}}
+    if len(home_claims) == 1 and not (away_claims & home_claims) and len(away_claims) <= 1:
+        home = next(iter(home_claims))
+        return home, next(iter(teams - {home}))
+    if len(away_claims) == 1 and not home_claims:
+        away = next(iter(away_claims))
+        return next(iter(teams - {away})), away
+    if known is not None and set(known) == teams:
+        return known
+    first, second = sorted(teams)
+    return first, second
+
+
+def games_from_logs(
+    rows: Iterable[Mapping[str, Any]],
+    known_sides: Optional[Mapping[str, tuple[str, str]]] = None,
+) -> tuple[list[dict], list[str]]:
     """nba.games rows (final, scored) for every game the lines cover.
 
-    Returns (games, unreadable_game_ids): a game whose home and away teams can't
-    both be read from its lines is left out, and its id is reported.
+    `known_sides` is game id -> (home, away) as nba.games has it, for games
+    whose lines disagree on who was home (see _sides).
+
+    Returns (games, unreadable_game_ids): a game without exactly two teams, a
+    date or a season is left out, and its id is reported.
     """
     by_game: dict[str, dict] = {}
     for row in rows:
@@ -137,23 +168,25 @@ def games_from_logs(rows: Iterable[Mapping[str, Any]]) -> tuple[list[dict], list
         team = team_id(row.get("TEAM_ABBREVIATION"))
         if not game_id or team is None:
             continue
-        game = by_game.setdefault(game_id, {"date": None, "home": None, "away": None, "points": {}})
+        game = by_game.setdefault(game_id, {"date": None, "teams": set(), "claims": {}, "points": {}})
         game["date"] = game["date"] or parse_game_date(row.get("GAME_DATE"))
         opponent, is_home = _opponent(str(row.get("MATCHUP") or ""))
-        if is_home is True:
-            game["home"], game["away"] = team, game["away"] or opponent
-        elif is_home is False:
-            game["away"], game["home"] = team, game["home"] or opponent
+        game["teams"].add(team)
+        if opponent:
+            game["teams"].add(opponent)
+        if is_home is not None:
+            game["claims"].setdefault(team, set()).add(is_home)
         game["points"][team] = game["points"].get(team, 0) + (_int(row.get("PTS")) or 0)
 
     games: list[dict] = []
     unreadable: list[str] = []
     for game_id, game in sorted(by_game.items()):
-        home, away = game["home"], game["away"]
+        sides = _sides(game["teams"], game["claims"], (known_sides or {}).get(game_id))
         season = season_for(game_id)
-        if not home or not away or home == away or game["date"] is None or season is None:
+        if sides is None or game["date"] is None or season is None:
             unreadable.append(game_id)
             continue
+        home, away = sides
         games.append({
             "game_id": game_id,
             "game_date": game["date"],

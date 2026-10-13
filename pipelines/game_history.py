@@ -86,16 +86,18 @@ def build_rows(
     rows: Iterable[Mapping[str, Any]],
     known_teams: set[str],
     run_id=None,
+    known_sides: Optional[Mapping[str, tuple[str, str]]] = None,
 ) -> tuple[list[dict], list[dict], dict[int, tuple[str, str]], Counter]:
     """(games, lines, players, skipped) for one season and season type's payload.
 
     A line is kept only when its game, team and player can all be stored; the
-    rest are counted in `skipped` by reason.
+    rest are counted in `skipped` by reason. `known_sides` (game id -> home,
+    away in nba.games) settles a neutral-site game whose lines disagree.
     """
     rows = list(rows)
     skipped: Counter = Counter()
 
-    games, unreadable = games_from_logs(rows)
+    games, unreadable = games_from_logs(rows, known_sides)
     skipped["unreadable_game"] += len(unreadable)
     storable_games = []
     for game in games:
@@ -229,7 +231,12 @@ class GameHistoryPipeline(BasePipeline):
         )
 
     def _store(self, ctx: PipelineContext, season: str, season_type: str, rows: list[dict], known_teams: set[str]) -> None:
-        games, lines, players, skipped = build_rows(rows, known_teams, ctx.run_id)
+        game_ids = list({str(row.get("GAME_ID") or "").strip() for row in rows} - {""})
+        known_sides = {
+            g.game_id: (g.home_team_id, g.away_team_id)
+            for g in Game.select(Game.game_id, Game.home_team, Game.away_team).where(Game.game_id.in_(game_ids))
+        } if game_ids else {}
+        games, lines, players, skipped = build_rows(rows, known_teams, ctx.run_id, known_sides)
         labels = Counter(line["season_type"] for line in lines)
 
         existing = {

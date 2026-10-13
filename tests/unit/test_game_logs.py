@@ -88,6 +88,25 @@ class TestGamesFromLogs:
         assert (games[0]["home_team"], games[0]["away_team"]) == ("NOP", "BOS")
         assert games[0]["home_score"] == 0 and games[0]["season"] == "2012-13"
 
+    @pytest.mark.parametrize("home_matchup,away_matchup", [
+        ("SAS vs. IND", "IND vs. SAS"),   # both claim home (Paris, 2025-01-23)
+        ("SAS @ IND", "IND @ SAS"),       # both claim away
+    ])
+    def test_a_neutral_site_game_takes_the_schedules_sides(self, home_matchup, away_matchup):
+        rows = [_line(game_id="0022400621", team="SAS", matchup=home_matchup, player_id=1, pts=140),
+                _line(game_id="0022400621", team="IND", matchup=away_matchup, player_id=2, pts=110)]
+        games, unreadable = games_from_logs(rows, {"0022400621": ("SAS", "IND")})
+        assert unreadable == []
+        assert [(g["home_team"], g["home_score"], g["away_team"], g["away_score"]) for g in games] == [
+            ("SAS", 140, "IND", 110)
+        ]
+
+    def test_without_a_schedule_row_a_neutral_game_is_in_alphabetical_order(self):
+        rows = [_line(game_id="0022400621", team="SAS", matchup="SAS vs. IND", player_id=1, pts=140),
+                _line(game_id="0022400621", team="IND", matchup="IND vs. SAS", player_id=2, pts=110)]
+        games, _ = games_from_logs(rows)
+        assert (games[0]["home_team"], games[0]["home_score"], games[0]["away_score"]) == ("IND", 110, 140)
+
     def test_a_game_whose_teams_cannot_be_read_is_reported(self):
         games, unreadable = games_from_logs([_line(matchup="GSW v LAL")])
         assert games == [] and unreadable == ["0022500001"]

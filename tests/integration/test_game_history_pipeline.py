@@ -127,6 +127,23 @@ def test_a_neutral_site_game_keeps_each_teams_score():
     assert (game.home_team_id, game.home_score, game.away_team_id, game.away_score) == ("DET", 122, "DAL", 110)
 
 
+def test_a_neutral_site_game_whose_lines_both_claim_home_is_stored():
+    """The 2025-26 Cup semifinal in Las Vegas: both teams' lines say "vs."."""
+    Game.create(game_id="0022501229", game_date=date(2025, 12, 13), season="2025-26", home_team_id="ORL",
+                away_team_id="NYK", status="final", home_score=None, away_score=None)
+    lines = [
+        _line("0022501229", "NYK", "NYK vs. ORL", 1, "Nyk One", 132, game_date="2025-12-13T00:00:00"),
+        _line("0022501229", "ORL", "ORL vs. NYK", 2, "Orl One", 120, game_date="2025-12-13T00:00:00"),
+    ]
+
+    result = _pipeline({("2025-26", "Regular Season"): lines})._run_sync(
+        options={"seasons": ["2025-26"], "season_types": ["regular"]})
+
+    assert result.records_processed == 2
+    game = Game.get_by_id("0022501229")
+    assert (game.home_team_id, game.home_score, game.away_team_id, game.away_score) == ("ORL", 120, "NYK", 132)
+
+
 def test_preseason_and_all_star_lines_are_never_stored():
     """No SeasonType returns every type for a whole season; whatever comes, only these load."""
     rows = PLAYOFF_GAME + [
