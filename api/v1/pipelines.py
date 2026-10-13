@@ -64,6 +64,15 @@ from schemas.pipeline import (
 from schemas.common import ApiStatus
 from services.alert_service import AlertEvent, get_alert_service
 
+# The gate routes here (pre-game, post-game, live-stats) are `async def`, so
+# they run on the private process's one event loop, which they share with
+# /health, the scheduled-pickups tick and cron-run ingestion. Every blocking
+# call in them goes to a worker thread: run_in_db_thread for Peewee,
+# asyncio.to_thread for the NBA scoreboard, whose sync tenacity retry sleeps
+# 2-30 s between attempts. Run inline, the live-stats gate stalled the loop
+# 0.3-8 s per call on game nights: about 21 false /health 503s and slow pickup
+# ticks in the week to 2026-10-13. tests/api/test_gate_routes_off_loop.py fails
+# a blocking call made on the loop.
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 log = get_logger("pipeline_api")
 
@@ -639,9 +648,10 @@ async def trigger_pre_game(
 
     target_date = date or nba_date
 
+    # Off the event loop, every read: see the note above `router`.
     if not force:
         # Exit early if no games today — nothing to prep for
-        games_today = Game.get_games_on_date(nba_date)
+        games_today = await run_in_db_thread(Game.get_games_on_date, nba_date)
         if not games_today:
             log.info("pre_game_no_games", nba_date=str(nba_date))
             return PipelineResponse(
@@ -649,7 +659,11 @@ async def trigger_pre_game(
                 message=f"No games scheduled for NBA date {nba_date}",
             )
 
-    first_game_time = Game.get_earliest_game_time_on_date(nba_date) if not force else None
+    first_game_time = (
+        await run_in_db_thread(Game.get_earliest_game_time_on_date, nba_date)
+        if not force
+        else None
+    )
 
     pre_game_pipelines = get_pipelines_by_category(PipelineCategory.PRE_GAME)
     pipelines_to_run = []
@@ -680,13 +694,13 @@ async def trigger_pre_game(
             # Pipelines with skip_batch_dedup manage their own internal dedup
             # and must not be blocked by an early "success with 0 records" run.
             if not cls.config.skip_batch_dedup:
-                if PipelineRun.was_successful_on_date(name, nba_date):
+                if await run_in_db_thread(PipelineRun.was_successful_on_date, name, nba_date):
                     log.info("pre_game_already_ran", pipeline=name, nba_date=str(nba_date))
                     decisions[name] = {"decision": "skip", "reason": "already_ran"}
                     continue
 
             # Concurrency gate: skip if already running
-            if PipelineRun.is_running(name):
+            if await run_in_db_thread(PipelineRun.is_running, name):
                 log.info("pre_game_already_running", pipeline=name)
                 decisions[name] = {"decision": "skip", "reason": "already_running"}
                 continue
@@ -801,7 +815,7 @@ async def trigger_post_game(
         # on the date cutoff, a game log that fails in this batch leaves its
         # dependents running on last night's success, and that run then dedups
         # them for the rest of the night. A day without games has no window.
-        latest_game_time = Game.get_latest_game_time_on_date(nba_date)
+        latest_game_time = await run_in_db_thread(Game.get_latest_game_time_on_date, nba_date)
         if latest_game_time:
             opens_at = post_game_window(
                 now_et.replace(tzinfo=None),
@@ -816,7 +830,7 @@ async def trigger_post_game(
 
     if not force:
         # Check if there are any scheduled games on the NBA date
-        latest_game_time = Game.get_latest_game_time_on_date(nba_date)
+        latest_game_time = await run_in_db_thread(Game.get_latest_game_time_on_date, nba_date)
         if not latest_game_time:
             log.info("post_game_no_games", nba_date=str(nba_date))
             return PipelineResponse(
@@ -830,8 +844,9 @@ async def trigger_post_game(
         # cron polls, not just the post-game window. Only on nights that have
         # games, so it costs nothing in the offseason. The gate below is handed
         # the result rather than making a second request.
-        # See docs/PENDING_PROD_CHECKS.md #4.
-        observed = probe_espn_watermark()
+        # See docs/PENDING_PROD_CHECKS.md #4. A DB read plus an ESPN GET with a
+        # 10 s timeout, so it runs in a worker thread with its own connection.
+        observed = await run_in_db_thread(probe_espn_watermark)
 
         now_et_naive = now_et.replace(tzinfo=None)
         window = post_game_window(
@@ -864,7 +879,7 @@ async def trigger_post_game(
         # Gate 2: Data readiness — verify all games are actually Final via live scoreboard
         nba_extractor = NBAApiExtractor()
         try:
-            all_final = nba_extractor.check_all_games_final(nba_date)
+            all_final = await asyncio.to_thread(nba_extractor.check_all_games_final, nba_date)
         except Exception as e:
             log.error("post_game_scoreboard_error", nba_date=str(nba_date), error=str(e))
             return PipelineResponse(
@@ -892,7 +907,7 @@ async def trigger_post_game(
         name = cls.config.name
 
         if not force:
-            if PipelineRun.is_running(name):
+            if await run_in_db_thread(PipelineRun.is_running, name):
                 log.info("post_game_pipeline_concurrency_skip", pipeline=name)
                 decisions[name] = {"decision": "skip", "reason": "already_running"}
                 continue
@@ -913,8 +928,8 @@ async def trigger_post_game(
                     decisions[name] = {"decision": "skip", "reason": "time_gated"}
                     continue
 
-            already_ran = PipelineRun.was_successful_on_date(
-                name, nba_date, after=window_open_utc
+            already_ran = await run_in_db_thread(
+                PipelineRun.was_successful_on_date, name, nba_date, after=window_open_utc
             )
 
             if cls.config.espn_gated:
@@ -924,14 +939,19 @@ async def trigger_post_game(
                 # succeeded before ESPN's batch landed wrote stale totals. It is
                 # handed the success and attempt counts so it can stop retrying
                 # rather than re-running every poll for the rest of the window.
+                # The attempt count is read in its own thread hop: as an
+                # argument to the call below it ran on the event loop.
+                attempts = (
+                    await run_in_db_thread(PipelineRun.count_since, name, window_open_utc)
+                    if window_open_utc
+                    else 0
+                )
                 gate = await run_in_db_thread(
                     _espn_scoring_period_advanced,
                     nba_date,
                     observed,
                     already_ran,
-                    PipelineRun.count_since(name, window_open_utc)
-                    if window_open_utc
-                    else 0,
+                    attempts,
                 )
                 if not gate.run:
                     log.info(
@@ -1235,8 +1255,9 @@ async def trigger_live_stats(
     now_et = datetime.now(eastern)
     game_date = nba_date_et(now_et)
 
-    # Check if there are any games today (DB path, covers regular season + known playoff dates)
-    games_today = Game.get_games_on_date(game_date)
+    # Check if there are any games today (DB path, covers regular season + known playoff dates).
+    # Off the event loop, this and every call below: see the note above `router`.
+    games_today = await run_in_db_thread(Game.get_games_on_date, game_date)
     scoreboard_fallback = False
 
     if not games_today:
@@ -1245,7 +1266,9 @@ async def trigger_live_stats(
         # Fall back to the live NBA scoreboard to check for actual games.
         fallback_extractor = NBAApiExtractor()
         try:
-            scoreboard_games = fallback_extractor.get_scoreboard_games(game_date)
+            scoreboard_games = await asyncio.to_thread(
+                fallback_extractor.get_scoreboard_games, game_date
+            )
         except Exception as e:
             log.warning("live_stats_scoreboard_fallback_failed", error=str(e), game_date=str(game_date))
             scoreboard_games = []
@@ -1289,7 +1312,7 @@ async def trigger_live_stats(
         games_count = len(games_today)
 
         # Pre-tip-off gate: don't run until 15 min before first game
-        earliest_start = Game.get_earliest_game_time_on_date(game_date)
+        earliest_start = await run_in_db_thread(Game.get_earliest_game_time_on_date, game_date)
         if earliest_start:
             now_et_naive = now_et.replace(tzinfo=None)
             earliest_dt = datetime.combine(game_date, earliest_start)
@@ -1328,20 +1351,22 @@ async def trigger_live_stats(
     # Check if all games are final so the cron-runner knows when to exit
     nba_extractor = NBAApiExtractor()
     try:
-        all_complete = nba_extractor.check_all_games_final(game_date)
+        all_complete = await asyncio.to_thread(nba_extractor.check_all_games_final, game_date)
     except Exception as e:
         log.warning("live_stats_final_check_failed", error=str(e))
         all_complete = False
 
     # Time-based finalize: force any game_status=2 records with stale last_updated.
     # Runs on EVERY trigger as a safety net, not gated on check_all_games_final.
-    time_finalized = LivePlayerStats.finalize_stale_by_time(game_date, stale_minutes=30)
+    time_finalized = await run_in_db_thread(
+        LivePlayerStats.finalize_stale_by_time, game_date, stale_minutes=30
+    )
     if time_finalized:
         log.info("live_stats_time_finalized", game_date=str(game_date), records=time_finalized)
 
     # Full finalize when scoreboard confirms all games are done
     if all_complete:
-        finalized = LivePlayerStats.finalize_stale_games(game_date)
+        finalized = await run_in_db_thread(LivePlayerStats.finalize_stale_games, game_date)
         if finalized:
             log.info("live_stats_finalized_stale", game_date=str(game_date), records=finalized)
 
@@ -1618,8 +1643,14 @@ async def _run_pipelines_background(
         for i, name in enumerate(pipeline_names, 1):
             # Dependency enforcement: skip if depends_on pipelines haven't succeeded.
             pipeline_cls = PIPELINE_REGISTRY[name]
-            unmet_deps = _check_unmet_dependencies(
-                pipeline_cls, succeeded_in_batch, date_override, dependencies_since
+            # A background task shares the event loop with every route, so its
+            # run-table reads go to a worker thread like the gates' do.
+            unmet_deps = await run_in_db_thread(
+                _check_unmet_dependencies,
+                pipeline_cls,
+                succeeded_in_batch,
+                date_override,
+                dependencies_since,
             )
 
             if unmet_deps:
