@@ -26,9 +26,15 @@ import pytest
 from freezegun import freeze_time
 
 from core.settings import settings
+from db.base import db
 from db.models.nba.live_game_score_snapshots import LiveGameScoreSnapshot
 from db.models.nba.live_player_stats import LivePlayerStats
-from pipelines.live_game_stats import LiveGameStatsPipeline, stored_final_games
+from db.models.nba.players import Player
+from pipelines.live_game_stats import (
+    STORED_FINAL_GAMES_SQL,
+    LiveGameStatsPipeline,
+    stored_final_games,
+)
 from schemas.common import ApiStatus
 
 GAME_DATE = date(2026, 3, 4)
@@ -281,3 +287,86 @@ def test_another_date_has_nothing_settled(integration_db):
 
     other = stored_final_games(date(2026, 3, 5))
     assert other.seen == frozenset() and not other.complete
+
+
+# One night shaped like 2026-10-12 in prod, the night that measured these
+# queries: five games, a poll every 30 s from tip to 4 AM ET (1,376 runs and
+# 6,880 snapshots; prod had 6,884), and each game's ~28 rows final.
+POLLS = 1376
+GAMES = [f"00225009{g:02d}" for g in range(1, 6)]
+NIGHT_STARTS = "2026-03-04 23:00"
+
+
+def _seed_a_full_night() -> None:
+    """Every game goes final at poll 400 + 100 * g; its rows' last writer reads it 32 polls on."""
+    db.execute_sql(
+        """
+        INSERT INTO nba.pipeline_runs
+            (id, pipeline_name, started_at, completed_at, status, records_processed)
+        SELECT md5('run' || i)::uuid, 'live_game_stats',
+               %(starts)s::timestamp + i * interval '30 seconds',
+               %(starts)s::timestamp + i * interval '30 seconds' + interval '8 seconds',
+               'success', 140
+        FROM generate_series(1, %(polls)s) i
+        """,
+        {"starts": NIGHT_STARTS, "polls": POLLS},
+    )
+    db.execute_sql(
+        """
+        INSERT INTO nba.live_game_score_snapshots
+            (game_id, game_date, home_team, away_team, home_score, away_score,
+             period, game_clock, game_status, captured_at, pipeline_run_id)
+        SELECT '00225009' || lpad(g::text, 2, '0'), %(game_date)s, 'NYK', 'BOS', 101, 99,
+               4, NULL, CASE WHEN i > 400 + 100 * g THEN 3 ELSE 2 END,
+               %(starts)s::timestamp + i * interval '30 seconds',
+               md5('run' || i)::uuid
+        FROM generate_series(1, %(polls)s) i, generate_series(1, 5) g
+        """,
+        {"starts": NIGHT_STARTS, "polls": POLLS, "game_date": GAME_DATE},
+    )
+    players = [(g, 100 * g + p) for g in range(1, 6) for p in range(28)]
+    Player.insert_many(
+        [{"id": pid, "name": f"Player {pid}", "name_normalized": f"player {pid}"} for _, pid in players]
+    ).execute()
+    writer = db.execute_sql(
+        "SELECT g, md5('run' || (432 + 100 * g))::uuid FROM generate_series(1, 5) g"
+    ).fetchall()
+    writer = {g: run_id for g, run_id in writer}
+    LivePlayerStats.insert_many(
+        [
+            {
+                "player": pid,
+                "game_id": GAMES[g - 1],
+                "game_date": GAME_DATE,
+                "game_status": 3,
+                "pts": 10,
+                "pipeline_run_id": writer[g],
+            }
+            for g, pid in players
+        ]
+    ).execute()
+    db.execute_sql("ANALYZE nba.pipeline_runs, nba.live_game_score_snapshots, nba.live_player_stats")
+
+
+@pytest.mark.integration
+def test_a_full_night_settles_with_a_plan_far_under_the_jit_threshold(integration_db):
+    """The query runs on most polls of a night; it must stay too cheap to JIT-compile.
+
+    Postgres JIT-compiles a plan whose estimated cost passes jit_above_cost
+    (100,000 by default, and in prod). The first version of the query asked a
+    correlated EXISTS per game, which the planner priced at 102,576 on prod's
+    2026-10-12 data: every call then paid about 58 ms of compilation for a
+    10 ms query. The bound here is a tenth of the threshold.
+    """
+    _seed_a_full_night()
+
+    stored = stored_final_games(GAME_DATE)
+    assert stored.seen == stored.settled == frozenset(GAMES)
+    assert stored.complete
+
+    (plan,) = db.execute_sql(
+        "EXPLAIN (FORMAT JSON) " + STORED_FINAL_GAMES_SQL,
+        {"game_date": GAME_DATE, "settle_minutes": settings.live_stats_settle_minutes},
+    ).fetchone()
+    cost = plan[0]["Plan"]["Total Cost"]
+    assert cost < 10_000, f"plan cost {cost:,.0f}: the planner may JIT-compile it"

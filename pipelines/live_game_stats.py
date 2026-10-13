@@ -39,6 +39,17 @@ from pipelines.transformers.minutes import seconds_played
 # snapshots: only the newest writer's id survives on a row, so walking a night
 # of snapshots to find it took 2.9 s on 2026-10-12's 6,884 snapshot rows.
 #
+# The last step joins stored_final and open_games rather than asking EXISTS of
+# each per game. Correlated, the planner prices those subqueries once per
+# estimated game (200, its default for a CTE's distinct values), which put the
+# plan at a cost of 102,576 on 2026-10-12's data: over prod's jit_above_cost of
+# 100,000, so every call paid about 58 ms of LLVM compilation and took 70-115
+# ms. Joined, the plan costs 862, compiles nothing and runs in 10-15 ms
+# (EXPLAIN ANALYZE, TIMING OFF) on the same data, returning the same rows. Its
+# cost grows with the night's snapshots, linearly now, so a 15-game slate stays
+# far under the threshold; tests/integration/test_live_stats_settled.py holds
+# it there.
+#
 # `seen` is every game the scoreboard has listed for the date (each run records
 # a snapshot of each), so "every game of the night" needs no scoreboard call.
 # `open_rows` is any row of the date not yet final, whichever game it is for.
@@ -84,10 +95,11 @@ STORED_FINAL_GAMES_SQL = """
           AND game_status <> 3
     )
     SELECT g.game_id,
-           EXISTS (SELECT 1 FROM stored_final sf WHERE sf.game_id = g.game_id)
-           AND NOT EXISTS (SELECT 1 FROM open_games o WHERE o.game_id = g.game_id) AS settled,
+           sf.game_id IS NOT NULL AND o.game_id IS NULL AS settled,
            EXISTS (SELECT 1 FROM open_games) AS open_rows
     FROM (SELECT DISTINCT game_id FROM snaps) g
+    LEFT JOIN stored_final sf ON sf.game_id = g.game_id
+    LEFT JOIN open_games o ON o.game_id = g.game_id
 """
 
 
