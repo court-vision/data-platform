@@ -7,7 +7,7 @@ import pytest
 
 from db.models.nba.games import season_for, season_type_for
 from pipelines.game_history import build_rows, postseason_window
-from pipelines.game_logs import box_score_stats, games_from_logs, parse_game_date, team_id
+from pipelines.game_logs import SEASON_TYPE_PARAMS, box_score_stats, games_from_logs, parse_game_date, team_id
 from pipelines.player_advanced_stats import _fraction_of_100
 
 
@@ -106,6 +106,13 @@ class TestBuildRows:
         assert lines[0]["oreb"] == 2 and lines[1]["oreb"] is None
         assert set(players) == {1, 2}
 
+    def test_preseason_and_all_star_lines_are_counted_not_stored(self):
+        rows = [_line(game_id="0012500001", player_id=1), _line(game_id="0032500001", player_id=2),
+                _line(game_id="0022500001", team="LAL", matchup="LAL @ GSW", player_id=3)]
+        games, lines, _, skipped = build_rows(rows, {"GSW", "LAL"}, run_id=None)
+        assert [g["game_id"] for g in games] == ["0022500001"] and [l["player"] for l in lines] == [3]
+        assert (skipped["preseason"], skipped["all_star"]) == (1, 1)
+
     def test_a_repeated_line_is_stored_once(self):
         """Two lines for one (player, game) in a batch would fail the whole upsert."""
         rows = [_line(player_id=1), _line(player_id=1, pts=31), _line(team="LAL", matchup="LAL @ GSW", player_id=2)]
@@ -139,6 +146,12 @@ class TestPostseasonWindow:
 
     def test_no_regular_season_yet_means_no_postseason(self):
         assert postseason_window(None, date(2026, 10, 12)) is False
+
+
+@pytest.mark.unit
+def test_the_regular_season_is_asked_for_by_name():
+    """No SeasonType returns every type for a whole season (production, 2026-10-13)."""
+    assert SEASON_TYPE_PARAMS == {"regular": "Regular Season", "play_in": "PlayIn", "playoffs": "Playoffs"}
 
 
 @pytest.mark.unit

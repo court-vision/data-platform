@@ -28,17 +28,18 @@ from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable, Mapping, Optional
 
-from peewee import EXCLUDED, fn
+from peewee import EXCLUDED, Case, fn
 
 from core.settings import settings
 from db.base import db
 from db.models.nba import NBATeam, Player, PlayerGameStats
-from db.models.nba.games import Game
+from db.models.nba.games import Game, season_type_for
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 from pipelines.game_logs import (
+    LOADED_SEASON_TYPES,
     POSTSEASON_TYPES,
     SEASON_TYPE_PARAMS,
     box_score_stats,
@@ -65,6 +66,15 @@ LINE_PRESERVE = [
 ]
 
 
+def _score_of(team_column):
+    """On conflict: the incoming score of the team the stored row has in this column."""
+    return Case(
+        None,
+        ((team_column == EXCLUDED.home_team_id, EXCLUDED.home_score),),
+        EXCLUDED.away_score,
+    )
+
+
 def postseason_window(last_regular: Optional[date], night: date) -> bool:
     """Whether `night` falls in the postseason that follows a regular season ending on `last_regular`."""
     if last_regular is None:
@@ -89,6 +99,8 @@ def build_rows(
     skipped["unreadable_game"] += len(unreadable)
     storable_games = []
     for game in games:
+        if game["season_type"] not in LOADED_SEASON_TYPES:
+            continue  # its lines are counted below, by season type
         if game["home_team"] in known_teams and game["away_team"] in known_teams:
             storable_games.append(game)
         else:
@@ -101,6 +113,10 @@ def build_rows(
     seen: set[tuple[int, str]] = set()
     for row in rows:
         game_id = str(row.get("GAME_ID") or "").strip()
+        season_type = season_type_for(game_id)
+        if season_type not in LOADED_SEASON_TYPES:
+            skipped[season_type or "unknown_season_type"] += 1
+            continue
         if game_id not in by_id:
             skipped["no_game"] += 1
             continue
@@ -235,9 +251,12 @@ class GameHistoryPipeline(BasePipeline):
                         conflict_target=[Game.game_id],
                         # A played game is final with the score its lines add up
                         # to; the date, teams and start time a schedule wrote stay.
+                        # Scores go by team: at a neutral site (Mexico City, the
+                        # Cup in Las Vegas) the box scores and the schedule can
+                        # name different home teams.
                         update={
-                            Game.home_score: EXCLUDED.home_score,
-                            Game.away_score: EXCLUDED.away_score,
+                            Game.home_score: _score_of(Game.home_team),
+                            Game.away_score: _score_of(Game.away_team),
                             Game.status: "final",
                             Game.season_type: EXCLUDED.season_type,
                             Game.updated_at: datetime.utcnow(),

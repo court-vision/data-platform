@@ -102,13 +102,44 @@ def test_a_rerun_updates_in_place_and_keeps_what_the_schedule_wrote():
 
 
 def test_an_old_season_lands_under_todays_team():
-    result = _pipeline({("2012-13", ""): OLD_SEASON})._run_sync(
+    result = _pipeline({("2012-13", "Regular Season"): OLD_SEASON})._run_sync(
         options={"seasons": ["2012-13"], "season_types": ["regular"]})
 
     assert result.status == ApiStatus.SUCCESS
     game = Game.get_by_id("0021200001")
     assert (game.home_team_id, game.season, game.season_type) == ("NOP", "2012-13", "regular")
     assert {l.team_id for l in PlayerGameStats.select()} == {"BOS", "NOP"}
+
+
+def test_a_neutral_site_game_keeps_each_teams_score():
+    """The schedule says DET hosted; the box scores (Mexico City) say DAL did."""
+    Game.create(game_id="0022500147", game_date=date(2025, 11, 1), season="2025-26", home_team_id="DET",
+                away_team_id="DAL", status="scheduled", start_time_et=time(19, 0))
+    lines = [
+        _line("0022500147", "DAL", "DAL vs. DET", 1, "Dal One", 110, game_date="2025-11-01T00:00:00"),
+        _line("0022500147", "DET", "DET @ DAL", 2, "Det One", 122, game_date="2025-11-01T00:00:00"),
+    ]
+
+    _pipeline({("2025-26", "Regular Season"): lines})._run_sync(
+        options={"seasons": ["2025-26"], "season_types": ["regular"]})
+
+    game = Game.get_by_id("0022500147")
+    assert (game.home_team_id, game.home_score, game.away_team_id, game.away_score) == ("DET", 122, "DAL", 110)
+
+
+def test_preseason_and_all_star_lines_are_never_stored():
+    """No SeasonType returns every type for a whole season; whatever comes, only these load."""
+    rows = PLAYOFF_GAME + [
+        _line("0012500001", "OKC", "OKC vs. MEM", 1628983, "Shai Gilgeous-Alexander", 20),
+        _line("0032500001", "OKC", "OKC vs. MEM", 1628983, "Shai Gilgeous-Alexander", 20),
+    ]
+
+    result = _pipeline({("2025-26", "Playoffs"): rows})._run_sync(
+        options={"seasons": ["2025-26"], "season_types": ["playoffs"]})
+
+    assert result.records_processed == 3
+    assert {l.season_type for l in PlayerGameStats.select()} == {"playoffs"}
+    assert not Game.select().where(Game.game_id.in_(["0012500001", "0032500001"])).exists()
 
 
 def test_a_failed_call_is_counted_and_the_rest_still_load():
