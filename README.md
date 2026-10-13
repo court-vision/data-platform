@@ -180,6 +180,7 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 | `NBA_SEASON` | No | derived from today (`"2026-27"` from Aug 1, 2026) | nba_api season string; also selects `static/schedule{yy}-{yy}.json`; set to pin |
 | `NBA_API_PROXY_URL` | No | — | Residential proxy for stats.nba.com (cloud IPs are sometimes blocked) |
 | `ESPN_GATE_MAX_ATTEMPTS` | No | `3` | Runs per night an ESPN-gated pipeline may start before the gate stops retrying |
+| `LIVE_STATS_SETTLE_MINUTES` | No | `15` | Minutes after a game goes final that live-stats keeps re-reading its box score; after that one stored read settles the game and later polls skip it |
 | `BALLDONTLIE_API_KEY` | No | — | BALLDONTLIE API key for injury data |
 | `RESEND_API_KEY` | No | — | Resend API key for lineup alert emails |
 | `NOTIFICATION_FROM_EMAIL` | No | `alerts@courtvision.dev` | Sender address for alerts |
@@ -438,7 +439,7 @@ Category endpoints self-gate — the service decides whether work is needed. The
 
 - **pre-game**: checks that current time is within the configured window before tip-off
 - **post-game**: checks that all games are final, then per-pipeline dedup; once the window has *closed*, one poll sweeps the night and alerts on anything that never ran
-- **live-stats**: checks NBA game schedule; returns `all_games_complete: true` when the cron loop should exit
+- **live-stats**: checks NBA game schedule; returns `all_games_complete: true` when the cron loop should exit. A game whose final box score is stored (`stored_final_games` in `pipelines/live_game_stats.py`: read by a successful run `LIVE_STATS_SETTLE_MINUTES` after it went final, no row still live) is skipped; when every game of the night is, the endpoint answers `all_games_complete: true` without running the pipeline
 
 #### The ESPN batch gate
 

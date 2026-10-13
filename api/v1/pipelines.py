@@ -1248,7 +1248,7 @@ async def trigger_live_stats(
     from db.models.nba.games import Game
     from db.models.nba.live_player_stats import LivePlayerStats
     from pipelines.extractors.nba_api import NBAApiExtractor
-    from pipelines.live_game_stats import LiveGameStatsPipeline
+    from pipelines.live_game_stats import LiveGameStatsPipeline, stored_final_games
 
     start_time = time.monotonic()
     eastern = pytz.timezone("US/Eastern")
@@ -1338,6 +1338,39 @@ async def trigger_live_stats(
                         duration_seconds=round(time.monotonic() - start_time, 3),
                     ),
                 )
+
+    # Every game of the night is final and its final box score is stored (see
+    # stored_final_games): a run now would re-read the same box scores and
+    # rewrite the same rows, and the scoreboard check after it would say the
+    # night is over. So say that without the work. Until now every poll from
+    # the last final until the cron window closes at 4 AM ET did all of it:
+    # 531 runs after the last final of 2026-10-12, each fetching every box
+    # score and rewriting every row. No row is still live, so the finalize
+    # calls below would have nothing to do either.
+    try:
+        stored = await run_in_db_thread(stored_final_games, game_date)
+    except Exception as e:
+        # A shortcut only: if it cannot be read, the full run below is still right.
+        log.warning("live_stats_stored_final_check_failed", error=str(e))
+        stored = None
+    if stored is not None and stored.complete:
+        log.info(
+            "live_stats_all_final_stored",
+            game_date=str(game_date),
+            games=len(stored.seen),
+        )
+        return LiveStatsResponse(
+            status=ApiStatus.SUCCESS,
+            message=f"All {len(stored.seen)} games final and stored for {game_date}",
+            data=LiveStatsData(
+                pipeline_name="live_game_stats",
+                status="skipped",
+                games_total=games_count,
+                all_games_complete=True,
+                done=True,
+                duration_seconds=round(time.monotonic() - start_time, 3),
+            ),
+        )
 
     # Run the pipeline
     # The pipeline is handed the date this endpoint gated on, rather than

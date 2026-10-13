@@ -21,7 +21,8 @@ import pytest
 from db.models.nba import LiveGameScoreSnapshot, LivePlayerStats, Player, PlayerGameStats
 from db.models.nba.games import Game
 from pipelines.context import PipelineContext
-from pipelines.live_game_stats import LiveGameStatsPipeline
+from pipelines import live_game_stats
+from pipelines.live_game_stats import LiveGameStatsPipeline, StoredFinalGames
 from pipelines.player_game_stats import PlayerGameStatsPipeline
 
 GAME_DATE = date(2026, 4, 12)
@@ -158,6 +159,12 @@ def live_rows(monkeypatch):
     monkeypatch.setattr(LivePlayerStats, "delete", classmethod(lambda cls: _NoRows()))
     monkeypatch.setattr(LiveGameScoreSnapshot, "delete", classmethod(lambda cls: _NoRows()))
     monkeypatch.setattr(LiveGameScoreSnapshot, "record_snapshot", classmethod(lambda cls, **kw: None))
+    # Nothing stored yet, so no game is skipped as already final.
+    monkeypatch.setattr(
+        live_game_stats,
+        "stored_final_games",
+        lambda _d, settle_minutes=None: StoredFinalGames(frozenset(), frozenset(), False),
+    )
     monkeypatch.setattr(Player, "upsert_player", classmethod(lambda cls, **kw: None))
     monkeypatch.setattr(
         LivePlayerStats,
@@ -222,6 +229,20 @@ def test_live_still_skips_players_who_have_not_played(live_rows) -> None:
 
     assert set(stored) == {1628973}
     assert ctx.records_processed == 1
+
+
+@pytest.mark.unit
+def test_live_reads_every_game_when_the_stored_finals_cannot_be_read(live_rows, monkeypatch) -> None:
+    """Skipping settled games is a saving, never a reason to skip a live one."""
+
+    def broken(_d, settle_minutes=None):
+        raise RuntimeError("canceling statement due to statement timeout")
+
+    monkeypatch.setattr(live_game_stats, "stored_final_games", broken)
+    stored, ctx = live_rows(home=[_live_player(1628973, "Jalen Brunson", "PT25M01.00S", "PT25M", points=21)])
+
+    assert set(stored) == {1628973}
+    assert ctx.records_skipped == 0
 
 
 @pytest.mark.unit

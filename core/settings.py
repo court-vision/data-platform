@@ -108,6 +108,14 @@ class Settings(BaseSettings):
     # (6 x 15 min polls = ~90 minutes of period-before-totals slack).
     espn_gate_max_attempts: int = 6
 
+    # Live stats: how long after the scoreboard calls a game final the
+    # live-stats pipeline keeps re-reading its box score. After that, once one
+    # successful run has stored the box score, the game is settled and later
+    # polls skip it (pipelines/live_game_stats.py, stored_final_games). The
+    # margin covers a box score that lags the scoreboard and a stat corrected
+    # after the buzzer; a final taken back by a review starts it again.
+    live_stats_settle_minutes: int = 15
+
     # Development mode
     development_mode: bool = False
 

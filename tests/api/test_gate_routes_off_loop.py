@@ -35,9 +35,10 @@ from db.models.nba.games import Game
 from db.models.nba.live_player_stats import LivePlayerStats
 from db.models.nba.pipeline_batch import PipelineBatch
 from db.models.pipeline_run import PipelineRun
+from pipelines import live_game_stats
 from pipelines.extractors.nba_api import NBAApiExtractor
 from pipelines.gates import GateDecision
-from pipelines.live_game_stats import LiveGameStatsPipeline
+from pipelines.live_game_stats import LiveGameStatsPipeline, StoredFinalGames
 from schemas.common import ApiStatus
 from schemas.pipeline import PipelineResult
 
@@ -222,7 +223,7 @@ def test_the_dispatched_batch_checks_dependencies_off_the_loop(blocking, monkeyp
     _assert_off_the_loop(blocking, {"PipelineRun.was_successful_on_date"})
 
 
-def _live_stats_fakes(blocking: Blocking, *, db_games: bool):
+def _live_stats_fakes(blocking: Blocking, *, db_games: bool, stored: StoredFinalGames):
     if db_games:
         blocking.fake(Game, "get_games_on_date", [object(), object()], kind="classmethod")
         blocking.fake(Game, "get_earliest_game_time_on_date", time(19, 0), kind="classmethod")
@@ -234,6 +235,7 @@ def _live_stats_fakes(blocking: Blocking, *, db_games: bool):
             [{"game_id": "0042500101", "game_status": 2}],
             kind="method",
         )
+    blocking.fake(live_game_stats, "stored_final_games", stored)
     blocking.fake(NBAApiExtractor, "check_all_games_final", True, kind="method")
     blocking.fake(LivePlayerStats, "finalize_stale_by_time", 0, kind="classmethod")
     blocking.fake(LivePlayerStats, "finalize_stale_games", 0, kind="classmethod")
@@ -252,9 +254,12 @@ def _live_stats_fakes(blocking: Blocking, *, db_games: bool):
     return runs
 
 
+NOT_SETTLED = StoredFinalGames(frozenset({"a", "b"}), frozenset({"a"}), False)
+
+
 @pytest.mark.api
 def test_live_stats_reads_the_schedule_scoreboard_and_finalizes_off_the_loop(client, blocking):
-    runs = _live_stats_fakes(blocking, db_games=True)
+    runs = _live_stats_fakes(blocking, db_games=True, stored=NOT_SETTLED)
 
     # 20:00 ET, after a 19:00 ET first tip.
     with freeze_time("2026-03-05T01:00:00Z"):
@@ -267,6 +272,7 @@ def test_live_stats_reads_the_schedule_scoreboard_and_finalizes_off_the_loop(cli
         {
             "Game.get_games_on_date",
             "Game.get_earliest_game_time_on_date",
+            "pipelines.live_game_stats.stored_final_games",
             "NBAApiExtractor.check_all_games_final",
             "LivePlayerStats.finalize_stale_by_time",
             "LivePlayerStats.finalize_stale_games",
@@ -277,7 +283,7 @@ def test_live_stats_reads_the_schedule_scoreboard_and_finalizes_off_the_loop(cli
 @pytest.mark.api
 def test_live_stats_scoreboard_fallback_runs_off_the_loop(client, blocking):
     """No games in nba.games (an unscheduled playoff round): the scoreboard is asked instead."""
-    runs = _live_stats_fakes(blocking, db_games=False)
+    runs = _live_stats_fakes(blocking, db_games=False, stored=NOT_SETTLED)
 
     with freeze_time("2026-03-05T01:00:00Z"):
         _post(client, "live-stats")
@@ -289,6 +295,7 @@ def test_live_stats_scoreboard_fallback_runs_off_the_loop(client, blocking):
         {
             "Game.get_games_on_date",
             "NBAApiExtractor.get_scoreboard_games",
+            "pipelines.live_game_stats.stored_final_games",
             "NBAApiExtractor.check_all_games_final",
         },
     )

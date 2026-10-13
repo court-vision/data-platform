@@ -9,6 +9,11 @@ Does no time-window gating itself — gating is handled by the trigger
 endpoint (POST /v1/internal/pipelines/live-stats).
 """
 
+from datetime import date
+from typing import NamedTuple
+
+from core.settings import settings
+from db.base import db
 from db.models.nba import Player, LivePlayerStats, LiveGameScoreSnapshot
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -16,6 +21,104 @@ from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 from pipelines.transformers import calculate_fantasy_points, minutes_to_int
 from pipelines.transformers.minutes import seconds_played
+
+
+# Which of a night's games already have their final box score stored.
+#
+# A game is settled when none of its rows is still live and a *successful* run
+# stored its box score at least `settle` minutes after the scoreboard called it
+# final (the last time: a final taken back after a buzzer review starts the
+# margin again). A row carries the id of the last run that upserted it, and
+# that run's snapshot of the game (recorded just before it fetched the box
+# score) says when that was. Row timestamps cannot answer this: the finalize_*
+# helpers mark rows final and touch `last_updated` without reading a box score,
+# so a game whose last box-score read was mid-fourth can look final and freshly
+# written.
+#
+# The query starts from the rows' writers (a run or two per game), not from the
+# snapshots: only the newest writer's id survives on a row, so walking a night
+# of snapshots to find it took 2.9 s on 2026-10-12's 6,884 snapshot rows.
+#
+# `seen` is every game the scoreboard has listed for the date (each run records
+# a snapshot of each), so "every game of the night" needs no scoreboard call.
+# `open_rows` is any row of the date not yet final, whichever game it is for.
+STORED_FINAL_GAMES_SQL = """
+    WITH snaps AS (
+        SELECT game_id, game_status, captured_at, pipeline_run_id
+        FROM nba.live_game_score_snapshots
+        WHERE game_date = %(game_date)s
+    ),
+    last_in_play AS (
+        SELECT game_id, MAX(captured_at) FILTER (WHERE game_status <> 3) AS at
+        FROM snaps
+        GROUP BY game_id
+    ),
+    went_final AS (
+        SELECT s.game_id, MIN(s.captured_at) AS final_at
+        FROM snaps s
+        JOIN last_in_play p ON p.game_id = s.game_id
+        WHERE s.game_status = 3
+          AND (p.at IS NULL OR s.captured_at > p.at)
+        GROUP BY s.game_id
+    ),
+    writers AS (
+        SELECT DISTINCT game_id, pipeline_run_id
+        FROM nba.live_player_stats
+        WHERE game_date = %(game_date)s
+    ),
+    stored_final AS (
+        SELECT DISTINCT w.game_id
+        FROM writers w
+        JOIN snaps s
+          ON s.game_id = w.game_id AND s.pipeline_run_id = w.pipeline_run_id
+        JOIN went_final f ON f.game_id = w.game_id
+        JOIN nba.pipeline_runs r ON r.id = w.pipeline_run_id
+        WHERE s.game_status = 3
+          AND s.captured_at >= f.final_at + make_interval(mins => %(settle_minutes)s)
+          AND r.status = 'success'
+    ),
+    open_games AS (
+        SELECT DISTINCT game_id
+        FROM nba.live_player_stats
+        WHERE game_date = %(game_date)s
+          AND game_status <> 3
+    )
+    SELECT g.game_id,
+           EXISTS (SELECT 1 FROM stored_final sf WHERE sf.game_id = g.game_id)
+           AND NOT EXISTS (SELECT 1 FROM open_games o WHERE o.game_id = g.game_id) AS settled,
+           EXISTS (SELECT 1 FROM open_games) AS open_rows
+    FROM (SELECT DISTINCT game_id FROM snaps) g
+"""
+
+
+class StoredFinalGames(NamedTuple):
+    """The night as `nba.live_player_stats` has it; see STORED_FINAL_GAMES_SQL."""
+
+    seen: frozenset[str]
+    settled: frozenset[str]
+    open_rows: bool
+
+    @property
+    def complete(self) -> bool:
+        """Every game the scoreboard listed is settled and no row is still live."""
+        return bool(self.seen) and self.seen <= self.settled and not self.open_rows
+
+
+def stored_final_games(
+    game_date: date, settle_minutes: int | None = None
+) -> StoredFinalGames:
+    """Read which of `game_date`'s games need no more box-score reads. Blocking DB."""
+    if settle_minutes is None:
+        settle_minutes = settings.live_stats_settle_minutes
+    rows = db.execute_sql(
+        STORED_FINAL_GAMES_SQL,
+        {"game_date": game_date, "settle_minutes": settle_minutes},
+    ).fetchall()
+    return StoredFinalGames(
+        seen=frozenset(game_id for game_id, _, _ in rows),
+        settled=frozenset(game_id for game_id, settled, _ in rows if settled),
+        open_rows=any(open_rows for _, _, open_rows in rows),
+    )
 
 
 class LiveGameStatsPipeline(BasePipeline):
@@ -28,7 +131,8 @@ class LiveGameStatsPipeline(BasePipeline):
     3. Upserts stats for each active player into nba.live_player_stats
 
     Records are continuously overwritten on each poll — this table is a
-    snapshot of current game state, not a historical record.
+    snapshot of current game state, not a historical record. A game whose
+    final box score is already stored (`stored_final_games`) is skipped.
     """
 
     config = PipelineConfig(
@@ -77,9 +181,21 @@ class LiveGameStatsPipeline(BasePipeline):
             ctx.log.info("live_stats_no_games", game_date=str(game_date))
             return
 
+        # Games whose final box score is already stored. Re-reading them is
+        # all this pipeline did from the night's last final until the cron
+        # window closes at 4 AM ET: about 138 identical row rewrites every 30 s,
+        # half of all DB execution time in prod (2026-10-13 audit). Only a
+        # saving: if it cannot be read, every game is read as before.
+        try:
+            settled = stored_final_games(game_date).settled
+        except Exception as e:
+            ctx.log.warning("live_stats_stored_final_check_failed", error=str(e))
+            settled = frozenset()
+
         ctx.log.info(
             "live_stats_games_found",
             game_count=len(scoreboard_games),
+            settled_count=len(settled),
             game_date=str(game_date),
         )
 
@@ -89,6 +205,12 @@ class LiveGameStatsPipeline(BasePipeline):
             game_status = game_meta["game_status"]
             period = game_meta.get("period") or None
             game_clock = game_meta.get("game_clock") or None
+
+            # No snapshot either: the score of a settled game no longer moves,
+            # and the last snapshot taken is already the final one.
+            if game_id in settled and game_status == 3:
+                ctx.increment_skipped(1, "final_stored")
+                continue
 
             # Record a score snapshot for this game using scoreboard data.
             # This appends one row per game per poll, building a time series
