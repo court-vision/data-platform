@@ -174,6 +174,7 @@ Copy `secrets.env` to `.env` (or export directly). All settings are in `core/set
 |---|---|---|---|
 | `DATABASE_URL` | Yes | — | PostgreSQL connection URL (e.g. `postgresql://user:pass@host/db`) |
 | `PIPELINE_API_TOKEN` | Yes | — | Bearer token required by all `/v1/internal/*` endpoints |
+| `DB_POOL_STALE_TIMEOUT_SECONDS` | No | `3600` | Age, from when it was opened, at which the pool drops a connection. Was 300: every connection died at five minutes and the next burst reconnected one at a time |
 | `ESPN_YEAR` | No | derived (season end year, e.g. `2027`) | ESPN Fantasy season year; set to pin |
 | `ESPN_LEAGUE_ID` | No | `993431466` | ESPN Fantasy league ID |
 | `NBA_SEASON` | No | derived from today (`"2026-27"` from Aug 1, 2026) | nba_api season string; also selects `static/schedule{yy}-{yy}.json`; set to pin |

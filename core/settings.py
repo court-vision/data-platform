@@ -18,6 +18,19 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str
+    # How long a pooled connection lives, counted from when it was *opened*:
+    # Peewee compares that age at check-out and at check-in, so a connection
+    # is dropped once it is this old even if it was busy the whole time. This
+    # used to be 300 s. Every connection then died five minutes after it was
+    # opened, and Peewee opens new ones one at a time under the pool lock, so
+    # the first burst after that queued one TCP+TLS+SCRAM handshake per
+    # connection (14-28 ms each in prod). Production Postgres has no
+    # idle_session_timeout and keeps idle sessions for days, so an idle hour
+    # is safe. The trade: after a Postgres restart each pooled connection
+    # fails one query before the pool discards it (it never re-uses one in an
+    # unknown state, and core.middleware evicts the request's), where at 300 s
+    # any connection opened more than five minutes earlier was dropped untried.
+    db_pool_stale_timeout_seconds: int = 3600
 
     # Season. Both default to the current season derived from today's date
     # (flips on Aug 1); set NBA_SEASON / ESPN_YEAR to pin them.
