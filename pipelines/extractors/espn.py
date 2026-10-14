@@ -5,6 +5,7 @@ Fetches data from ESPN Fantasy Basketball API.
 """
 
 import json
+import re
 from typing import Any, Optional, Sequence
 
 import requests
@@ -321,9 +322,14 @@ class ESPNExtractor(BaseExtractor):
         swid: str,
         year: int,
         matchup_period: int,
+        espn_team_id: Optional[int] = None,
     ) -> Optional[dict]:
         """
         Fetch matchup data from ESPN API for a specific team.
+
+        The team is found by `espn_team_id` when the backend has learned it, then
+        by name, then as the one team `swid` owns: a user can rename a team on
+        ESPN, and the stored name lags until the backend next reads the team.
 
         Args:
             league_id: ESPN league ID
@@ -387,14 +393,9 @@ class ESPNExtractor(BaseExtractor):
 
         # Find our team
         teams = data.get("teams", [])
-        our_team_id = None
-        our_team_name = None
-
-        for team in teams:
-            if team.get("name", "").strip() == team_name.strip():
-                our_team_id = team.get("id")
-                our_team_name = team.get("name")
-                break
+        our_team = _find_team(teams, team_name, espn_team_id, swid)
+        our_team_id = our_team.get("id") if our_team else None
+        our_team_name = our_team.get("name") if our_team else None
 
         if not our_team_id:
             self.log.warning("team_not_found", team=team_name)
@@ -504,3 +505,24 @@ class ESPNExtractor(BaseExtractor):
             raise ServerError("ESPN server error", status_code=response.status_code)
         response.raise_for_status()
         return response.json()
+
+
+def _swid_key(value: Optional[str]) -> str:
+    return re.sub(r"[\s{}]", "", value or "").upper()
+
+
+def _find_team(teams: list, team_name: str, espn_team_id: Optional[int], swid: Optional[str]) -> Optional[dict]:
+    """The stored team in an ESPN payload: by id, then name, then sole SWID owner."""
+    if espn_team_id is not None:
+        found = next((t for t in teams if t.get("id") == espn_team_id), None)
+        if found is not None:
+            return found
+    wanted = (team_name or "").strip()
+    found = next((t for t in teams if wanted and (t.get("name") or "").strip() == wanted), None)
+    if found is not None:
+        return found
+    mine = _swid_key(swid)
+    if not mine:
+        return None
+    owned = [t for t in teams if mine in {_swid_key(o) for o in t.get("owners") or [] if isinstance(o, str)}]
+    return owned[0] if len(owned) == 1 else None
