@@ -85,6 +85,11 @@ def batches(monkeypatch):
     return written
 
 
+async def _in_a_thread(fn, *args, **kwargs):
+    """run_in_db_thread without the connection: the run-table reads here are faked."""
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
 def _ran(monkeypatch, names: set[str]):
     """Only `names` have a successful run for the date."""
     monkeypatch.setattr(
@@ -476,6 +481,7 @@ class TestDependenciesMeanTonight:
         from schemas.pipeline import PipelineResult
 
         _only_last_night_succeeded(monkeypatch)
+        monkeypatch.setattr(pipelines_api, "run_in_db_thread", _in_a_thread)
         names = [
             cls.config.name
             for cls in get_pipelines_by_category(PipelineCategory.POST_GAME)

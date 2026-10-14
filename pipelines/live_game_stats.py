@@ -9,6 +9,12 @@ Does no time-window gating itself — gating is handled by the trigger
 endpoint (POST /v1/internal/pipelines/live-stats).
 """
 
+from collections.abc import Iterable
+from datetime import date
+from typing import NamedTuple
+
+from core.settings import settings
+from db.base import db
 from db.models.nba import Player, LivePlayerStats, LiveGameScoreSnapshot
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
@@ -16,6 +22,157 @@ from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
 from pipelines.transformers import calculate_fantasy_points, minutes_to_int
 from pipelines.transformers.minutes import seconds_played
+
+
+# Which of a night's games already have their final box score stored.
+#
+# A game is settled when none of its rows is still live and a *successful* run
+# stored its box score at least `settle` minutes after the scoreboard called it
+# final (the last time: a final taken back after a buzzer review starts the
+# margin again). A row carries the id of the last run that upserted it, and
+# that run's snapshot of the game (recorded just before it fetched the box
+# score) says when that was. Row timestamps cannot answer this: the finalize_*
+# helpers mark rows final and touch `last_updated` without reading a box score,
+# so a game whose last box-score read was mid-fourth can look final and freshly
+# written.
+#
+# The query starts from the rows' writers (a run or two per game), not from the
+# snapshots: only the newest writer's id survives on a row, so walking a night
+# of snapshots to find it took 2.9 s on 2026-10-12's 6,884 snapshot rows.
+#
+# The last step joins stored_final and open_games rather than asking EXISTS of
+# each per game. Correlated, the planner prices those subqueries once per
+# estimated game (200, its default for a CTE's distinct values), which put the
+# plan at a cost of 102,576 on 2026-10-12's data: over prod's jit_above_cost of
+# 100,000, so every call paid about 58 ms of LLVM compilation and took 70-115
+# ms. Joined, the plan costs 862, compiles nothing and runs in 10-15 ms
+# (EXPLAIN ANALYZE, TIMING OFF) on the same data, returning the same rows. Its
+# cost grows with the night's snapshots, linearly now, so a 15-game slate stays
+# far under the threshold; tests/integration/test_live_stats_settled.py holds
+# it there.
+#
+# `seen` is every game the scoreboard has listed for the date on a run (each
+# run records a snapshot of each game it does not skip), so "every game of the
+# night" needs no scoreboard call. It knows only what the runs' scoreboards
+# listed, though, so the endpoint's check (stored_final_night) adds the slate it
+# gated on: a game on tonight's schedule that no run has listed keeps the night
+# open. `open_rows` is any row of the date not yet final, whichever game it is for.
+STORED_FINAL_GAMES_SQL = """
+    WITH snaps AS (
+        SELECT game_id, game_status, captured_at, pipeline_run_id
+        FROM nba.live_game_score_snapshots
+        WHERE game_date = %(game_date)s
+    ),
+    last_in_play AS (
+        SELECT game_id, MAX(captured_at) FILTER (WHERE game_status <> 3) AS at
+        FROM snaps
+        GROUP BY game_id
+    ),
+    went_final AS (
+        SELECT s.game_id, MIN(s.captured_at) AS final_at
+        FROM snaps s
+        JOIN last_in_play p ON p.game_id = s.game_id
+        WHERE s.game_status = 3
+          AND (p.at IS NULL OR s.captured_at > p.at)
+        GROUP BY s.game_id
+    ),
+    writers AS (
+        SELECT DISTINCT game_id, pipeline_run_id
+        FROM nba.live_player_stats
+        WHERE game_date = %(game_date)s
+    ),
+    stored_final AS (
+        SELECT DISTINCT w.game_id
+        FROM writers w
+        JOIN snaps s
+          ON s.game_id = w.game_id AND s.pipeline_run_id = w.pipeline_run_id
+        JOIN went_final f ON f.game_id = w.game_id
+        JOIN nba.pipeline_runs r ON r.id = w.pipeline_run_id
+        WHERE s.game_status = 3
+          AND s.captured_at >= f.final_at + make_interval(mins => %(settle_minutes)s)
+          AND r.status = 'success'
+    ),
+    open_games AS (
+        SELECT DISTINCT game_id
+        FROM nba.live_player_stats
+        WHERE game_date = %(game_date)s
+          AND game_status <> 3
+    )
+    SELECT g.game_id,
+           sf.game_id IS NOT NULL AND o.game_id IS NULL AS settled,
+           EXISTS (SELECT 1 FROM open_games) AS open_rows
+    FROM (SELECT DISTINCT game_id FROM snaps) g
+    LEFT JOIN stored_final sf ON sf.game_id = g.game_id
+    LEFT JOIN open_games o ON o.game_id = g.game_id
+"""
+
+
+class StoredFinalGames(NamedTuple):
+    """The night as `nba.live_player_stats` has it; see STORED_FINAL_GAMES_SQL."""
+
+    seen: frozenset[str]
+    settled: frozenset[str]
+    open_rows: bool
+
+    @property
+    def complete(self) -> bool:
+        """Every game seen is settled and no row is still live."""
+        return bool(self.seen) and self.seen <= self.settled and not self.open_rows
+
+
+def stored_final_games(
+    game_date: date, settle_minutes: int | None = None
+) -> StoredFinalGames:
+    """Read which of `game_date`'s games need no more box-score reads. Blocking DB."""
+    if settle_minutes is None:
+        settle_minutes = settings.live_stats_settle_minutes
+    rows = db.execute_sql(
+        STORED_FINAL_GAMES_SQL,
+        {"game_date": game_date, "settle_minutes": settle_minutes},
+    ).fetchall()
+    return StoredFinalGames(
+        seen=frozenset(game_id for game_id, _, _ in rows),
+        settled=frozenset(game_id for game_id, settled, _ in rows if settled),
+        open_rows=any(open_rows for _, _, open_rows in rows),
+    )
+
+
+def live_rows_open(game_date: date) -> bool:
+    """Whether any of `game_date`'s rows is not yet final. Blocking DB.
+
+    The table only ever holds one night's rows (the pipeline deletes older
+    dates first), so this is a read of a few hundred rows at most.
+    """
+    return (
+        LivePlayerStats.select()
+        .where(
+            (LivePlayerStats.game_date == game_date)
+            & (LivePlayerStats.game_status != 3)
+        )
+        .exists()
+    )
+
+
+def stored_final_night(game_date: date, slate: Iterable[str]) -> StoredFinalGames | None:
+    """`stored_final_games` for the endpoint's is-the-night-over check. Blocking DB.
+
+    `slate` is the night's games as the endpoint gated on them (nba.games for
+    the date, or the scoreboard when that has none), and they count as seen.
+    The store knows only the games a run has snapshotted, so without them a
+    game on tonight's schedule that no run has listed would leave every game
+    the store knows settled: the endpoint would call the night complete and
+    skip the run, and since only a run snapshots a game, so would every later
+    poll. The game would never be read.
+
+    None while a row of the date is still live: the night cannot be complete
+    then, and the endpoint asks this on every poll, so the polls while games
+    are on answer it with `live_rows_open` and never run STORED_FINAL_GAMES_SQL
+    here. (The pipeline runs it once a poll, and only once a game is final.)
+    """
+    if live_rows_open(game_date):
+        return None
+    stored = stored_final_games(game_date)
+    return stored._replace(seen=stored.seen | frozenset(slate))
 
 
 class LiveGameStatsPipeline(BasePipeline):
@@ -28,7 +185,8 @@ class LiveGameStatsPipeline(BasePipeline):
     3. Upserts stats for each active player into nba.live_player_stats
 
     Records are continuously overwritten on each poll — this table is a
-    snapshot of current game state, not a historical record.
+    snapshot of current game state, not a historical record. A game whose
+    final box score is already stored (`stored_final_games`) is skipped.
     """
 
     config = PipelineConfig(
@@ -77,9 +235,25 @@ class LiveGameStatsPipeline(BasePipeline):
             ctx.log.info("live_stats_no_games", game_date=str(game_date))
             return
 
+        # Games whose final box score is already stored. Re-reading them is
+        # all this pipeline did from the night's last final until the cron
+        # window closes at 4 AM ET: about 138 identical row rewrites every 30 s,
+        # half of all DB execution time in prod (2026-10-13 audit). Only a
+        # saving: if it cannot be read, every game is read as before.
+        #
+        # Only a game the scoreboard calls final can be skipped, so until one
+        # is (the first hours of every night) the query is not run at all.
+        settled: frozenset[str] = frozenset()
+        if any(game["game_status"] == 3 for game in scoreboard_games):
+            try:
+                settled = stored_final_games(game_date).settled
+            except Exception as e:
+                ctx.log.warning("live_stats_stored_final_check_failed", error=str(e))
+
         ctx.log.info(
             "live_stats_games_found",
             game_count=len(scoreboard_games),
+            settled_count=len(settled),
             game_date=str(game_date),
         )
 
@@ -89,6 +263,12 @@ class LiveGameStatsPipeline(BasePipeline):
             game_status = game_meta["game_status"]
             period = game_meta.get("period") or None
             game_clock = game_meta.get("game_clock") or None
+
+            # No snapshot either: the score of a settled game no longer moves,
+            # and the last snapshot taken is already the final one.
+            if game_id in settled and game_status == 3:
+                ctx.increment_skipped(1, "final_stored")
+                continue
 
             # Record a score snapshot for this game using scoreboard data.
             # This appends one row per game per poll, building a time series

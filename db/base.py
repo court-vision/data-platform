@@ -7,6 +7,7 @@ from playhouse.db_url import parse
 from playhouse.pool import PooledPostgresqlExtDatabase
 
 from core.logging import get_logger
+from core.settings import settings
 
 # Get database credentials from environment variables
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -16,7 +17,9 @@ db_name = parsed_url.pop('database')
 db = PooledPostgresqlExtDatabase(
     db_name,
     max_connections=20,
-    stale_timeout=300,
+    # Age limit from when a connection was opened; see the setting for why it
+    # is an hour and not the five minutes it used to be.
+    stale_timeout=settings.db_pool_stale_timeout_seconds,
     # psycopg2 connect_timeout: a dead/unreachable host fails fast (503) instead of hanging a worker
     connect_timeout=10,
     **parsed_url

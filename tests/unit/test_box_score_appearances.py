@@ -21,7 +21,8 @@ import pytest
 from db.models.nba import LiveGameScoreSnapshot, LivePlayerStats, Player, PlayerGameStats
 from db.models.nba.games import Game
 from pipelines.context import PipelineContext
-from pipelines.live_game_stats import LiveGameStatsPipeline
+from pipelines import live_game_stats
+from pipelines.live_game_stats import LiveGameStatsPipeline, StoredFinalGames
 from pipelines.player_game_stats import PlayerGameStatsPipeline
 
 GAME_DATE = date(2026, 4, 12)
@@ -158,6 +159,12 @@ def live_rows(monkeypatch):
     monkeypatch.setattr(LivePlayerStats, "delete", classmethod(lambda cls: _NoRows()))
     monkeypatch.setattr(LiveGameScoreSnapshot, "delete", classmethod(lambda cls: _NoRows()))
     monkeypatch.setattr(LiveGameScoreSnapshot, "record_snapshot", classmethod(lambda cls, **kw: None))
+    # Nothing stored yet, so no game is skipped as already final.
+    monkeypatch.setattr(
+        live_game_stats,
+        "stored_final_games",
+        lambda _d, settle_minutes=None: StoredFinalGames(frozenset(), frozenset(), False),
+    )
     monkeypatch.setattr(Player, "upsert_player", classmethod(lambda cls, **kw: None))
     monkeypatch.setattr(
         LivePlayerStats,
@@ -165,10 +172,12 @@ def live_rows(monkeypatch):
         classmethod(lambda cls, player_id, stats, **kw: stored.__setitem__(player_id, stats)),
     )
 
-    def run(home: list[dict], away: list[dict] | None = None) -> tuple[dict[int, dict], PipelineContext]:
+    def run(
+        home: list[dict], away: list[dict] | None = None, game_status: int = 2
+    ) -> tuple[dict[int, dict], PipelineContext]:
         pipeline = LiveGameStatsPipeline()
         pipeline.nba_extractor.get_scoreboard_games = lambda _d: [
-            {"game_id": GAME_ID, "game_status": 2, "period": 4, "game_clock": "PT00M40.00S"}
+            {"game_id": GAME_ID, "game_status": game_status, "period": 4, "game_clock": "PT00M40.00S"}
         ]
         pipeline.nba_extractor.get_live_box_score = lambda _id: {
             "homeTeam": {"players": home},
@@ -222,6 +231,50 @@ def test_live_still_skips_players_who_have_not_played(live_rows) -> None:
 
     assert set(stored) == {1628973}
     assert ctx.records_processed == 1
+
+
+@pytest.mark.unit
+def test_live_reads_every_game_when_the_stored_finals_cannot_be_read(live_rows, monkeypatch) -> None:
+    """Skipping settled games is a saving, never a reason to skip a live one."""
+
+    def broken(_d, settle_minutes=None):
+        raise RuntimeError("canceling statement due to statement timeout")
+
+    monkeypatch.setattr(live_game_stats, "stored_final_games", broken)
+    # Final on the scoreboard, so the stored finals are asked for (and fail).
+    stored, ctx = live_rows(
+        home=[_live_player(1628973, "Jalen Brunson", "PT25M01.00S", "PT25M", points=21)],
+        game_status=3,
+    )
+
+    assert set(stored) == {1628973}
+    assert ctx.records_skipped == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("game_status", "reads"), [(1, 0), (2, 0), (3, 1)])
+def test_live_reads_the_stored_finals_only_once_a_game_is_final(
+    live_rows, monkeypatch, game_status, reads
+) -> None:
+    """Only a game final on the scoreboard can be skipped, so until then the query is not run.
+
+    It costs about 11 ms in prod and the first hours of every night have no
+    final game.
+    """
+    calls = []
+
+    def recorded(game_date, settle_minutes=None):
+        calls.append(game_date)
+        return StoredFinalGames(frozenset(), frozenset(), False)
+
+    monkeypatch.setattr(live_game_stats, "stored_final_games", recorded)
+    stored, _ = live_rows(
+        home=[_live_player(1628973, "Jalen Brunson", "PT25M01.00S", "PT25M", points=21)],
+        game_status=game_status,
+    )
+
+    assert len(calls) == reads
+    assert set(stored) == {1628973}
 
 
 @pytest.mark.unit
