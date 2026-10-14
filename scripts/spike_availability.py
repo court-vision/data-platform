@@ -3,16 +3,20 @@ Availability spike (docs/NEWS_AND_INJURY_PIPELINES_PLAN.md § 6). Read-only prob
 
 Three questions the availability pipeline's due rules depend on, none of which
 can be answered from the dev machine (cdn.nba.com and ak-static.cms.nba.com
-answer it 403). Run this where prod data-platform runs, e.g. `railway ssh` into
-the data-platform service, under nohup so it survives the session:
+answer it 403). Run this where prod data-platform runs: copy it into the data-platform container
+(`railway ssh`) and start it detached, with the app on the import path:
 
-    nohup python scripts/spike_availability.py boxscore --out /tmp/spike > /tmp/spike/boxscore.log 2>&1 &
-    nohup python scripts/spike_availability.py report --date 2026-10-19 --out /tmp/spike > /tmp/spike/report.log 2>&1 &
-    python scripts/spike_availability.py espn-etag
+    mkdir -p /tmp/spike
+    cd /app && PYTHONPATH=/app setsid nohup python /tmp/spike_availability.py boxscore \
+        --out /tmp/spike > /tmp/spike/boxscore.log 2>&1 &
+    cd /app && PYTHONPATH=/app setsid nohup python /tmp/spike_availability.py report \
+        --date 2026-10-20 --include-eve --out /tmp/spike > /tmp/spike/report.log 2>&1 &
+    cd /app && PYTHONPATH=/app python /tmp/spike_availability.py espn-etag
 
 It reads nothing from and writes nothing to the database. Every observation is
-also printed as one JSON line, so the Railway log keeps the result even if the
-container's /tmp does not survive.
+also printed as one JSON line to the log file. Results live only in the
+container's /tmp, so a redeploy of data-platform (any merge to main) stops the
+run and loses them: copy them out when a run ends.
 
 boxscore
     For each of today's games (ET date, from the league schedule feed), fetch
