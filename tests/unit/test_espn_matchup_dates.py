@@ -81,3 +81,16 @@ def test_missing_schedule_settings_still_resolves(calendar, monkeypatch):
     payload["settings"] = {}
     r = _matchup(monkeypatch, payload, local_period=2)
     assert r["matchup_start"] == ss.get_matchup_by_number(2)["start_date"]
+
+
+@pytest.mark.unit
+def test_team_renamed_on_espn_is_found_by_id_or_owner(calendar, monkeypatch):
+    payload = _payload(2, {"1": [1], "2": [2]}, 8)
+    payload["teams"] = [{"id": 1, "name": "Renamed", "owners": ["{ABC-1}"]}, {"id": 2, "name": "Them"}]
+    monkeypatch.setattr(espn_mod.requests, "get", lambda *a, **k: _Resp(payload))
+    ex = espn_mod.ESPNExtractor()
+    by_id = ex.get_matchup_data(league_id=1, team_name="Us", espn_s2="", swid="", year=2026,
+                                matchup_period=2, espn_team_id=1)
+    by_owner = ex.get_matchup_data(league_id=1, team_name="Us", espn_s2="", swid="abc-1", year=2026,
+                                   matchup_period=2)
+    assert by_id["team_name"] == by_owner["team_name"] == "Renamed"

@@ -387,6 +387,7 @@ class DailyMatchupScoresPipeline(BasePipeline):
             swid=league_info.get("swid", ""),
             year=league_info.get("year", settings.espn_year),
             matchup_period=matchup_period,
+            espn_team_id=league_info.get("espn_team_id"),
         )
 
     def _fetch_yahoo_matchup(
