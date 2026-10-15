@@ -46,10 +46,15 @@ VERDICTS: frozenset[str] = frozenset({"out", "doubtful", "questionable", "probab
 # Verdict changes the reactor acts on (decision 8); the rest only update the row.
 REACTION_VERDICTS: frozenset[str] = frozenset({"out", "doubtful", "available"})
 
+# Future-tense "he won't play" phrasing, as Rotowire writes it. A bare "not play"
+# would also catch recaps ("did not play in Wednesday's loss"), so it is not here.
 _WONT_PLAY = re.compile(
-    r"\b(won'?t play|will not play|ruled out|is out|sit out|sits out|will miss|not play)\b",
+    r"\b(won'?t play|will not play|(?:is not|isn'?t|not) expected to play|ruled out|is out"
+    r"|sit out|sits out|will sit|will miss|will be rested|to be rested)\b",
     re.IGNORECASE,
 )
+# A weekday names this game only in a blurb written in the week before it.
+_WEEKDAY_WINDOW_DAYS = 6
 _SAME_DAY_WORDS: tuple[str, ...] = ("tonight", "today", "this evening")
 
 
@@ -89,8 +94,9 @@ class GameContext:
     """What the resolver needs to know about the player's game on `game_date`.
 
     `day_words` are the words that name this game in a blurb: the weekday
-    ("Tuesday") and the opponent ("Lakers", "Los Angeles"). "Tonight" and
-    "today" name it only when the blurb was written on the game's ET date.
+    ("Tuesday") and the opponent ("Lakers", "Los Angeles"), both only in a blurb
+    written in the six days before the game. "Tonight" and "today" name it only when
+    the blurb was written on the game's ET date.
     """
 
     game_date: date
@@ -110,12 +116,14 @@ def _newest(reports: Iterable[Report], source: str) -> Optional[Report]:
 def names_game_day(text: str, written_at: Optional[datetime], game: GameContext) -> bool:
     """Whether `text` points at this game rather than some later one."""
     lowered = text.lower()
+    written_on = written_at.astimezone(ET).date() if written_at is not None else None
     weekday = game.game_date.strftime("%A").lower()
-    if re.search(rf"\b{weekday}\b", lowered):
+    in_week = written_on is None or 0 <= (game.game_date - written_on).days <= _WEEKDAY_WINDOW_DAYS
+    if in_week and re.search(rf"\b{weekday}\b", lowered):
         return True
-    if any(w and re.search(rf"\b{re.escape(w.lower())}\b", lowered) for w in game.day_words):
+    if in_week and any(w and re.search(rf"\b{re.escape(w.lower())}\b", lowered) for w in game.day_words):
         return True
-    if written_at is not None and written_at.astimezone(ET).date() == game.game_date:
+    if written_on == game.game_date:
         return any(re.search(rf"\b{w}\b", lowered) for w in _SAME_DAY_WORDS)
     return False
 

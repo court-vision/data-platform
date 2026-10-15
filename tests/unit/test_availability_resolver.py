@@ -103,6 +103,8 @@ def test_espn_out_with_a_return_date_by_the_game_is_questionable():
     "Brunson has been ruled out for Tuesday's game.",
     "Brunson will not play against the Knicks.",
     "Brunson will sit out tonight's game for rest.",
+    "Brunson (rest) isn't expected to play in Tuesday's game against the Celtics.",
+    "Brunson will be rested for Tuesday's game against the Celtics.",
 ])
 def test_day_to_day_with_a_wont_play_blurb_that_names_the_game_is_out(comment):
     assert verdict_of(rep("espn_injuries", "questionable", detail=comment)) == "out"
@@ -112,6 +114,7 @@ def test_day_to_day_with_a_wont_play_blurb_that_names_the_game_is_out(comment):
     "Brunson (ankle) won't play Thursday against the Bulls.",          # a later game
     "Brunson is probable for Tuesday's game.",                          # no won't-play phrase
     "Brunson is listed as questionable against the Knicks.",
+    "Brunson (knee) did not play in Tuesday's 114-93 loss to the Celtics.",   # a recap, not a ruling
 ])
 def test_day_to_day_otherwise_stays_questionable(comment):
     assert verdict_of(rep("espn_injuries", "questionable", detail=comment)) == "questionable"
@@ -125,6 +128,14 @@ def test_tonight_names_the_game_only_when_written_on_the_game_day():
     # 11 PM ET Monday is 03:00Z Tuesday: the ET date decides, not the UTC one.
     late_monday = datetime(2026, 10, 21, 3, 0, tzinfo=timezone.utc) - timedelta(days=1)
     assert not names_game_day("will sit out tonight", late_monday, game)
+
+
+def test_a_weekday_names_the_game_only_in_a_blurb_from_the_week_before():
+    blurb = "Brunson won't play Tuesday against the Celtics."
+    eight_days_before = T0 - timedelta(days=8)
+    assert verdict_of(rep("espn_injuries", "questionable", detail=blurb, source_time=eight_days_before)) == "questionable"
+    six_days_before = T0 - timedelta(days=6)
+    assert verdict_of(rep("espn_injuries", "questionable", detail=blurb, source_time=six_days_before)) == "out"
 
 
 # ---- no game: roster-level status -------------------------------------------------------
