@@ -38,7 +38,8 @@ report
 
 espn-etag
     One GET (then one conditional GET) of the ESPN injuries JSON; prints the
-    caching headers and whether a conditional request is answered 304.
+    caching headers and whether a conditional request is answered 304, and
+    saves the payload to --out as the injuries extractor's test fixture.
 """
 
 import argparse
@@ -273,6 +274,10 @@ def run_report(args) -> None:
 def run_espn_etag(args) -> None:
     headers = {"User-Agent": BROWSER_UA, "Accept-Encoding": "gzip"}
     first = requests.get(ESPN_INJURIES_URL, headers=headers, timeout=30)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = now_utc().strftime("%Y%m%dT%H%MZ")
+    (out / f"espn_injuries_{stamp}.json").write_bytes(first.content)   # the extractor's fixture
     cache = {k: first.headers.get(k) for k in ("ETag", "Last-Modified", "Cache-Control", "Age", "Expires")}
     emit("espn_first", http=first.status_code, bytes=len(first.content), **cache)
     conditional = dict(headers)
@@ -308,6 +313,7 @@ def main() -> None:
     rep.set_defaults(func=run_report)
 
     etag = sub.add_parser("espn-etag")
+    etag.add_argument("--out", default="/tmp/spike")
     etag.set_defaults(func=run_espn_etag)
 
     args = parser.parse_args()
