@@ -33,6 +33,7 @@ from pipelines.season_history import SeasonHistoryPipeline
 from pipelines.game_history import GameHistoryPipeline
 from pipelines.cv_projection import CVProjectionPipeline
 from pipelines.scheduled_pickups import ScheduledPickupsPipeline
+from pipelines.availability import AvailabilityPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -71,6 +72,9 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "cv_projection": CVProjectionPipeline,
     # The executor tick for usr.scheduled_pickups (every minute; its route gates on a due row).
     "scheduled_pickups": ScheduledPickupsPipeline,
+    # Injury lists and pre-tip box scores into per-game verdicts (every 2 minutes;
+    # its route gates on a source being due).
+    "availability": AvailabilityPipeline,
 }
 
 

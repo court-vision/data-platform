@@ -4249,6 +4249,57 @@
         ]
       }
     },
+    "/v1/internal/pipelines/availability": {
+      "post": {
+        "description": "Trigger the availability pipeline: ESPN's injury list, ESPN fantasy's injury\nstatuses and pre-tip box scores into nba.availability_reports, resolved into\none verdict per player and game date in nba.player_availability.\n\nCalled every 2 minutes by the 'availability' cron job. Decides from the clock\nand the date's nba.games which sources are due (one query, no run row when\nnone is) and polls only those; the rules are `due_sources` in\npipelines/availability.py.",
+        "operationId": "trigger_availability_v1_internal_pipelines_availability_post",
+        "parameters": [
+          {
+            "description": "Poll every source now, due or not (the dashboard's Run button).",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Poll every source now, due or not (the dashboard's Run button).",
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Availability",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/breakout-detection": {
       "post": {
         "description": "Trigger the breakout streamer detection pipeline.\n\nAnalyzes current injuries to prominent starters and identifies teammates\nmost likely to absorb their minutes. Results written to nba.breakout_candidates.\n\nDepends on espn_injury_status and player_season_stats being fresh.\nPass ?date=YYYY-MM-DD to run detection as of a specific date.",

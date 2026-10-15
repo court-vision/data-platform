@@ -41,6 +41,7 @@ from pipelines import (
     PIPELINE_REGISTRY,
     get_pipelines_by_category,
 )
+from pipelines.availability import Due as AvailabilityDue, due_now as availability_due_now
 from pipelines.config import PipelineCategory
 from pipelines.game_logs import GAME_HISTORY_FIRST_YEAR, SEASON_TYPE_PARAMS
 from pipelines.gates import (
@@ -66,7 +67,7 @@ from services.alert_service import AlertEvent, get_alert_service
 
 # The gate routes here (pre-game, post-game, live-stats) are `async def`, so
 # they run on the private process's one event loop, which they share with
-# /health, the scheduled-pickups tick and cron-run ingestion. Every blocking
+# /health, the scheduled-pickups and availability ticks and cron-run ingestion. Every blocking
 # call in them goes to a worker thread: run_in_db_thread for Peewee,
 # asyncio.to_thread for the NBA scoreboard, whose sync tenacity retry sleeps
 # 2-30 s between attempts. Run inline, the live-stats gate stalled the loop
@@ -1222,6 +1223,32 @@ def _has_due_pickups() -> bool:
 
 async def _due_pickups_exist() -> bool:
     return await run_in_db_thread(_has_due_pickups)
+
+
+@router.post("/availability", response_model=PipelineResponse)
+async def trigger_availability(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(False, description="Poll every source now, due or not (the dashboard's Run button)."),
+) -> PipelineResponse:
+    """
+    Trigger the availability pipeline: ESPN's injury list, ESPN fantasy's injury
+    statuses and pre-tip box scores into nba.availability_reports, resolved into
+    one verdict per player and game date in nba.player_availability.
+
+    Called every 2 minutes by the 'availability' cron job. Decides from the clock
+    and the date's nba.games which sources are due (one query, no run row when
+    none is) and polls only those; the rules are `due_sources` in
+    pipelines/availability.py.
+    """
+    due = await _availability_due(force)
+    if not due.any:
+        return PipelineResponse(status=ApiStatus.SKIPPED, message="No availability source is due")
+    result = await run_pipeline("availability", options=due.options())
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+async def _availability_due(force: bool) -> AvailabilityDue:
+    return await run_in_db_thread(availability_due_now, force)
 
 
 @router.post("/live-stats", response_model=LiveStatsResponse)
