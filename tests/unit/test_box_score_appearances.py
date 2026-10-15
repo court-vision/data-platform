@@ -20,6 +20,7 @@ import pytest
 
 from db.models.nba import LiveGameScoreSnapshot, LivePlayerStats, Player, PlayerGameStats
 from db.models.nba.games import Game
+from pipelines.availability import WriteResult
 from pipelines.context import PipelineContext
 from pipelines import live_game_stats
 from pipelines.live_game_stats import LiveGameStatsPipeline, StoredFinalGames
@@ -171,6 +172,13 @@ def live_rows(monkeypatch):
         "upsert_live_stats",
         classmethod(lambda cls, player_id, stats, **kw: stored.__setitem__(player_id, stats)),
     )
+    # The availability hand-off, captured: (game_date, [(game_id, box score, tipped)]) per run.
+    handed: list[tuple[date, list]] = []
+    monkeypatch.setattr(
+        live_game_stats,
+        "record_boxscore",
+        lambda game_date, boxes, **kw: handed.append((game_date, boxes)) or WriteResult(),
+    )
 
     def run(
         home: list[dict], away: list[dict] | None = None, game_status: int = 2
@@ -187,6 +195,7 @@ def live_rows(monkeypatch):
         pipeline.execute(ctx)
         return stored, ctx
 
+    run.handed = handed
     return run
 
 
@@ -286,3 +295,44 @@ def test_live_falls_back_to_whole_minutes_when_the_clock_field_is_missing(live_r
     stored, _ = live_rows(home=[player])
 
     assert stored[1628973]["min"] == 25
+
+
+# ---------------------------------------------------------------------------
+# The availability hand-off: who sat out, and why
+# ---------------------------------------------------------------------------
+
+
+def _inactive(person_id: int, name: str) -> dict:
+    return {
+        **_live_player(person_id, name, "PT00M00.00S", "PT00M", status="INACTIVE"),
+        "notPlayingReason": "INACTIVE_INJURY",
+        "notPlayingDescription": "Left Knee; Soreness",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("game_status", "tipped"), [(1, False), (2, True), (3, True)])
+def test_live_hands_each_box_score_to_the_availability_log(live_rows, game_status, tipped) -> None:
+    """The inactive players the rows skip reach nba.availability_reports, with whether the game has tipped."""
+    stored, _ = live_rows(
+        home=[_inactive(2, "Street Clothes"), _live_player(1628973, "Jalen Brunson", "PT25M01.00S", "PT25M")],
+        game_status=game_status,
+    )
+
+    ((game_date, boxes),) = live_rows.handed
+    ((game_id, game, was_tipped),) = boxes
+    assert (game_date, game_id, was_tipped) == (GAME_DATE, GAME_ID, tipped)
+    assert [p["personId"] for p in game["homeTeam"]["players"]] == [2, 1628973]
+    assert 2 not in stored
+
+
+@pytest.mark.unit
+def test_a_failed_hand_off_costs_the_capture_not_the_rows(live_rows, monkeypatch) -> None:
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("deadlock detected")
+
+    monkeypatch.setattr(live_game_stats, "record_boxscore", broken)
+    stored, ctx = live_rows(home=[_live_player(1628973, "Jalen Brunson", "PT25M01.00S", "PT25M", points=21)])
+
+    assert set(stored) == {1628973}
+    assert ctx.failure_reasons == {"availability_capture_failed": 1}

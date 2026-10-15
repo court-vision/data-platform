@@ -150,12 +150,23 @@ def test_no_game_keeps_the_roster_level_status_without_a_game_id():
 # ---- report log idempotency ---------------------------------------------------------------
 
 
-def test_should_record_only_on_a_status_or_reason_change():
-    first = rep("espn_injuries", "questionable", reason="Ankle")
+def test_should_record_only_when_the_source_says_something_new():
+    first = rep("espn_injuries", "questionable", reason="Ankle", detail="Brunson is questionable for Tuesday.")
     assert should_record(None, first)
-    assert not should_record(first, rep("espn_injuries", "questionable", minutes=2, reason="Ankle", detail="new words"))
-    assert should_record(first, rep("espn_injuries", "out", minutes=2, reason="Ankle"))
-    assert should_record(first, rep("espn_injuries", "questionable", minutes=2, reason="Knee"))
+    # The same word re-observed two minutes later, even with a fresher timestamp: nothing to log.
+    assert not should_record(first, rep("espn_injuries", "questionable", minutes=2, reason="Ankle",
+                                        detail="Brunson is questionable for Tuesday."))
+    assert should_record(first, rep("espn_injuries", "out", minutes=2, reason="Ankle",
+                                    detail="Brunson is questionable for Tuesday."))
+    assert should_record(first, rep("espn_injuries", "questionable", minutes=2, reason="Knee",
+                                    detail="Brunson is questionable for Tuesday."))
+
+
+def test_a_new_note_under_the_same_status_is_logged_so_its_ruling_counts():
+    first = rep("espn_injuries", "questionable", reason="Ankle", detail="Brunson is questionable for Tuesday.")
+    ruled = rep("espn_injuries", "questionable", minutes=90, reason="Ankle", detail="Brunson won't play Tuesday.")
+    assert should_record(first, ruled)
+    assert verdict_of(first) == "questionable" and verdict_of(first, ruled) == "out"
 
 
 # ---- verdict row and events -----------------------------------------------------------------
@@ -165,6 +176,23 @@ def test_first_row_takes_the_previous_games_verdict_and_counts_as_a_change():
     v = resolve([rep("nba_report", "doubtful")], GAME)
     row, changed = next_row(None, v, T0, verdict_at_previous_game="out")
     assert changed and row["previous_verdict"] == "out" and row["changed_at"] == T0
+
+
+def test_a_first_row_that_repeats_the_previous_games_verdict_is_not_news():
+    # Out all week: the 6 AM rollover writes a new row, not a new scratch.
+    week_ago = T0 - timedelta(days=7)
+    v = resolve([rep("espn_injuries", "out", expected_return=date(2026, 11, 1))], GAME)
+    row, changed = next_row(None, v, T0, verdict_at_previous_game="out", previous_game_changed_at=week_ago)
+    assert not changed and row["changed_at"] == week_ago and row["previous_verdict"] == "out"
+
+
+def test_a_first_row_without_a_previous_verdict_is_measured_against_available():
+    out = resolve([rep("espn_injuries", "out", expected_return=date(2026, 11, 1))], GAME)
+    row, changed = next_row(None, out, T0)
+    assert changed and row["previous_verdict"] is None and row["changed_at"] == T0
+    healthy = resolve([rep("nba_boxscore", "active")], GAME)
+    row, changed = next_row(None, healthy, T0, verdict_at_previous_game="available")
+    assert not changed and row["changed_at"] == T0
 
 
 def test_a_verdict_change_moves_changed_at_and_previous_verdict():

@@ -27,6 +27,7 @@ CRON_RUNNER_JOBS = {
     "playoffs",
     "preseason-market",
     "scheduled-pickups",
+    "availability",
 }
 
 # SCHEDULED pipelines that no cron-runner job fires (manual trigger only).
@@ -116,6 +117,11 @@ class TestCronJobs:
         assert config.cron_job_name == "scheduled-pickups"
         assert trigger_endpoint(config) == "/v1/internal/pipelines/scheduled-pickups"
 
+    def test_availability_picks_up_its_cron_runs(self):
+        config = PIPELINE_REGISTRY["availability"].config
+        assert config.cron_job_name == "availability"
+        assert trigger_endpoint(config) == "/v1/internal/pipelines/availability"
+
 
 @pytest.mark.api
 class TestDateOverride:
@@ -163,8 +169,9 @@ class TestForceOnRun:
         params = public_paths[trigger_endpoint(cls.config)]["post"].get("parameters", [])
         assert any(p["name"] == "force" and p["in"] == "query" for p in params), name
 
-    def test_only_the_scheduled_pickups_run_is_forced(self):
-        # Its route skips a cron tick with no pickup due, which made the Run
-        # button a no-op. cv-projection's route takes `force` too, but there it
-        # means "outside the preseason window" - not what a Run click means.
-        assert [name for name, _ in FORCED] == ["scheduled_pickups"]
+    def test_only_the_gated_ticks_are_forced(self):
+        # Their routes skip a cron tick with nothing due (no pickup, no source),
+        # which made the Run button a no-op. cv-projection's route takes `force`
+        # too, but there it means "outside the preseason window" - not what a
+        # Run click means.
+        assert [name for name, _ in FORCED] == ["availability", "scheduled_pickups"]

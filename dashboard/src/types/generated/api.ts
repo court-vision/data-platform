@@ -368,6 +368,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Availability
+         * @description Trigger the availability pipeline: ESPN's injury list, ESPN fantasy's injury
+         *     statuses and pre-tip box scores into nba.availability_reports, resolved into
+         *     one verdict per player and game date in nba.player_availability.
+         *
+         *     Called every 2 minutes by the 'availability' cron job. Decides from the clock
+         *     and the date's nba.games which sources are due (one query, no run row when
+         *     none is) and polls only those; the rules are `due_sources` in
+         *     pipelines/availability.py.
+         */
+        post: operations["trigger_availability_v1_internal_pipelines_availability_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/breakout-detection": {
         parameters: {
             query?: never;
@@ -2978,6 +3005,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AllPipelinesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_availability_v1_internal_pipelines_availability_post: {
+        parameters: {
+            query?: {
+                /** @description Poll every source now, due or not (the dashboard's Run button). */
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
                 };
             };
             /** @description Validation Error */

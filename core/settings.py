@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     # after the buzzer; a final taken back by a review starts it again.
     live_stats_settle_minutes: int = 15
 
+    # The availability pipeline copies each date's verdicts into nba.player_injuries
+    # for that table's readers (Scout's status chip, team rosters, the AI tool), which
+    # gives off days and the offseason a status (docs/NEWS_AND_INJURY_PIPELINES_PLAN.md
+    # § 1). Off leaves the table to the PRE_GAME espn_injury_status pipeline alone.
+    availability_writes_injuries: bool = True
+
     # Development mode
     development_mode: bool = False
 
@@ -149,6 +155,7 @@ class Settings(BaseSettings):
         "schedule-sync": 1,
         "deploy": 1,
         "scheduled-pickups": 5,   # one-minute cadence: five misses is five minutes
+        "availability": 3,        # two-minute cadence: three misses is six minutes
     }
     alert_cron_streak_default_threshold: int = 2
 

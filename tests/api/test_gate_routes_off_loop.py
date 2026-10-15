@@ -1,9 +1,9 @@
 """
 The cron gate routes keep their blocking work off the event loop.
 
-pre-game, post-game and live-stats are `async def`, so they run on the private
-process's one event loop, next to /health, the scheduled-pickups tick and
-cron-run ingestion. Until 2026-10 live-stats called the NBA scoreboard (a sync
+pre-game, post-game, live-stats and availability are `async def`, so they run
+on the private process's one event loop, next to /health, the scheduled-pickups
+tick and cron-run ingestion. Until 2026-10 live-stats called the NBA scoreboard (a sync
 retry that sleeps 2-30 s between attempts) and Peewee inline, and the post-game
 gate did the same plus an ESPN request: on game nights the loop stalled 0.3-8 s
 per call, which was about 21 false /health 503s and slow pickup ticks in a week.
@@ -36,6 +36,7 @@ from db.models.nba.live_player_stats import LivePlayerStats
 from db.models.nba.pipeline_batch import PipelineBatch
 from db.models.pipeline_run import PipelineRun
 from pipelines import live_game_stats
+from pipelines.availability import Slate
 from pipelines.extractors.nba_api import NBAApiExtractor
 from pipelines.gates import GateDecision
 from pipelines.live_game_stats import LiveGameStatsPipeline, StoredFinalGames
@@ -305,3 +306,24 @@ def test_live_stats_scoreboard_fallback_runs_off_the_loop(client, blocking):
             "NBAApiExtractor.check_all_games_final",
         },
     )
+
+
+@pytest.mark.api
+def test_availability_reads_the_slate_off_the_loop(client, blocking, monkeypatch):
+    """The 2-minute tick reads nba.games to decide what is due, on a worker thread."""
+    blocking.fake(Slate, "load", lambda day: Slate(day), kind="classmethod")
+    runs: list[dict] = []
+
+    async def fake_run_pipeline(name, date_override=None, options=None, nba_date=None):
+        runs.append(options)
+        return PipelineResult(status=ApiStatus.SUCCESS, message=name, started_at="2026-03-05T15:00:00")
+
+    monkeypatch.setattr(pipelines_api, "run_pipeline", fake_run_pipeline)
+
+    # 10:00 ET on a date with no games: ESPN's injury list and fantasy are due.
+    with freeze_time("2026-03-05T15:00:00Z"):
+        body = _post(client, "availability")
+
+    assert body["status"] == "success"
+    assert runs == [{"sources": ["espn_injuries", "espn_fantasy"], "boxscore_games": []}]
+    _assert_off_the_loop(blocking, {"Slate.load"})

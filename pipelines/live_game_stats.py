@@ -10,12 +10,13 @@ endpoint (POST /v1/internal/pipelines/live-stats).
 """
 
 from collections.abc import Iterable
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import NamedTuple
 
 from core.settings import settings
 from db.base import db
 from db.models.nba import Player, LivePlayerStats, LiveGameScoreSnapshot
+from pipelines.availability import record_boxscore
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
@@ -257,6 +258,9 @@ class LiveGameStatsPipeline(BasePipeline):
             game_date=str(game_date),
         )
 
+        # Every box score read, for the availability log (see _record_availability).
+        boxes: list[tuple[str, dict, bool]] = []
+
         # Process each game
         for game_meta in scoreboard_games:
             game_id = game_meta["game_id"]
@@ -290,6 +294,7 @@ class LiveGameStatsPipeline(BasePipeline):
                 else:
                     ctx.increment_failed(1, "live_box_score_unavailable")
                 continue
+            boxes.append((game_id, game_data, game_status >= 2))
 
             # Combine home and away players
             home_players = game_data.get("homeTeam", {}).get("players", [])
@@ -297,7 +302,8 @@ class LiveGameStatsPipeline(BasePipeline):
             all_players = home_players + away_players
 
             for player_data in all_players:
-                # Only process players who are active (dressed for the game)
+                # Only process players who are active (dressed for the game). The
+                # inactive ones, and why, go to the availability log below.
                 status = player_data.get("status", "")
                 if status != "ACTIVE":
                     continue
@@ -366,8 +372,35 @@ class LiveGameStatsPipeline(BasePipeline):
 
                 ctx.increment_records()
 
+        self._record_availability(ctx, game_date, boxes)
+
         ctx.log.info(
             "live_stats_complete",
             game_date=str(game_date),
             records_processed=ctx.records_processed,
         )
+
+    @staticmethod
+    def _record_availability(ctx: PipelineContext, game_date: date, boxes: list[tuple[str, dict, bool]]) -> None:
+        """Hand the box scores read this poll to the availability log
+        (pipelines/availability.py): who is inactive and why, which the loop above
+        skips, so a DNP is on record for the post-game view, and from the tip each
+        listed player's final word. A poll that changes nothing writes nothing.
+
+        Never fails the run: a write error costs this poll's capture, and the next
+        poll hands over the same box scores.
+        """
+        if not boxes:
+            return
+        try:
+            result = record_boxscore(game_date, boxes, now=datetime.now(timezone.utc), run_id=ctx.run_id)
+        except Exception as exc:
+            ctx.increment_failed(1, "availability_capture_failed")
+            ctx.log.warning("live_stats_availability_capture_failed", error=f"{type(exc).__name__}: {exc}")
+            return
+        if result.reports:
+            ctx.log.info(
+                "live_stats_availability_captured",
+                reports=result.reports,
+                verdicts_changed=len(result.changes),
+            )
