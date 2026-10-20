@@ -58,9 +58,10 @@ def test_overview_ranks_routes_by_time_and_averages_their_parts(timings):
     for minutes_ago, espn in ((10, 300.0), (70, 500.0), (130, 900.0)):
         timings(MATCHUP, minutes_ago, espn + 100.0, {"espn": espn, "app": 100.0}, calls={"espn": 1})
     timings(MATCHUP, 20, 50.0, {"app": 50.0}, status=502)
-    for minutes_ago in range(0, 10):
+    for minutes_ago in range(1, 11):
         timings(RANKINGS, minutes_ago, 10.0, {"postgres": 4.0, "app": 6.0}, calls={"postgres": 2})
     timings(RANKINGS, 60 * 25, 9999.0, {"app": 9999.0})  # outside the day
+    timings(RANKINGS, -1, 9999.0, {"app": 9999.0})  # after the window's end
     timings(RANKINGS, 5, 9999.0, {"app": 9999.0}, service="data-platform")  # another service
 
     data = build_overview("24h", now=NOW)
@@ -82,6 +83,7 @@ def test_route_detail_has_every_slice_and_the_slowest_requests(timings):
     timings(MATCHUP, 15, 1200.0, {"espn": 1100.0, "wait": 50.0, "app": 50.0})
     timings(MATCHUP, 180, 200.0, {"espn": 150.0, "app": 50.0})
     timings(RANKINGS, 10, 5000.0, {"app": 5000.0})
+    timings(MATCHUP, 0, 9000.0, {"app": 9000.0})  # at the window's end, so outside it
 
     data = build_route("GET", MATCHUP, "24h", now=NOW)
 
