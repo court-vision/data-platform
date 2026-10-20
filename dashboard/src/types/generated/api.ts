@@ -60,6 +60,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/latency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Latency
+         * @description Every route that answered in the window: its request count, 5xx count,
+         *     p50/p95/p99, and the mean request split into where the time went. Routes
+         *     are ordered by the time they cost the service (requests × mean).
+         */
+        get: operations["get_latency_v1_dashboard_latency_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/latency/route": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Route Latency
+         * @description One route over the window: its summary, its p50/p95 and mean split per
+         *     slice of the window (empty slices included), and its slowest requests,
+         *     each with its own split and, when Railway has it, its trace id.
+         */
+        get: operations["get_route_latency_v1_dashboard_latency_route_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/pipelines/{name}/runs": {
         parameters: {
             query?: never;
@@ -1576,6 +1620,108 @@ export interface components {
             status: components["schemas"]["ApiStatus"];
         };
         /**
+         * LatencyBin
+         * @description One slice of the window. Empty slices are included, with no percentiles.
+         */
+        LatencyBin: {
+            /**
+             * At
+             * Format: date-time
+             * @description Start of the slice
+             */
+            at: string;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /** P50 Ms */
+            p50_ms: number | null;
+            /** P95 Ms */
+            p95_ms: number | null;
+            /**
+             * Parts
+             * @description Mean ms per request, by bucket
+             */
+            parts: {
+                [key: string]: number;
+            };
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+        };
+        /** LatencyOverview */
+        LatencyOverview: {
+            /**
+             * Available
+             * @description False until the backend's migration has created ops.request_timings
+             */
+            available: boolean;
+            /**
+             * Routes
+             * @description Most total time first (requests × mean)
+             */
+            routes: components["schemas"]["RouteLatency"][];
+            /** Service */
+            service: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            totals: components["schemas"]["LatencyStats"];
+            /**
+             * Until
+             * Format: date-time
+             */
+            until: string;
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d" | "30d";
+        };
+        /**
+         * LatencyResponse
+         * @description Response for GET /v1/dashboard/latency.
+         */
+        LatencyResponse: {
+            data: components["schemas"]["LatencyOverview"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * LatencyStats
+         * @description Response times over a set of requests. Percentiles are None with no requests.
+         */
+        LatencyStats: {
+            /**
+             * Errors
+             * @description Requests answered with a 5xx
+             * @default 0
+             */
+            errors: number;
+            /** Max Ms */
+            max_ms: number | null;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** P50 Ms */
+            p50_ms: number | null;
+            /** P95 Ms */
+            p95_ms: number | null;
+            /** P99 Ms */
+            p99_ms: number | null;
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+        };
+        /**
          * LiveStatsData
          * @description Data payload for the live stats trigger endpoint.
          */
@@ -2301,6 +2447,95 @@ export interface components {
             triggered_by: string | null;
         };
         /**
+         * RouteLatency
+         * @description One route (method + path template) over the window.
+         */
+        RouteLatency: {
+            /**
+             * Calls
+             * @description Mean calls per request, by bucket
+             */
+            calls: {
+                [key: string]: number;
+            };
+            /**
+             * Errors
+             * @description Requests answered with a 5xx
+             * @default 0
+             */
+            errors: number;
+            /** Max Ms */
+            max_ms: number | null;
+            /** Mean Ms */
+            mean_ms: number | null;
+            /** Method */
+            method: string;
+            /** P50 Ms */
+            p50_ms: number | null;
+            /** P95 Ms */
+            p95_ms: number | null;
+            /** P99 Ms */
+            p99_ms: number | null;
+            /**
+             * Parts
+             * @description Mean ms per request, by bucket; sums to mean_ms
+             */
+            parts: {
+                [key: string]: number;
+            };
+            /**
+             * Requests
+             * @default 0
+             */
+            requests: number;
+            /** Route */
+            route: string;
+        };
+        /** RouteLatencyDetail */
+        RouteLatencyDetail: {
+            /** Available */
+            available: boolean;
+            /** Bin Seconds */
+            bin_seconds: number;
+            /** @description None when the route had no requests in the window */
+            route: components["schemas"]["RouteLatency"] | null;
+            /** Series */
+            series: components["schemas"]["LatencyBin"][];
+            /** Service */
+            service: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /**
+             * Slowest
+             * @description The slowest requests in the window, slowest first
+             */
+            slowest: components["schemas"]["SlowRequest"][];
+            /**
+             * Until
+             * Format: date-time
+             */
+            until: string;
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "1h" | "24h" | "7d" | "30d";
+        };
+        /**
+         * RouteLatencyResponse
+         * @description Response for GET /v1/dashboard/latency/route.
+         */
+        RouteLatencyResponse: {
+            data: components["schemas"]["RouteLatencyDetail"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * RunsSummary
          * @description Over the runs returned (a window, newest first), not all time, but for last_success_at.
          */
@@ -2435,6 +2670,33 @@ export interface components {
             message: string;
             /** Status */
             status: string;
+        };
+        /** SlowRequest */
+        SlowRequest: {
+            /** Calls */
+            calls: {
+                [key: string]: number;
+            };
+            /** Duration Ms */
+            duration_ms: number;
+            /** Parts */
+            parts: {
+                [key: string]: number;
+            };
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Status Code */
+            status_code: number;
+            /**
+             * Trace Id
+             * @description Set when the request's trace went to Railway
+             */
+            trace_id: string | null;
+            /** Version */
+            version: string | null;
         };
         /**
          * StandardLeague
@@ -2579,6 +2841,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FreshnessResponse"];
+                };
+            };
+        };
+    };
+    get_latency_v1_dashboard_latency_get: {
+        parameters: {
+            query?: {
+                /** @description How far back: 1h, 24h, 7d or 30d */
+                window?: "1h" | "24h" | "7d" | "30d";
+                /** @description The service that wrote the rows */
+                service?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatencyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_route_latency_v1_dashboard_latency_route_get: {
+        parameters: {
+            query: {
+                /** @description The route's path template, as the table shows it */
+                route: string;
+                method?: string;
+                /** @description How far back: 1h, 24h, 7d or 30d */
+                window?: "1h" | "24h" | "7d" | "30d";
+                /** @description The service that wrote the rows */
+                service?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteLatencyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
