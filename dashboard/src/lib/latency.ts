@@ -1,4 +1,5 @@
 import type { Schemas } from "@/lib/api"
+import { formatClockCentral, formatDay, formatDayClockCentral } from "@/lib/time"
 
 export type LatencyOverview = Schemas["LatencyOverview"]
 export type RouteLatency = Schemas["RouteLatency"]
@@ -190,10 +191,6 @@ export function msTick(ms: number): string {
   return Number.isInteger(seconds) ? `${seconds}s` : `${seconds.toFixed(1)}s`
 }
 
-const sliceClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", minute: "2-digit" })
-const sliceDayClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short", hour: "numeric" })
-const sliceDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" })
-
 /**
  * When a slice of the series starts, at its width's grain: a clock time in
  * Central for the hour's five-minute slices, a weekday and hour for hourly and
@@ -201,8 +198,7 @@ const sliceDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "sho
  * ones, which are UTC days.
  */
 export function formatSlice(iso: string, binSeconds: number): string {
+  if (binSeconds >= 86_400) return `${formatDay(iso.slice(0, 10))} UTC`
   const ms = Date.parse(iso)
-  if (binSeconds >= 86_400) return `${sliceDay.format(ms)} UTC`
-  if (binSeconds >= 3600) return sliceDayClock.format(ms)
-  return sliceClock.format(ms)
+  return binSeconds >= 3600 ? formatDayClockCentral(ms) : formatClockCentral(ms)
 }
