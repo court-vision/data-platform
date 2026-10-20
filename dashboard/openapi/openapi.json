@@ -1153,6 +1153,227 @@
         "title": "JobStatusResponse",
         "type": "object"
       },
+      "LatencyBin": {
+        "description": "One slice of the window. Empty slices are included, with no percentiles.",
+        "properties": {
+          "at": {
+            "description": "Start of the slice",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "errors": {
+            "default": 0,
+            "title": "Errors",
+            "type": "integer"
+          },
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Ms"
+          },
+          "parts": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Mean ms per request, by bucket",
+            "title": "Parts",
+            "type": "object"
+          },
+          "requests": {
+            "default": 0,
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "requests",
+          "errors",
+          "p50_ms",
+          "p95_ms",
+          "parts"
+        ],
+        "title": "LatencyBin",
+        "type": "object"
+      },
+      "LatencyOverview": {
+        "properties": {
+          "available": {
+            "description": "False until the backend's migration has created ops.request_timings",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "routes": {
+            "description": "Most total time first (requests \u00d7 mean)",
+            "items": {
+              "$ref": "#/components/schemas/RouteLatency"
+            },
+            "title": "Routes",
+            "type": "array"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/LatencyStats"
+          },
+          "until": {
+            "format": "date-time",
+            "title": "Until",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "window",
+          "since",
+          "until",
+          "available",
+          "totals",
+          "routes"
+        ],
+        "title": "LatencyOverview",
+        "type": "object"
+      },
+      "LatencyResponse": {
+        "description": "Response for GET /v1/dashboard/latency.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LatencyOverview"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "LatencyResponse",
+        "type": "object"
+      },
+      "LatencyStats": {
+        "description": "Response times over a set of requests. Percentiles are None with no requests.",
+        "properties": {
+          "errors": {
+            "default": 0,
+            "description": "Requests answered with a 5xx",
+            "title": "Errors",
+            "type": "integer"
+          },
+          "max_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Ms"
+          },
+          "mean_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ms"
+          },
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Ms"
+          },
+          "p99_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P99 Ms"
+          },
+          "requests": {
+            "default": 0,
+            "title": "Requests",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "errors",
+          "p50_ms",
+          "p95_ms",
+          "p99_ms",
+          "mean_ms",
+          "max_ms"
+        ],
+        "title": "LatencyStats",
+        "type": "object"
+      },
       "LiveStatsData": {
         "description": "Data payload for the live stats trigger endpoint.",
         "properties": {
@@ -2924,6 +3145,214 @@
         "title": "QualityRunEntry",
         "type": "object"
       },
+      "RouteLatency": {
+        "description": "One route (method + path template) over the window.",
+        "properties": {
+          "calls": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Mean calls per request, by bucket",
+            "title": "Calls",
+            "type": "object"
+          },
+          "errors": {
+            "default": 0,
+            "description": "Requests answered with a 5xx",
+            "title": "Errors",
+            "type": "integer"
+          },
+          "max_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Ms"
+          },
+          "mean_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ms"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P50 Ms"
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P95 Ms"
+          },
+          "p99_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P99 Ms"
+          },
+          "parts": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Mean ms per request, by bucket; sums to mean_ms",
+            "title": "Parts",
+            "type": "object"
+          },
+          "requests": {
+            "default": 0,
+            "title": "Requests",
+            "type": "integer"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requests",
+          "errors",
+          "p50_ms",
+          "p95_ms",
+          "p99_ms",
+          "mean_ms",
+          "max_ms",
+          "method",
+          "route",
+          "parts",
+          "calls"
+        ],
+        "title": "RouteLatency",
+        "type": "object"
+      },
+      "RouteLatencyDetail": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "bin_seconds": {
+            "title": "Bin Seconds",
+            "type": "integer"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteLatency"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "None when the route had no requests in the window"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/LatencyBin"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          },
+          "slowest": {
+            "description": "The slowest requests in the window, slowest first",
+            "items": {
+              "$ref": "#/components/schemas/SlowRequest"
+            },
+            "title": "Slowest",
+            "type": "array"
+          },
+          "until": {
+            "format": "date-time",
+            "title": "Until",
+            "type": "string"
+          },
+          "window": {
+            "enum": [
+              "1h",
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "title": "Window",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "window",
+          "since",
+          "until",
+          "available",
+          "bin_seconds",
+          "route",
+          "series",
+          "slowest"
+        ],
+        "title": "RouteLatencyDetail",
+        "type": "object"
+      },
+      "RouteLatencyResponse": {
+        "description": "Response for GET /v1/dashboard/latency/route.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/RouteLatencyDetail"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "RouteLatencyResponse",
+        "type": "object"
+      },
       "RunsSummary": {
         "description": "Over the runs returned (a window, newest first), not all time, but for last_success_at.",
         "properties": {
@@ -3274,6 +3703,71 @@
         "title": "ServicesResponse",
         "type": "object"
       },
+      "SlowRequest": {
+        "properties": {
+          "calls": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Calls",
+            "type": "object"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "number"
+          },
+          "parts": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Parts",
+            "type": "object"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status_code": {
+            "title": "Status Code",
+            "type": "integer"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set when the request's trace went to Railway",
+            "title": "Trace Id"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "started_at",
+          "duration_ms",
+          "status_code",
+          "parts",
+          "calls",
+          "trace_id",
+          "version"
+        ],
+        "title": "SlowRequest",
+        "type": "object"
+      },
       "StandardLeague": {
         "description": "What the ranks were measured in.",
         "properties": {
@@ -3596,6 +4090,169 @@
         "summary": "Get Freshness",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/v1/dashboard/latency": {
+      "get": {
+        "description": "Every route that answered in the window: its request count, 5xx count,\np50/p95/p99, and the mean request split into where the time went. Routes\nare ordered by the time they cost the service (requests \u00d7 mean).",
+        "operationId": "get_latency_v1_dashboard_latency_get",
+        "parameters": [
+          {
+            "description": "How far back: 1h, 24h, 7d or 30d",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "description": "How far back: 1h, 24h, 7d or 30d",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The service that wrote the rows",
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "default": "api",
+              "description": "The service that wrote the rows",
+              "title": "Service",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatencyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Latency",
+        "tags": [
+          "latency"
+        ]
+      }
+    },
+    "/v1/dashboard/latency/route": {
+      "get": {
+        "description": "One route over the window: its summary, its p50/p95 and mean split per\nslice of the window (empty slices included), and its slowest requests,\neach with its own split and, when Railway has it, its trace id.",
+        "operationId": "get_route_latency_v1_dashboard_latency_route_get",
+        "parameters": [
+          {
+            "description": "The route's path template, as the table shows it",
+            "in": "query",
+            "name": "route",
+            "required": true,
+            "schema": {
+              "description": "The route's path template, as the table shows it",
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Route",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "method",
+            "required": false,
+            "schema": {
+              "default": "GET",
+              "maxLength": 16,
+              "minLength": 1,
+              "title": "Method",
+              "type": "string"
+            }
+          },
+          {
+            "description": "How far back: 1h, 24h, 7d or 30d",
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "default": "24h",
+              "description": "How far back: 1h, 24h, 7d or 30d",
+              "enum": [
+                "1h",
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "title": "Window",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The service that wrote the rows",
+            "in": "query",
+            "name": "service",
+            "required": false,
+            "schema": {
+              "default": "api",
+              "description": "The service that wrote the rows",
+              "title": "Service",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteLatencyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Route Latency",
+        "tags": [
+          "latency"
         ]
       }
     },
