@@ -2,7 +2,7 @@
 The Latency page's numbers, read from ops.request_timings.
 
 The backend writes one row per request (backend/services/request_timings.py,
-table from backend migration 0037): its route, status, total, and `parts`, the
+table from backend migration 0038): its route, status, total, and `parts`, the
 total split into buckets that add up to it. Percentiles are computed by
 Postgres; a route's parts are averaged per request, so they add up to its mean.
 Blocking: call these through `run_in_db_thread`.

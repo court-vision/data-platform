@@ -2,7 +2,7 @@
 services/latency_service.py against Postgres: percentiles, means per request
 and the slices of a route's series, from rows shaped like the backend's.
 
-The table is created here as the backend's migration 0037 creates it (the
+The table is created here as the backend's migration 0038 creates it (the
 backend owns the schema; this suite only reads it).
 """
 
