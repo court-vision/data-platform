@@ -27,7 +27,9 @@ import l from "@/components/latency.module.css"
 
 /**
  * Every backend route's response times, and where its time goes: ESPN, the
- * NBA, Postgres, our own code. The window and the order live in the URL.
+ * NBA, Postgres, our own code. The window and the order live in the URL; the
+ * text names the window of the data on screen, which lags the URL while
+ * another window loads.
  */
 export function Latency() {
   usePageContext("Latency")
@@ -82,7 +84,7 @@ export function Latency() {
         </Block>
       ) : (
         <>
-          <TotalsTiles totals={data.totals} window={window} />
+          <TotalsTiles totals={data.totals} window={data.window} />
           <RoutesBlock data={data} window={window} sort={sort} onWindow={(value) => update("window", value, "24h")} onSort={(value) => update("sort", value, "time")} />
         </>
       )}
@@ -147,7 +149,7 @@ function RoutesBlock({
         <AnatomyKey groups={groupsUsed(routes.map((route) => route.parts))} />
       </div>
       {routes.length === 0 ? (
-        <p className={s.empty}>No requests in the last {window}.</p>
+        <p className={s.empty}>No requests in the last {data.window}.</p>
       ) : (
         <div className={s.bleed}>
           <table className={s.table} style={{ minWidth: "60rem" }}>

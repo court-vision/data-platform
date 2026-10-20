@@ -89,12 +89,12 @@ export function LatencyRoute() {
       ) : !data.available || !data.route ? (
         <Block title="Response time" right={windowChoice}>
           <p className={s.empty}>
-            {data.available ? `No ${method} requests to this route in the last ${window}.` : "No request timings yet."}
+            {data.available ? `No ${method} requests to this route in the last ${data.window}.` : "No request timings yet."}
           </p>
         </Block>
       ) : (
         <>
-          <StatsTiles stats={data.route} note={`in the last ${window}`} />
+          <StatsTiles stats={data.route} note={`in the last ${data.window}`} />
 
           <Block title="Response time" note="p50 and p95 per slice · Central time" right={windowChoice}>
             <PercentileChart series={data.series} binSeconds={data.bin_seconds} />
@@ -105,7 +105,7 @@ export function LatencyRoute() {
             <AnatomyKey groups={groupsUsed(data.series.map((bin) => bin.parts))} />
           </Block>
 
-          <BucketsTable route={data.route} window={window} />
+          <BucketsTable route={data.route} window={data.window} />
 
           <SlowestTable slowest={data.slowest} now={now} />
         </>

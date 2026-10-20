@@ -72,6 +72,16 @@ describe("Latency", () => {
     expect(html).toMatch(pressed("7d"))
   })
 
+  test("while another window loads, the text names the window of the numbers on screen", () => {
+    // The 30d answer has not landed: the 24h one stands in for it.
+    const html = render(<Latency />, "/latency?window=30d", (client) =>
+      client.setQueryData(latencyQuery("30d").queryKey, overview({ window: "24h" })),
+    )
+    expect(html).toContain("in the last 24h")
+    expect(html).not.toContain("in the last 30d")
+    expect(html).toMatch(pressed("30d"))
+  })
+
   test("before the backend writes any timings, the page says so", () => {
     const html = render(<Latency />, "/latency", (client) =>
       client.setQueryData(latencyQuery("24h").queryKey, overview({ available: false, routes: [] })),
