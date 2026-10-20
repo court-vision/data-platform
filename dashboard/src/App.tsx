@@ -5,6 +5,8 @@ import { TokenGate } from "@/components/shell/TokenGate"
 import { DeskFrame } from "@/desk/DeskFrame"
 import { useToken } from "@/lib/token"
 import { Freshness } from "@/routes/Freshness"
+import { Latency } from "@/routes/Latency"
+import { LatencyRoute } from "@/routes/LatencyRoute"
 import { NotFound } from "@/routes/NotFound"
 import { Overview } from "@/routes/Overview"
 import { PipelineDetail } from "@/routes/PipelineDetail"
@@ -30,6 +32,8 @@ const router = createBrowserRouter([
       { path: "quality", element: <Quality /> },
       { path: "quality/runs/:runId", element: <QualityRun /> },
       { path: "projections", element: <Projections /> },
+      { path: "latency", element: <Latency /> },
+      { path: "latency/route", element: <LatencyRoute /> },
       { path: "*", element: <NotFound /> },
     ],
   },
