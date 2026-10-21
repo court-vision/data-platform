@@ -6,8 +6,9 @@ active game windows by the LiveGameStatsPipeline. Used to build score-over-time
 charts showing how leads changed throughout a game.
 
 One row is appended per game per pipeline run — this is a pure time series,
-not a rolling snapshot. Records are cleaned up at the start of each day's
-live pipeline run.
+not a rolling snapshot. A night's rows outlive it: the next night's first live
+run deletes only its pre-tip ones (game_status 1), and the rest are the margin
+line of each game's sheet after the fact.
 """
 
 from datetime import datetime
@@ -28,8 +29,9 @@ class LiveGameScoreSnapshot(BaseModel):
     """
     Score snapshot for an NBA game at a specific point in time.
 
-    One row per game per ~60-second pipeline poll. Records accumulate throughout
-    a game night (~240 rows per game) and are deleted when the next game day starts.
+    One row per game per ~30-second pipeline poll. Records accumulate throughout
+    a game night (about 300 in play per game, plus the pre-tip polls, which are
+    deleted when the next game day starts; the rest are kept).
 
     Attributes:
         id: Auto-incrementing primary key

@@ -20,7 +20,7 @@ from pipelines.base import BasePipeline
 from pipelines.config import PipelineConfig, PipelineCategory
 from pipelines.context import PipelineContext
 from pipelines.extractors import NBAApiExtractor
-from pipelines.transformers import calculate_fantasy_points, minutes_to_int
+from pipelines.transformers import calculate_fantasy_points
 from pipelines.transformers.minutes import seconds_played
 
 
@@ -223,9 +223,14 @@ class LiveGameStatsPipeline(BasePipeline):
         if deleted:
             ctx.log.info("live_stats_cleanup", deleted_count=deleted, game_date=str(game_date))
 
-        # Clean up score snapshots from previous game days.
+        # A past night keeps its in-play and final score snapshots: they are
+        # the margin line of each game's sheet once the night is over (the
+        # backend's GET /v1/games/{date}/{game_id}). Only the pre-tip polls go,
+        # 0-0 each and most of a night's rows: 870 of the 1,201 for the 9:30 PM
+        # game of 2026-10-20, whose slate first tipped at 3 PM.
         LiveGameScoreSnapshot.delete().where(
-            LiveGameScoreSnapshot.game_date < game_date
+            (LiveGameScoreSnapshot.game_date < game_date)
+            & (LiveGameScoreSnapshot.game_status == 1)
         ).execute()
 
         # Get all games on the scoreboard for today
@@ -310,10 +315,15 @@ class LiveGameStatsPipeline(BasePipeline):
                 # question goes to `minutes`, which keeps the seconds
                 # ("PT00M40.00S"). Same rule as player_game_stats, so live and
                 # settled agree about who played; the row is stored with `min` 0.
-                if seconds_played(stats_raw.get("minutes") or minutes_str) <= 0:
+                seconds = seconds_played(stats_raw.get("minutes") or minutes_str)
+                if seconds <= 0:
                     continue
 
-                min_int = minutes_to_int(minutes_str)
+                # Whole minutes, truncated, from the same field. Read off
+                # `minutesCalculated`, every row of 2026-10-20 was stored with
+                # `min` 0 (Paul George: 38 points, 30 minutes in the game log),
+                # while `minutes` told each of them apart from a DNP.
+                min_int = int(seconds // 60)
 
                 player_id = player_data.get("personId")
                 if not player_id:

@@ -286,3 +286,18 @@ def test_live_falls_back_to_whole_minutes_when_the_clock_field_is_missing(live_r
     stored, _ = live_rows(home=[player])
 
     assert stored[1628973]["min"] == 25
+
+
+@pytest.mark.unit
+def test_live_minutes_come_from_the_clock_field_that_decides_the_row(live_rows) -> None:
+    """2026-10-20: all 68 live rows were stored with `min` 0 while the game log
+    had the minutes (Paul George, 30). `minutes` decided each row was a player
+    who played; the row's minutes now come from it too, not `minutesCalculated`."""
+    george = _live_player(202331, "Paul George", "PT30M12.00S", "PT30M", points=38)
+    del george["statistics"]["minutesCalculated"]
+    cameo = _live_player(1628969, "Mikal Bridges", "PT00M40.00S", "PT00M", points=3)
+
+    stored, _ = live_rows(home=[george, cameo])
+
+    assert stored[202331]["min"] == 30
+    assert stored[1628969]["min"] == 0
