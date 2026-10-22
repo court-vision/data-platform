@@ -178,3 +178,10 @@ jobs:
             ! command -v bun >/dev/null && ! command -v node >/dev/null &&
             echo "ok: dist present, bun/node absent, running as $(id -un)"
           '
+
+      - name: Runtime image carries the score snapshot restore and its data
+        run: |
+          docker run --rm --entrypoint sh \
+            -e DATABASE_URL=postgresql://ci:ci@127.0.0.1:1/ci -e PIPELINE_API_TOKEN=ci data-platform:ci -c '
+            python -c "from scripts.restore_score_snapshots import load_rows; n = len(load_rows()); assert n, n; print(f\"ok: {n} rows\")"
+          '
