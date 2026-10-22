@@ -11,13 +11,17 @@ from scripts.restore_score_snapshots import RESTORE_RUN_ID, load_rows, restore
 
 
 @pytest.mark.integration
-def test_the_saved_file_holds_each_opening_night_game_from_the_tip_to_the_final():
+def test_the_saved_files_hold_each_game_of_both_nights_from_the_tip_to_the_final():
     rows = load_rows()
 
-    assert {r["game_id"] for r in rows} == {"0022600001", "0022600002", "0022600003"}
-    assert all(r["game_date"] == date(2026, 10, 20) and r["game_status"] in (2, 3) for r in rows)
+    nights = {d: {r["game_id"] for r in rows if r["game_date"] == d} for d in {r["game_date"] for r in rows}}
+    assert set(nights) == {date(2026, 10, 20), date(2026, 10, 21)}
+    assert nights[date(2026, 10, 20)] == {"0022600001", "0022600002", "0022600003"}
+    assert len(nights[date(2026, 10, 21)]) == 11
+    assert all(r["game_status"] in (2, 3) for r in rows)
     finals = {r["game_id"]: (r["away_score"], r["home_score"]) for r in rows if r["game_status"] == 3}
-    assert finals == {"0022600001": (113, 121), "0022600002": (106, 100), "0022600003": (116, 104)}
+    assert len(finals) == 14
+    assert finals["0022600001"] == (113, 121) and finals["0022600093"] == (96, 121)
 
 
 @pytest.mark.integration
@@ -31,7 +35,7 @@ def test_a_dry_run_writes_nothing_and_a_second_apply_skips_what_is_there(integra
     stored = LiveGameScoreSnapshot.select().where(LiveGameScoreSnapshot.pipeline_run_id == RESTORE_RUN_ID)
     assert stored.count() == len(rows)
 
-    assert restore(rows, apply=True) == {"0022600001": 0, "0022600002": 0, "0022600003": 0}
+    assert set(restore(rows, apply=True).values()) == {0}
     assert LiveGameScoreSnapshot.select().count() == len(rows)
 
 
