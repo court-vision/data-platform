@@ -520,12 +520,14 @@ class TestDependenciesMeanTonight:
         }
         assert waits_on_game_log >= {"player_season_stats", "player_rolling_stats", "team_stats"}
         # lineup_snapshots waits for the ESPN-gated daily_matchup_scores instead,
-        # which this batch never runs: it stays skipped on both polls.
-        waits_on_espn_gate = {
-            name for name in names
-            if any(PIPELINE_REGISTRY[dep].config.espn_gated for dep in PIPELINE_REGISTRY[name].config.depends_on)
-        }
-        assert waits_on_espn_gate == {"lineup_snapshots"}
+        # which this batch never runs, and move_ledger waits for lineup_snapshots:
+        # both stay skipped on both polls.
+        def waits_on_gate(name: str) -> bool:
+            return any(PIPELINE_REGISTRY[dep].config.espn_gated or waits_on_gate(dep)
+                       for dep in PIPELINE_REGISTRY[name].config.depends_on)
+
+        waits_on_espn_gate = {name for name in names if waits_on_gate(name)}
+        assert waits_on_espn_gate == {"lineup_snapshots", "move_ledger"}
 
         with freeze_time(IN_WINDOW):
             first = asyncio.run(poll())

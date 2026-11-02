@@ -7,6 +7,7 @@ from .data_quality_run import DataQualityRun
 from .data_quality_check import DataQualityCheck
 from .scheduled_pickups import ScheduledPickup
 from .lineup_snapshots import LineupSnapshot, LineupSnapshotPlayer
+from .move_outcomes import MoveOutcome
 
 __all__ = [
     'User',
@@ -18,4 +19,5 @@ __all__ = [
     'ScheduledPickup',
     'LineupSnapshot',
     'LineupSnapshotPlayer',
+    'MoveOutcome',
 ]

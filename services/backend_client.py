@@ -1,6 +1,7 @@
 """
-Backend internal API client — the lineup-alerts pipeline's one call per team, and
-the scheduled-pickups pipeline's one call per tick.
+Backend internal API client — the lineup-alerts pipeline's one call per team, the
+scheduled-pickups pipeline's one call per tick, and the move-ledger pipeline's one
+call per night.
 
     POST {BACKEND_INTERNAL_URL}/v1/internal/jobs/lineup/evaluate
     Authorization: Bearer <PIPELINE_API_TOKEN>      (the token both services share)
@@ -31,6 +32,13 @@ answers one `PickupResult` per row (`executed | skipped | failed | expired |
 deferred`). Same contract — one request, no retry (the backend's claim lease and
 its re-read before every attempt make a lost answer safe), transport problems
 come back as a `PickupsRun` that is not `ok`.
+
+`run_ledger` is the third, POST /v1/internal/jobs/ledger/run with `{}`: the backend
+rebuilds the move ledger (usr.move_outcomes) of every league with a recent lineup
+snapshot and answers one result per league. A rebuild replaces a league's rows
+whole, so a lost answer is safe to repeat; still one request, no retry (the
+post-game batch's next poll is the retry). It reads a season of snapshots per
+league, so it has its own read timeout.
 """
 
 from __future__ import annotations
@@ -47,6 +55,7 @@ from core.settings import settings as default_settings
 
 EVALUATE_PATH = "/v1/internal/jobs/lineup/evaluate"
 EXECUTE_PICKUPS_PATH = "/v1/internal/jobs/pickups/execute"
+RUN_LEDGER_PATH = "/v1/internal/jobs/ledger/run"
 CONNECT_TIMEOUT_SECONDS = 5.0
 
 # Outcomes the backend returns for a 200.
@@ -261,16 +270,74 @@ class PickupsRun:
         return cls(ok=True, due=due, results=results, lanes=lanes)
 
 
+@dataclass(frozen=True)
+class LedgerLeague:
+    """One league's rebuild: how many stored days it read and moves it found, by source."""
+
+    provider_league_id: str
+    season: int
+    ok: bool
+    days: int = 0
+    moves: int = 0
+    by_source: dict = field(default_factory=dict)
+    error: Optional[str] = None
+
+    @classmethod
+    def from_payload(cls, item: Any) -> Optional["LedgerLeague"]:
+        if not isinstance(item, dict) or not isinstance(item.get("ok"), bool):
+            return None
+        try:
+            return cls(
+                provider_league_id=str(item["provider_league_id"]),
+                season=int(item["season"]),
+                ok=item["ok"],
+                days=int(item.get("days") or 0),
+                moves=int(item.get("moves") or 0),
+                by_source=item["by_source"] if isinstance(item.get("by_source"), dict) else {},
+                error=item.get("error"),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+@dataclass(frozen=True)
+class LedgerRun:
+    """The backend's answer to one ledger rebuild, or why there is none (`ok` False)."""
+
+    ok: bool
+    leagues: list[LedgerLeague] = field(default_factory=list)
+    reason: Optional[str] = None
+    error: Optional[str] = None
+
+    @classmethod
+    def unavailable(cls, reason: str, error: Optional[str] = None) -> "LedgerRun":
+        return cls(ok=False, reason=reason, error=error)
+
+    @classmethod
+    def from_payload(cls, data: Any) -> "LedgerRun":
+        if not isinstance(data, dict) or not isinstance(data.get("leagues"), list):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        leagues: list[LedgerLeague] = []
+        for item in data["leagues"]:
+            league = LedgerLeague.from_payload(item)
+            if league is None:
+                return cls.unavailable(reason="malformed_response", error=f"unexpected league: {_excerpt(repr(item))}")
+            leagues.append(league)
+        return cls(ok=True, leagues=leagues)
+
+
 class BackendClient:
     """Talks to the backend's pipeline-token routes. Disabled when no base URL is configured."""
 
     def __init__(self, base_url: Optional[str], token: str, timeout_seconds: float,
-                 pickups_timeout_seconds: Optional[float] = None):
+                 pickups_timeout_seconds: Optional[float] = None, ledger_timeout_seconds: Optional[float] = None):
         self._base_url = (base_url or "").strip().rstrip("/")
         self._token = token
         self._timeout = (CONNECT_TIMEOUT_SECONDS, float(timeout_seconds))
         # A pickups tick is several ESPN round trips per row, so it gets its own read timeout.
         self._pickups_timeout = (CONNECT_TIMEOUT_SECONDS, float(pickups_timeout_seconds or timeout_seconds))
+        # A ledger rebuild reads a season of snapshots and box scores per league.
+        self._ledger_timeout = (CONNECT_TIMEOUT_SECONDS, float(ledger_timeout_seconds or timeout_seconds))
         self._log = get_logger("backend_client")
 
     @property
@@ -394,6 +461,75 @@ class BackendClient:
         )
         return run
 
+    def run_ledger(self, *, correlation_id: Optional[str] = None) -> LedgerRun:
+        """Ask the backend to rebuild the move ledger of every active league.
+
+        Never raises: transport and protocol failures come back as a run that is not `ok`.
+        """
+        if not self.enabled:
+            return LedgerRun.unavailable(reason="backend_not_configured")
+
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+
+        started = time.monotonic()
+        status_code: Optional[int] = None
+        try:
+            response = requests.post(
+                f"{self._base_url}{RUN_LEDGER_PATH}",
+                json={},
+                headers=headers,
+                timeout=self._ledger_timeout,
+            )
+            status_code = response.status_code
+            run = self._parse_ledger_response(response)
+        except requests.Timeout as exc:
+            run = LedgerRun.unavailable(reason="timeout", error=_excerpt(str(exc)))
+        except requests.RequestException as exc:
+            run = LedgerRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+        except Exception as exc:  # a client bug must degrade the run, not raise
+            run = LedgerRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        log = self._log.info if run.ok else self._log.warning
+        log(
+            "backend_run_ledger",
+            ok=run.ok,
+            leagues=len(run.leagues),
+            failed=sum(1 for league in run.leagues if not league.ok),
+            moves=sum(league.moves for league in run.leagues),
+            reason=run.reason,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            error=run.error,
+        )
+        return run
+
+    @staticmethod
+    def _parse_ledger_response(response: requests.Response) -> LedgerRun:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if status == 200:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            return LedgerRun.from_payload(data)
+
+        if status == 401:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            return LedgerRun.unavailable(reason="unauthorized", error=_excerpt(str(detail or response.text)))
+
+        detail: Optional[str] = None
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
+        return LedgerRun.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
+
     @staticmethod
     def _parse_pickups_response(response: requests.Response) -> PickupsRun:
         status = response.status_code
@@ -454,4 +590,5 @@ def backend_client_from_settings(settings: Any = default_settings) -> BackendCli
         token=settings.pipeline_api_token.get_secret_value(),
         timeout_seconds=settings.backend_timeout_seconds,
         pickups_timeout_seconds=getattr(settings, "pickups_backend_timeout_seconds", None),
+        ledger_timeout_seconds=getattr(settings, "ledger_backend_timeout_seconds", None),
     )
