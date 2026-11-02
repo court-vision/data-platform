@@ -18,7 +18,9 @@ back too.
 
 Counters: a league rebuilt is a processed record; a league the backend could
 not rebuild is a failed record with its error; a backend that could not be
-asked is one failed record (the next poll retries).
+asked is one failed record. Either failure then fails the run: the post-game
+batch skips a pipeline that already succeeded that night, so only a failed
+run is retried by the next poll (which rebuilds every league again, safely).
 """
 
 from core.logging import get_correlation_id
@@ -26,6 +28,10 @@ from pipelines.base import BasePipeline
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
 from services.backend_client import backend_client_from_settings
+
+
+class MoveLedgerFailed(RuntimeError):
+    """The night's rebuild did not finish: the run is recorded as failed, so it is retried."""
 
 
 class MoveLedgerPipeline(BasePipeline):
@@ -51,11 +57,13 @@ class MoveLedgerPipeline(BasePipeline):
         if not run.ok:
             ctx.increment_failed(1, run.reason or "backend_unavailable")
             ctx.log.warning("move_ledger_backend_unavailable", reason=run.reason, error=run.error)
-            return
+            raise MoveLedgerFailed(f"the backend could not be asked ({run.reason or 'backend_unavailable'})")
+        failed: list[str] = []
         for league in run.leagues:
             if league.ok:
                 ctx.increment_records(1)
             else:
+                failed.append(f"{league.provider_league_id}/{league.season}")
                 ctx.increment_failed(1, f"league_failed:{league.error or 'unknown'}")
             ctx.log.info(
                 "move_ledger_league",
@@ -69,3 +77,5 @@ class MoveLedgerPipeline(BasePipeline):
             )
         if not run.leagues:
             ctx.log.info("move_ledger_no_active_leagues")
+        if failed:
+            raise MoveLedgerFailed(f"{len(failed)} of {len(run.leagues)} leagues not rebuilt: {', '.join(failed)}")

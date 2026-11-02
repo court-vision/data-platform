@@ -12,7 +12,7 @@ import requests
 import responses
 
 from pipelines.context import PipelineContext
-from pipelines.move_ledger import MoveLedgerPipeline
+from pipelines.move_ledger import MoveLedgerFailed, MoveLedgerPipeline
 from services.backend_client import RUN_LEDGER_PATH, BackendClient, LedgerLeague, LedgerRun
 
 BASE = "http://api.railway.internal:8080"
@@ -86,6 +86,21 @@ def test_a_timeout_is_not_retried():
     assert len(responses.calls) == 1
 
 
+@pytest.mark.unit
+def test_the_ledger_waits_with_its_own_read_timeout(monkeypatch):
+    # A whole night's rebuild can take minutes; the general 45 s would cut it off.
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        raise requests.Timeout("read timed out")
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    _client().run_ledger()
+    timeout = captured["timeout"]
+    assert (timeout[1] if isinstance(timeout, tuple) else timeout) == 300.0
+
+
 class FakeBackendClient:
     def __init__(self, run):
         self.run = run
@@ -96,27 +111,49 @@ class FakeBackendClient:
         return self.run
 
 
-def _run(backend_run):
+def _pipeline(backend_run):
     pipeline = MoveLedgerPipeline()
     pipeline.backend_client = FakeBackendClient(backend_run)
+    return pipeline
+
+
+def _run(backend_run):
+    pipeline = _pipeline(backend_run)
     ctx = PipelineContext("move_ledger")
     pipeline.execute(ctx)
     return pipeline, ctx
 
 
 @pytest.mark.unit
-def test_each_rebuilt_league_is_a_record_and_a_failed_one_a_failure():
-    _, ctx = _run(LedgerRun(ok=True, leagues=[
+def test_each_rebuilt_league_is_a_record_and_a_failed_one_fails_the_run():
+    # A failed run, not a successful one with a failure counted: the post-game batch
+    # skips a pipeline that already succeeded that night, so only this gets retried.
+    pipeline = _pipeline(LedgerRun(ok=True, leagues=[
         LedgerLeague(provider_league_id="1001", season=2027, ok=True, days=14, moves=9),
         LedgerLeague(provider_league_id="2002", season=2027, ok=False, error="OperationalError"),
     ]))
+    ctx = PipelineContext("move_ledger")
+    with pytest.raises(MoveLedgerFailed, match="1 of 2 leagues not rebuilt: 2002/2027"):
+        pipeline.execute(ctx)
     assert (ctx.records_processed, ctx.records_failed) == (1, 1)
 
 
 @pytest.mark.unit
-def test_a_backend_that_cannot_be_asked_is_one_failure():
-    _, ctx = _run(LedgerRun.unavailable(reason="timeout"))
+def test_a_backend_that_cannot_be_asked_fails_the_run():
+    pipeline = _pipeline(LedgerRun.unavailable(reason="timeout"))
+    ctx = PipelineContext("move_ledger")
+    with pytest.raises(MoveLedgerFailed, match="timeout"):
+        pipeline.execute(ctx)
     assert (ctx.records_processed, ctx.records_failed) == (0, 1)
+
+
+@pytest.mark.unit
+def test_every_league_rebuilt_is_a_successful_run():
+    _, ctx = _run(LedgerRun(ok=True, leagues=[
+        LedgerLeague(provider_league_id="1001", season=2027, ok=True, days=14, moves=9),
+        LedgerLeague(provider_league_id="2002", season=2027, ok=True, days=3, moves=0),
+    ]))
+    assert (ctx.records_processed, ctx.records_failed) == (2, 0)
 
 
 @pytest.mark.unit

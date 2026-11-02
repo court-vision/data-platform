@@ -34,3 +34,18 @@ def test_needs_the_pipeline_token():
     app = FastAPI()
     app.include_router(pipelines_api.router, prefix="/v1/internal")
     assert TestClient(app).post("/v1/internal/pipelines/move-ledger").status_code in (401, 403)
+
+
+@pytest.mark.api
+def test_a_wrong_token_runs_nothing(monkeypatch):
+    calls = []
+
+    async def fake_run_pipeline(name, date_override=None, options=None):
+        calls.append(name)
+
+    monkeypatch.setattr(pipelines_api, "run_pipeline", fake_run_pipeline)
+    app = FastAPI()
+    app.include_router(pipelines_api.router, prefix="/v1/internal")
+    res = TestClient(app).post("/v1/internal/pipelines/move-ledger", headers={"Authorization": "Bearer not-the-token"})
+    assert res.status_code in (401, 403)
+    assert calls == []

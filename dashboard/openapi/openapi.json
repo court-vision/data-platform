@@ -5769,6 +5769,33 @@
         ]
       }
     },
+    "/v1/internal/pipelines/move-ledger": {
+      "post": {
+        "description": "Trigger the move ledger pipeline.\n\nAsks the backend to rebuild the move ledger (usr.move_outcomes) of every\nleague with a recent lineup snapshot: each add and drop, who made it, and\nwhat it earned. Production reaches it through the post-game batch, after\nlineup_snapshots and player_game_stats; this direct trigger skips those\ndependencies. A rebuild replaces each league's rows, so it is safe to rerun.",
+        "operationId": "trigger_move_ledger_v1_internal_pipelines_move_ledger_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Move Ledger",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/player-advanced-stats": {
       "post": {
         "description": "Trigger the player advanced stats pipeline.\n\nPass ?date=YYYY-MM-DD to backfill a specific date.",
