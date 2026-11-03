@@ -63,8 +63,9 @@ WRITE_COLUMNS = ("updated_at", "last_updated", "captured_at", "created_at", "sen
 # leaves their table untouched, so its age says nothing about their health.
 # lineup_alerts: only when a lineup needs attention. breakout_detection: only
 # when a prominent player is out (`no_prominent_injuries_today` returns
-# without a row).
-CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection"})
+# without a row). move_ledger: its rows are dated by the move, so a night when
+# no team moved leaves the table's last date where it was.
+CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection", "move_ledger"})
 
 # Tables dated by the run, not by the game night, and how far ahead that is.
 # daily_matchup_scores stamps its rows with the Central calendar date it ran

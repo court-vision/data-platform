@@ -805,6 +805,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/move-ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Move Ledger
+         * @description Trigger the move ledger pipeline.
+         *
+         *     Asks the backend to rebuild the move ledger (usr.move_outcomes) of every
+         *     league with a recent lineup snapshot: each add and drop, who made it, and
+         *     what it earned. Production reaches it through the post-game batch, after
+         *     lineup_snapshots and player_game_stats; this direct trigger skips those
+         *     dependencies. A rebuild replaces each league's rows, so it is safe to rerun.
+         */
+        post: operations["trigger_move_ledger_v1_internal_pipelines_move_ledger_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/player-advanced-stats": {
         parameters: {
             query?: never;
@@ -3787,6 +3813,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LiveStatsResponse"];
+                };
+            };
+        };
+    };
+    trigger_move_ledger_v1_internal_pipelines_move_ledger_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
                 };
             };
         };
