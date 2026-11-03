@@ -117,6 +117,7 @@ _WONT_PLAY = re.compile(
 # A weekday names this game only in a blurb written in the week before it.
 _WEEKDAY_WINDOW_DAYS = 6
 _SAME_DAY_WORDS: tuple[str, ...] = ("tonight", "today", "this evening")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,25 @@ def names_game_day(text: str, written_at: Optional[datetime], game: GameContext)
     return False
 
 
+def ruling_sentences(text: str, game: GameContext) -> str:
+    """The part of a blurb that says which game he will miss.
+
+    A Rotowire note often recaps the game just played before it rules him out of
+    the next one ("...in Monday's loss to Minnesota. He won't play Tuesday
+    against Toronto"), so the whole blurb names both games. The sentences with
+    the won't-play wording decide, when they name any day or opponent at all;
+    a bare "He will not play." leaves the whole blurb to say which game.
+    """
+    ruling = " ".join(part for part in _SENTENCE_END.split(text) if _WONT_PLAY.search(part))
+    return ruling if ruling and _names_a_day(ruling, game) else text
+
+
+def _names_a_day(text: str, game: GameContext) -> bool:
+    lowered = text.lower()
+    words = (*_WEEKDAYS, *_SAME_DAY_WORDS, *(w.lower() for w in game.day_words if w))
+    return any(re.search(rf"\b{re.escape(w)}\b", lowered) for w in words)
+
+
 def team_day_words(tricode: Optional[str]) -> tuple[str, ...]:
     """The words that name `tricode` in a blurb, for GameContext.day_words."""
     return TEAM_WORDS.get(tricode or "", ())
@@ -215,7 +235,7 @@ def espn_injuries_status(report: Report, game: GameContext) -> str:
             return "questionable"      # ESPN expects him back by then
         return "out"
     if status == "questionable" and report.detail and _WONT_PLAY.search(report.detail):
-        if names_game_day(report.detail, report.source_time, game):
+        if names_game_day(ruling_sentences(report.detail, game), report.source_time, game):
             return "out"
     return status
 
@@ -265,17 +285,23 @@ def resolve(reports: Sequence[Report], game: GameContext) -> Optional[Verdict]:
 
 def should_record(latest: Optional[Report], new: Report) -> bool:
     """Append `new` to the report log only when it says something that source's
-    latest row for the player and date did not: its status, reason or wording.
+    latest row for the player and date did not: its status, reason, wording or
+    return date.
 
     The wording counts because the ruling can live there: ESPN keeps a player
     Day-To-Day with the same body part while his note changes from "is
     questionable for Tuesday" to "won't play Tuesday", and only the stored note
-    lets `espn_injuries_status` see that. A source's wording changes when it
-    writes a new note, so a quiet poll still writes nothing.
+    lets `espn_injuries_status` see that. The return date counts because it
+    turns an ESPN Out into questionable once it reaches the game, and the
+    verdict row carries it. A source's wording changes when it writes a new
+    note, so a quiet poll still writes nothing.
     """
     if latest is None:
         return True
-    return (latest.status, latest.reason, latest.detail) != (new.status, new.reason, new.detail)
+    return (
+        (latest.status, latest.reason, latest.detail, latest.expected_return)
+        != (new.status, new.reason, new.detail, new.expected_return)
+    )
 
 
 @dataclass(frozen=True)

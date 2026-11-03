@@ -73,3 +73,15 @@ def test_the_monday_blurb_makes_gilbert_out_for_monday_only(parsed):
                     reason=g.reason, detail=g.detail, expected_return=g.expected_return)
     assert resolve([report], GameContext(game_date=date(2026, 10, 12))).verdict == "out"
     assert resolve([report], GameContext(game_date=date(2026, 10, 16))).verdict == "questionable"
+
+
+def test_the_towns_blurb_recaps_monday_and_rules_him_out_for_tuesday_only(parsed):
+    """"...in Monday's 122-104 preseason loss to Minnesota. He won't play Tuesday against Toronto"
+    written Monday night: questionable for Monday's game (he played it), out for Tuesday's."""
+    t = by_name(parsed[0], "Karl-Anthony Towns")
+    report = Report(source="espn_injuries", status=t.status, observed_at=t.source_time, source_time=t.source_time,
+                    reason=t.reason, detail=t.detail, expected_return=t.expected_return)
+    monday = GameContext(game_date=date(2026, 10, 12), day_words=("Minnesota", "Timberwolves"))
+    tuesday = GameContext(game_date=date(2026, 10, 13), day_words=("Toronto", "Raptors"))
+    assert resolve([report], monday).verdict == "questionable"
+    assert resolve([report], tuesday).verdict == "out"

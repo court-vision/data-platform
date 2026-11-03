@@ -120,6 +120,26 @@ def test_day_to_day_otherwise_stays_questionable(comment):
     assert verdict_of(rep("espn_injuries", "questionable", detail=comment)) == "questionable"
 
 
+@pytest.mark.parametrize("game_day, expected", [
+    (date(2026, 10, 19), "questionable"),   # Monday: the recap's game, which he played
+    (TUESDAY, "out"),                       # Tuesday: the game the ruling names
+])
+def test_a_recap_sentence_does_not_name_the_game_the_ruling_is_about(game_day, expected):
+    """Rotowire recaps the game just played, then rules him out of the next one:
+    only the won't-play sentence says which game he misses."""
+    blurb = ("Towns ended with 11 points over 22 minutes in Monday's 122-104 loss to Minnesota. "
+             "He won't play Tuesday against Toronto for rest purposes.")
+    written = datetime(2026, 10, 20, 2, 47, tzinfo=timezone.utc)   # Monday 10:47 PM ET
+    game = GameContext(game_date=game_day, game_id="0022600003", day_words=("Minnesota", "Timberwolves"))
+    report = rep("espn_injuries", "questionable", detail=blurb, source_time=written)
+    assert verdict_of(report, game=game) == expected
+
+
+def test_a_ruling_sentence_that_names_no_day_leaves_the_whole_blurb_to_name_the_game():
+    blurb = "Brunson is dealing with a sprained ankle ahead of Tuesday's game against Boston. He will not play."
+    assert verdict_of(rep("espn_injuries", "questionable", detail=blurb)) == "out"
+
+
 def test_tonight_names_the_game_only_when_written_on_the_game_day():
     game = GameContext(game_date=TUESDAY)
     sunday = datetime(2026, 10, 18, 22, 0, tzinfo=timezone.utc)
@@ -160,6 +180,19 @@ def test_should_record_only_when_the_source_says_something_new():
                                     detail="Brunson is questionable for Tuesday."))
     assert should_record(first, rep("espn_injuries", "questionable", minutes=2, reason="Knee",
                                     detail="Brunson is questionable for Tuesday."))
+
+
+def test_a_moved_return_date_is_logged_so_the_verdict_follows_it():
+    """ESPN Out with a return date on the game day resolves to questionable, so a
+    return date that moves onto the game is news even under the same note."""
+    first = rep("espn_injuries", "out", reason="Ankle", detail="Brunson (ankle) is out.",
+                expected_return=date(2026, 10, 22))
+    moved = rep("espn_injuries", "out", minutes=10, reason="Ankle", detail="Brunson (ankle) is out.",
+                expected_return=TUESDAY)
+    assert should_record(first, moved)
+    assert not should_record(first, rep("espn_injuries", "out", minutes=10, reason="Ankle",
+                                        detail="Brunson (ankle) is out.", expected_return=date(2026, 10, 22)))
+    assert verdict_of(first) == "out" and verdict_of(moved) == "questionable"
 
 
 def test_a_new_note_under_the_same_status_is_logged_so_its_ruling_counts():
