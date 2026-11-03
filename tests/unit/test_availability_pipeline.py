@@ -93,12 +93,19 @@ def test_espn_injuries_runs_every_tick_from_ninety_minutes_before_any_tip_until_
     assert not due_sources(et(GAME_DAY, 22, 2), NIGHT).espn_injuries   # every tip has passed
 
 
-def test_a_games_box_score_is_due_from_one_hundred_minutes_before_its_tip_until_it():
-    assert due_sources(et(GAME_DAY, 17, 48), NIGHT).boxscore_games == ()
-    assert due_sources(et(GAME_DAY, 17, 50), NIGHT).boxscore_games == ("0022600101",)
+def test_a_games_box_score_is_due_from_thirty_five_minutes_before_its_tip_until_it():
+    assert due_sources(et(GAME_DAY, 18, 54), NIGHT).boxscore_games == ()   # 36 minutes out
+    assert due_sources(et(GAME_DAY, 18, 56), NIGHT).boxscore_games == ("0022600101",)
     assert due_sources(et(GAME_DAY, 19, 28), NIGHT).boxscore_games == ("0022600101",)
-    assert due_sources(et(GAME_DAY, 20, 20), NIGHT).boxscore_games == ("0022600102",)
     assert due_sources(et(GAME_DAY, 19, 30), NIGHT).boxscore_games == ()   # tipped: live-stats has it
+    assert due_sources(et(GAME_DAY, 21, 24), NIGHT).boxscore_games == ()
+    assert due_sources(et(GAME_DAY, 21, 26), NIGHT).boxscore_games == ("0022600102",)
+
+
+def test_a_game_night_reads_each_box_score_on_seventeen_ticks():
+    dues = [due_sources(t, NIGHT) for t in _ticks(GAME_DAY)]
+    reads = Counter(g for d in dues for g in d.boxscore_games)
+    assert reads == {"0022600101": 17, "0022600102": 17}   # 50 at the old 100 minutes
 
 
 def test_a_game_without_a_start_time_opens_no_window():
@@ -108,10 +115,12 @@ def test_a_game_without_a_start_time_opens_no_window():
 
 
 def test_the_rules_hold_in_utc_across_the_dst_switch():
-    # Sunday 2026-11-01: EST from 2 AM. 7:30 PM EST is 00:30Z on the 2nd.
+    # Sunday 2026-11-01: EST from 2 AM. 7:30 PM EST is 00:30Z on the 2nd; read
+    # as EDT it would be 23:30Z on the 1st, and 00:00Z would be past the tip.
     day = date(2026, 11, 1)
     sunday = slate(("0022600200", "NYK", "BOS", time(19, 30)), day=day)
-    assert due_sources(datetime(2026, 11, 1, 23, 0, tzinfo=timezone.utc), sunday).boxscore_games == ("0022600200",)
+    assert due_sources(datetime(2026, 11, 1, 23, 50, tzinfo=timezone.utc), sunday).boxscore_games == ()
+    assert due_sources(datetime(2026, 11, 2, 0, 0, tzinfo=timezone.utc), sunday).boxscore_games == ("0022600200",)
     assert due_sources(datetime(2026, 11, 2, 0, 30, tzinfo=timezone.utc), sunday).boxscore_games == ()
 
 

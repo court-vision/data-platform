@@ -13,9 +13,11 @@ skips the tick, with no run row, when none is:
     espn_fantasy   ESPN fantasy's injuryStatus for ~1,500 players, the call
                    espn_injury_status makes: every 15 minutes on a game day from
                    11 AM ET, hourly otherwise
-    nba_boxscore   a game's live box score from 100 minutes before its tip until
-                   the tip, every tick: its inactive list is the one final
-                   source. From the tip the live-stats pipeline reads the same
+    nba_boxscore   a game's live box score from 35 minutes before its tip until
+                   the tip, every tick (it is not up before about 30): its
+                   inactive list is the one final source, though no game the
+                   spike watched flagged anyone before the tip. From the tip
+                   the live-stats pipeline reads the same
                    box score every poll and hands it here (`record_boxscore`),
                    which is also how DNPs reach the post-game view.
 
@@ -101,8 +103,13 @@ FANTASY_GAME_DAY_EVERY = 15
 FANTASY_EVERY = 60
 FANTASY_GAME_DAY_FROM = time(11, 0)
 # How long before its tip a game's box score is read. The spike (plan § 6.1)
-# measures when the inactive list first shows; until then, the plan's 100.
-BOXSCORE_PRE_TIP = timedelta(minutes=100)
+# found the live box score 403s until 25 to 31 minutes before the tip (four
+# games on 2026-11-01; 28 to 30 in the 2026-10-15 preseason) and lists the
+# starters from 21 to 25. It flagged no one INACTIVE before the tip, or up to 9
+# minutes after it, on either night. So the window only has to cover the part
+# of the hour the box score can be read: 35 minutes is the earliest lift seen
+# plus two ticks, where the plan's 100 spent about 35 reads a game on 403s.
+BOXSCORE_PRE_TIP = timedelta(minutes=35)
 
 
 def _slot_due(now_et: datetime, every: int) -> bool:
@@ -453,9 +460,10 @@ def boxscore_observations(
 ) -> list[Observation]:
     """A box score's list as observations.
 
-    INACTIVE is news at any time. Before the tip an ACTIVE may only mean the
-    inactive list is not in yet (the spike says when it is), so it is observed
-    only to take back an INACTIVE; from the tip, ACTIVE is final.
+    INACTIVE is news at any time. Before the tip an ACTIVE means nothing: the
+    spike watched six games to the tip and none flagged anyone INACTIVE before
+    it, so the pre-tip list is not the inactive list. A pre-tip ACTIVE is
+    observed only to take back an INACTIVE; from the tip, ACTIVE is final.
     """
     observations: list[Observation] = []
     for p in players:
