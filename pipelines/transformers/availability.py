@@ -108,16 +108,19 @@ TEAM_WORDS: Mapping[str, tuple[str, ...]] = {
 _WEEKDAYS: tuple[str, ...] = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 # Future-tense "he won't play" phrasing, as Rotowire writes it. A bare "not play"
-# would also catch recaps ("did not play in Wednesday's loss"), so it is not here.
+# would also catch recaps ("did not play in Wednesday's loss"), so it is not here;
+# nor is a ruling denied ("hasn't been ruled out") or only possible ("could sit out").
 _WONT_PLAY = re.compile(
-    r"\b(won'?t play|will not play|(?:is not|isn'?t|not) expected to play|ruled out|is out"
-    r"|sit out|sits out|will sit|will miss|will be rested|to be rested)\b",
+    r"\b(won'?t play|will not play|(?:is not|isn'?t|not) expected to play"
+    r"|(?<!not been )(?<!n't been )(?<!not )ruled out|is out"
+    r"|(?<!could )(?<!may )(?<!might )sits? out|will sit|will miss|will be rested|to be rested)\b",
     re.IGNORECASE,
 )
 # A weekday names this game only in a blurb written in the week before it.
 _WEEKDAY_WINDOW_DAYS = 6
 _SAME_DAY_WORDS: tuple[str, ...] = ("tonight", "today", "this evening")
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+# A sentence end, or the semicolon Rotowire joins a recap and a ruling with.
+_SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")
 
 
 @dataclass(frozen=True)

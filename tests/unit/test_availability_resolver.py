@@ -115,20 +115,27 @@ def test_day_to_day_with_a_wont_play_blurb_that_names_the_game_is_out(comment):
     "Brunson is probable for Tuesday's game.",                          # no won't-play phrase
     "Brunson is listed as questionable against the Knicks.",
     "Brunson (knee) did not play in Tuesday's 114-93 loss to the Celtics.",   # a recap, not a ruling
+    "Brunson (ankle) hasn't been ruled out for Tuesday's game against the Celtics.",   # a ruling denied
+    "Brunson has not been ruled out of Tuesday's game against the Celtics.",
+    "Brunson (ankle) could sit out Tuesday's game against the Celtics.",             # only possible
 ])
 def test_day_to_day_otherwise_stays_questionable(comment):
     assert verdict_of(rep("espn_injuries", "questionable", detail=comment)) == "questionable"
 
 
+@pytest.mark.parametrize("blurb", [
+    "Towns ended with 11 points over 22 minutes in Monday's 122-104 loss to Minnesota. "
+    "He won't play Tuesday against Toronto for rest purposes.",
+    "Towns played 22 minutes in Monday's loss to Minnesota; he won't play Tuesday against Toronto.",
+])
 @pytest.mark.parametrize("game_day, expected", [
     (date(2026, 10, 19), "questionable"),   # Monday: the recap's game, which he played
     (TUESDAY, "out"),                       # Tuesday: the game the ruling names
 ])
-def test_a_recap_sentence_does_not_name_the_game_the_ruling_is_about(game_day, expected):
-    """Rotowire recaps the game just played, then rules him out of the next one:
-    only the won't-play sentence says which game he misses."""
-    blurb = ("Towns ended with 11 points over 22 minutes in Monday's 122-104 loss to Minnesota. "
-             "He won't play Tuesday against Toronto for rest purposes.")
+def test_a_recap_sentence_does_not_name_the_game_the_ruling_is_about(blurb, game_day, expected):
+    """Rotowire recaps the game just played, then rules him out of the next one, as
+    a new sentence or after a semicolon: only the won't-play clause says which
+    game he misses."""
     written = datetime(2026, 10, 20, 2, 47, tzinfo=timezone.utc)   # Monday 10:47 PM ET
     game = GameContext(game_date=game_day, game_id="0022600003", day_words=("Minnesota", "Timberwolves"))
     report = rep("espn_injuries", "questionable", detail=blurb, source_time=written)

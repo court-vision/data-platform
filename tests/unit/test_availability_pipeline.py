@@ -220,7 +220,7 @@ INDEX = PlayerIndex(
 def _entry(espn_id, name, status="questionable", team="NYK", **kw):
     return EspnInjury(
         item_id=f"n{espn_id}", espn_id=espn_id, name=name, team=team, status=status,
-        espn_status="Day-To-Day", fantasy_status="GTD", reason=kw.get("reason", "Ankle"),
+        espn_status=kw.get("espn_status", "Day-To-Day"), fantasy_status="GTD", reason=kw.get("reason", "Ankle"),
         detail=kw.get("detail"), long_comment=None, expected_return=kw.get("expected_return"),
         source_time=kw.get("source_time", NOW - timedelta(hours=3)),
     )
@@ -251,6 +251,17 @@ def test_a_player_the_whole_list_stops_naming_is_observed_healthy():
     observed = espn_injury_observations(_whole_list(_entry(3934672, "Jalen Brunson")), earlier, INDEX, NOW, skips)
     healthy = [o for o in observed if o.report.status == "available"]
     assert [(o.player_id, o.report.source_time) for o in healthy] == [(1629011, None)]   # 1630173 was already
+
+
+def test_a_player_listed_under_an_unknown_word_is_still_named_and_says_nothing():
+    """ESPN lists Robinson as "Suspended", a word we do not store: he is still on the
+    list, so a whole list does not drop him to healthy; the entry is only counted."""
+    earlier = {1629011: Report("espn_injuries", "out", NOW - timedelta(hours=1))}
+    skips = Counter()
+    entries = _whole_list(_entry(4066354, "Mitchell Robinson", status=None, espn_status="Suspended"))
+    observed = espn_injury_observations(entries, earlier, INDEX, NOW, skips)
+    assert 1629011 not in {o.player_id for o in observed}
+    assert skips["espn_injuries_unknown_status"] == 1
 
 
 def test_a_short_list_drops_only_players_whose_team_it_still_lists():

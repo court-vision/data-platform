@@ -376,7 +376,11 @@ def espn_injury_observations(
     skips: Counter,
 ) -> list[Observation]:
     """ESPN's list as observations: one per listed player, and an `available` one
-    for each player it named earlier today and no longer does."""
+    for each player it named earlier today and no longer does.
+
+    A player listed under a word we do not know (`status` None) is still named,
+    so he is not dropped to healthy; the entry itself is counted, not stored.
+    """
     observations: list[Observation] = []
     listed: set[int] = set()
     for entry in entries:
@@ -387,6 +391,9 @@ def espn_injury_observations(
         if player_id in listed:
             continue
         listed.add(player_id)
+        if entry.status is None:
+            skips["espn_injuries_unknown_status"] += 1
+            continue
         observations.append(Observation(player_id, Report(
             source="espn_injuries",
             status=entry.status,

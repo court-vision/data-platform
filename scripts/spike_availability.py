@@ -257,8 +257,16 @@ def run_report(args) -> None:
             except Exception as exc:
                 status = f"error:{type(exc).__name__}"
             if status == 200:
+                # Seen only once the PDF is on disk, so a failed GET is probed again.
+                try:
+                    pdf = session.get(url, headers=headers, timeout=30)
+                except Exception as exc:
+                    emit("report_fetch_failed", name=name, error=f"{type(exc).__name__}: {exc}")
+                    continue
+                if pdf.status_code != 200 or not pdf.content:
+                    emit("report_fetch_failed", name=name, http=pdf.status_code, bytes=len(pdf.content))
+                    continue
                 seen[name] = now_et.isoformat(timespec="seconds")
-                pdf = session.get(url, headers=headers, timeout=30)
                 (out / f"Injury-Report_{name}.pdf").write_bytes(pdf.content)
                 emit("report_found", name=name, first_seen_et=seen[name], bytes=len(pdf.content),
                      last_modified=resp.headers.get("Last-Modified"))

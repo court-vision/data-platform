@@ -56,14 +56,19 @@ def test_out_for_season_is_out_with_a_far_return_date(parsed):
     assert len(ofs) == 2 and all(e.status == "out" and e.expected_return == date(2027, 7, 1) for e in ofs)
 
 
-def test_entries_without_an_id_or_a_known_status_are_counted_not_dropped():
+def test_an_entry_names_its_player_by_id_or_name_and_keeps_a_status_it_cannot_read():
+    """Only an entry naming nobody is skipped; an unknown status word is kept as None,
+    because the player is still listed (the pipeline's drop-off rule needs that)."""
     payload = {"injuries": [{"injuries": [
         {"id": "1", "status": "Day-To-Day", "athlete": {"displayName": "No Id", "links": []}},
         {"id": "2", "status": "Suspended", "athlete": {"links": [{"href": "https://www.espn.com/nba/player/_/id/9/x"}]}},
         {"id": "3", "status": "Out", "athlete": {"headshot": {"href": "https://a.espncdn.com/i/headshots/nba/players/full/77.png"}}},
+        {"id": "4", "status": "Out", "athlete": {}},
     ]}]}
     entries, skipped = parse_espn_injuries(payload)
-    assert [e.espn_id for e in entries] == [77] and skipped == 2
+    assert [(e.espn_id, e.name, e.status, e.espn_status) for e in entries] == [
+        (None, "No Id", "questionable", "Day-To-Day"), (9, "", None, "Suspended"), (77, "", "out", "Out")]
+    assert skipped == 1
 
 
 def test_the_monday_blurb_makes_gilbert_out_for_monday_only(parsed):

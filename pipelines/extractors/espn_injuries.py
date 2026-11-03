@@ -65,10 +65,10 @@ STATUS_MAP: dict[str, str] = {
 @dataclass(frozen=True)
 class EspnInjury:
     item_id: str                     # ESPN's injury note id
-    espn_id: int
+    espn_id: Optional[int]           # None when the entry has no player link or headshot
     name: str
     team: Optional[str]              # NBA tricode
-    status: str                      # out | questionable (the availability vocabulary)
+    status: Optional[str]            # out | questionable (the availability vocabulary); None for a word STATUS_MAP lacks
     espn_status: str                 # "Out" / "Day-To-Day" as ESPN wrote it
     fantasy_status: Optional[str]    # GTD / OUT / OFS
     reason: Optional[str]            # body part, "Rest", "Illness", ...
@@ -112,25 +112,31 @@ def nba_tricode(espn_abbreviation: Optional[str]) -> Optional[str]:
 
 
 def parse_espn_injuries(payload: dict) -> tuple[list[EspnInjury], int]:
-    """Every parseable entry, and how many entries were skipped (no ESPN id or an
-    unknown status) so the pipeline can count them rather than drop them silently."""
+    """Every entry that names a player (by ESPN id or by name), and how many name
+    nobody and were skipped, so the pipeline can count them rather than drop them
+    silently.
+
+    An entry whose status is a word STATUS_MAP lacks is kept with `status=None`:
+    ESPN still lists the player, which the pipeline's drop-off rule needs to
+    know, even though the entry says nothing we can store about him.
+    """
     out: list[EspnInjury] = []
     skipped = 0
     for team_block in payload.get("injuries") or []:
         for entry in team_block.get("injuries") or []:
             athlete = entry.get("athlete") or {}
             espn_id = _espn_id(athlete)
-            status = STATUS_MAP.get(str(entry.get("status") or "").strip().lower())
-            if espn_id is None or status is None:
+            name = athlete.get("displayName") or ""
+            if espn_id is None and not name:
                 skipped += 1
                 continue
             details = entry.get("details") or {}
             out.append(EspnInjury(
                 item_id=str(entry.get("id") or ""),
                 espn_id=espn_id,
-                name=athlete.get("displayName") or "",
+                name=name,
                 team=nba_tricode((athlete.get("team") or {}).get("abbreviation")),
-                status=status,
+                status=STATUS_MAP.get(str(entry.get("status") or "").strip().lower()),
                 espn_status=entry.get("status") or "",
                 fantasy_status=(details.get("fantasyStatus") or {}).get("abbreviation"),
                 reason=details.get("type"),
