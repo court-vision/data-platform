@@ -27,6 +27,7 @@ from pipelines.player_profiles import PlayerProfilesPipeline
 from pipelines.game_start_times import GameStartTimesPipeline
 from pipelines.daily_matchup_scores import DailyMatchupScoresPipeline
 from pipelines.lineup_snapshots import LineupSnapshotsPipeline
+from pipelines.move_ledger import MoveLedgerPipeline
 from pipelines.playoff_bracket import PlayoffBracketPipeline
 from pipelines.preseason_market import PreseasonMarketPipeline
 from pipelines.season_history import SeasonHistoryPipeline
@@ -53,6 +54,8 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "daily_matchup_scores": DailyMatchupScoresPipeline,
     # After daily_matchup_scores: its ESPN gate is what waits for ESPN's nightly flip.
     "lineup_snapshots": LineupSnapshotsPipeline,
+    # After the night's rosters and box scores: the backend rebuilds the move ledger.
+    "move_ledger": MoveLedgerPipeline,
     # PRE_GAME — run before games start (timed relative to first tip-off)
     "espn_injury_status": ESPNInjuryStatusPipeline,
     "breakout_detection": BreakoutDetectionPipeline,

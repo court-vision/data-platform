@@ -189,6 +189,27 @@ async def trigger_lineup_snapshots(
     )
 
 
+@router.post("/move-ledger", response_model=PipelineResponse)
+async def trigger_move_ledger(
+    _: str = Security(verify_pipeline_token),
+) -> PipelineResponse:
+    """
+    Trigger the move ledger pipeline.
+
+    Asks the backend to rebuild the move ledger (usr.move_outcomes) of every
+    league with a recent lineup snapshot: each add and drop, who made it, and
+    what it earned. Production reaches it through the post-game batch, after
+    lineup_snapshots and player_game_stats; this direct trigger skips those
+    dependencies. A rebuild replaces each league's rows, so it is safe to rerun.
+    """
+    result = await run_pipeline("move_ledger")
+    return PipelineResponse(
+        status=result.status,
+        message=result.message,
+        data=result,
+    )
+
+
 _ESPN_ENDPOINT = (
     "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba/seasons/{}/segments/0/leagues/{}"
 )

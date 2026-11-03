@@ -50,6 +50,11 @@ COPY main_public.py .
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
+# One-off restore of past nights' score snapshots, run by hand in this container
+# (scripts/restore_score_snapshots.py). The other scripts are dev tools and stay out.
+COPY scripts/restore_score_snapshots.py ./scripts/
+COPY scripts/data/ ./scripts/data/
+
 # The built dashboard. Last of the app's layers: a UI-only change leaves the pip
 # install above cached.
 COPY --from=dashboard /dashboard/dist ./dashboard/dist

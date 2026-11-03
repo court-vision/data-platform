@@ -12,7 +12,7 @@ import dk from "@/desk/desk.module.css"
 import s from "./shell.module.css"
 
 const KEYS: Array<[string, string]> = [
-  ["1–4", "page"],
+  ["1–5", "page"],
   ["R", "refresh"],
   ["T", "theme"],
 ]
@@ -55,7 +55,7 @@ export function AppShell() {
 }
 
 /**
- * 1–4 open the pages, R refreshes what is on screen, T swaps the theme for its
+ * 1–5 open the pages, R refreshes what is on screen, T swaps the theme for its
  * pair; none while typing. The page keys also wait outside a form, a dialog or
  * a menu: a button keeps focus after a click, and "1.5" typed after "Add a
  * multiplier" must not leave the unsaved adjustment for the Overview.

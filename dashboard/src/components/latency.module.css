@@ -1,0 +1,193 @@
+/*
+ * The Latency page: where a request's time went, in eight hues and a grey.
+ *
+ * The hues are the data-viz reference palette in its slot order, which keeps
+ * neighbours in a stack apart for colour-blind readers (checked with the
+ * palette validator against each desk theme's ground: every adjacent pair
+ * passes in light and dark). The light steps fall under 3:1 on the ground for
+ * a few hues, so every bar's numbers are also in text: its title, and the
+ * table under each chart. Dark themes take the same hues stepped for a dark
+ * ground, not an automatic flip. The order follows lib/latency.ts GROUPS.
+ */
+
+.viz {
+  --g-espn: #2a78d6;
+  --g-postgres: #eb6834;
+  --g-app: #1baf7a;
+  --g-wait: #eda100;
+  --g-nba: #e87ba4;
+  --g-yahoo: #008300;
+  --g-services: #6250d6;
+  --g-claude: #e34948;
+  --g-other: #9a958c;
+}
+
+[data-theme="midnight"] .viz,
+[data-theme="ember"] .viz {
+  --g-espn: #3987e5;
+  --g-postgres: #d95926;
+  --g-app: #199e70;
+  --g-wait: #c98500;
+  --g-nba: #d55181;
+  --g-yahoo: #008300;
+  --g-services: #9085e9;
+  --g-claude: #e66767;
+  --g-other: #6f6b65;
+}
+
+[data-group="espn"] { --g: var(--g-espn); }
+[data-group="postgres"] { --g: var(--g-postgres); }
+[data-group="app"] { --g: var(--g-app); }
+[data-group="wait"] { --g: var(--g-wait); }
+[data-group="nba"] { --g: var(--g-nba); }
+[data-group="yahoo"] { --g: var(--g-yahoo); }
+[data-group="services"] { --g: var(--g-services); }
+[data-group="claude"] { --g: var(--g-claude); }
+[data-group="other"] { --g: var(--g-other); }
+
+/* ---------------------------------------------------------------- the anatomy bar */
+
+/* One request (or a route's mean) as segments, on the scale its column shares. */
+.anatomy {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  min-width: 2px;
+}
+
+.segment {
+  flex: 0 0 auto;
+  min-width: 1px;
+  background: var(--g);
+}
+
+.segment:first-child {
+  border-radius: 2px 0 0 2px;
+}
+
+.segment:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.segment:only-child {
+  border-radius: 2px 4px 4px 2px;
+}
+
+.anatomyCell {
+  width: 34%;
+  min-width: 10rem;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--g, var(--text-3));
+}
+
+/* ---------------------------------------------------------------- route table */
+
+.routeName {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The route table scrolls sideways on a phone; its first column keeps a path on a line or two. */
+.routeCell {
+  min-width: 17rem;
+}
+
+.method {
+  flex-shrink: 0;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.path {
+  overflow-wrap: anywhere;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+.bad {
+  color: var(--down);
+}
+
+/* ---------------------------------------------------------------- time charts */
+
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.p95 {
+  stroke: var(--accent);
+}
+
+.p50 {
+  stroke: var(--text-3);
+}
+
+.dot95 {
+  fill: var(--accent);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.dot50 {
+  fill: var(--text-3);
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.keyLine {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--key);
+}
+
+.slice {
+  outline: none;
+}
+
+.stack {
+  fill: var(--g);
+  transition: opacity 120ms ease;
+}
+
+.plot[data-hovering="true"] .slice:not([data-active="true"]) .stack {
+  opacity: 0.45;
+}
+
+.cursor {
+  stroke: var(--text-3);
+  stroke-dasharray: 2 3;
+}
+
+.plot {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  overflow: visible;
+}
+
+.trace {
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}

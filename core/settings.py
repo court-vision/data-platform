@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     # `pickups_per_run` rows per call, each a few ESPN round trips (board, pool,
     # write, re-read, then the seat on day D), so its read timeout is its own.
     pickups_backend_timeout_seconds: float = 120.0
+    # The move ledger's nightly rebuild (POST /v1/internal/jobs/ledger/run): every
+    # active league's season of lineup snapshots and box scores, read and scored.
+    ledger_backend_timeout_seconds: float = 300.0
     pickups_per_run: int = 4
 
     # Pre-game pipeline scheduling
