@@ -4,10 +4,13 @@ import pytest
 from peewee import OperationalError
 
 from db.base import db
+from db.models.nba.availability import AvailabilityReport, PlayerAvailability
 from db.models.nba.games import Game
 from db.models.nba.live_game_score_snapshots import LiveGameScoreSnapshot
 from db.models.nba.live_player_stats import LivePlayerStats
+from db.models.nba.news import NewsItem
 from db.models.nba.player_game_stats import PlayerGameStats
+from db.models.nba.player_injuries import PlayerInjury
 from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.player_season_stats import PlayerSeasonStats
 from db.models.nba.pipeline_batch import PipelineBatch
@@ -38,6 +41,12 @@ INTEGRATION_MODELS = [
     # Written by the lineup_snapshots pipeline's store (tests/integration/test_lineup_snapshot_store.py).
     LineupSnapshot,
     LineupSnapshotPlayer,
+    # Written by the availability pipeline, and by live-stats' hand-off to it
+    # (tests/integration/test_availability_writes.py). A report may cite a news item.
+    NewsItem,
+    AvailabilityReport,
+    PlayerAvailability,
+    PlayerInjury,
 ]
 
 
@@ -70,6 +79,10 @@ def clean_integration_tables(integration_db):
         TRUNCATE TABLE
           usr.lineup_snapshot_players,
           usr.lineup_snapshots,
+          nba.availability_reports,
+          nba.player_availability,
+          nba.player_injuries,
+          nba.news_items,
           nba.player_rolling_stats,
           nba.team_stats,
           nba.live_player_stats,
