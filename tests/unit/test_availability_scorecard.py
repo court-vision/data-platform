@@ -13,7 +13,8 @@ import pytest
 
 from pipelines.transformers.availability import ET, GameContext, Report
 from schemas.availability import AvailabilityCall
-from services.availability_scorecard import out_since, score_call, summarize
+from pipelines.availability import Slate, SlateGame
+from services.availability_scorecard import game_context, out_since, score_call, summarize
 
 pytestmark = pytest.mark.unit
 
@@ -175,6 +176,13 @@ def test_a_call_for_a_game_not_tipped_is_pending_and_one_never_on_the_box_score_
     assert tipped.lead_minutes == 30.0
 
 
+def test_a_pre_tip_inactive_is_not_graded_before_the_tip():
+    call = score(box("inactive", "2026-11-04T23:40"), now=BEFORE.replace(hour=23, minute=45))
+
+    assert call.outcome == "pending"
+    assert call.ours_by == "nba_boxscore"
+
+
 def test_a_pre_tip_inactive_taken_back_by_the_box_score_is_a_false_out():
     call = score(box("inactive", "2026-11-04T23:40"), box("active", "2026-11-05T00:02"))
 
@@ -237,3 +245,26 @@ def test_no_races_is_no_gate():
     assert summary.first_share is None
     assert summary.median_lead_minutes is None
     assert not summary.gate_met
+
+
+# ---- which game ------------------------------------------------------------------
+
+
+SLATE = Slate(WEDNESDAY, (
+    SlateGame("0022600150", home="NYK", away="BOS", tip=TIP),
+    SlateGame("0022600153", home="DAL", away="PHX", tip=datetime(2026, 11, 4, 21, 0, tzinfo=ET)),
+))
+
+
+def test_the_box_scores_game_wins_over_a_traded_players_current_team():
+    # Listed in Knicks-Celtics as a Knick, now a Mav: still the 7 PM game.
+    game = game_context(SLATE, "DAL", "0022600150")
+
+    assert game.game_id == "0022600150"
+    assert game.day_words == ()
+    assert game_context(SLATE, "NYK", "0022600150").day_words == ("Boston", "Celtics")
+
+
+def test_without_a_box_score_the_current_teams_game_is_his():
+    assert game_context(SLATE, "PHX", None).game_id == "0022600153"
+    assert not game_context(SLATE, "LAL", None).has_game

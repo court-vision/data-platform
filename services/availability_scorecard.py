@@ -33,7 +33,8 @@ And otherwise:
 
     false_out                         active in the box score, out at the tip
     not_in_box                        called out, tipped, never on the box score
-    pending                           called out, not tipped yet
+    pending                           called out, not tipped yet (nothing is
+                                      graded before the tip)
 
 A player the box score lists inactive whom no other source ever named (a
 two-way player, mostly) is left out, as is one neither side called who played.
@@ -60,7 +61,7 @@ from pipelines.availability import (
     _REPORT_COLUMNS,
     _stored_report,
 )
-from pipelines.transformers.availability import ET, GameContext, Report, Verdict, resolve
+from pipelines.transformers.availability import ET, GameContext, Report, Verdict, resolve, team_day_words
 from schemas.availability import (
     AvailabilityCall,
     AvailabilityDay,
@@ -155,7 +156,12 @@ def score_call(
     called = ours_at is not None or espn_at is not None
     named = any(r.source != BOX for r in reports)
 
-    if box == "active":
+    if now < tip:
+        # Nothing is graded before the tip: a pre-tip INACTIVE can still be taken back.
+        if not called:
+            return None
+        outcome = "pending"
+    elif box == "active":
         if not out_at_tip:
             return None
         outcome = "false_out"
@@ -175,7 +181,7 @@ def score_call(
     else:
         if not called:
             return None
-        outcome = "pending" if now < tip else "not_in_box"
+        outcome = "not_in_box"
 
     shown = full if outcome == "false_out" or ours_verdict is None else ours_verdict
     lead = (espn_at - ours_at).total_seconds() / 60 if ours_at and espn_at else None
@@ -198,6 +204,16 @@ def score_call(
         reason=shown.reason if shown else None,
         detail=shown.detail if shown else None,
     )
+
+
+def game_context(slate: Slate, team: Optional[str], box_game: Optional[str]) -> GameContext:
+    """The player's game that date: the one the box score listed him under, else
+    his current team's. A player traded since keeps the game he was in, and its tip."""
+    played = slate.by_id(box_game)
+    if played is None:
+        return slate.context(team, game_id=box_game)
+    opponent = played.opponent(team) if team in (played.home, played.away) else None
+    return GameContext(slate.game_date, has_game=True, game_id=played.game_id, day_words=team_day_words(opponent))
 
 
 def summarize(calls: Sequence[AvailabilityCall]) -> AvailabilitySummary:
@@ -288,7 +304,7 @@ def build_scorecard(days: int = 7, now: Optional[datetime] = None) -> Availabili
                 if game_date != day:
                     continue
                 box_game = next((r.game_id for r in rows if r.source == BOX and r.game_id), None)
-                game = slate.context(teams.get(pid), game_id=box_game)
+                game = game_context(slate, teams.get(pid), box_game)
                 scheduled = slate.by_id(game.game_id)
                 if not game.has_game or scheduled is None or scheduled.tip is None:
                     continue
