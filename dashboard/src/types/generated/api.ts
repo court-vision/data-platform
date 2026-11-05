@@ -884,6 +884,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/news": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger News
+         * @description Trigger the news feed pipeline: ESPN's injury notes and per-player news,
+         *     Rotowire and RealGM into nba.news_items, linked to the players and teams
+         *     each item is about; new items about players go to Dime's event check-ins.
+         *
+         *     Called every 5 minutes by the 'news' cron job. No gate: each tick reads its
+         *     share of the sources (pipelines/news_feed.py).
+         */
+        post: operations["trigger_news_v1_internal_pipelines_news_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/player-advanced-stats": {
         parameters: {
             query?: never;
@@ -3935,6 +3960,26 @@ export interface operations {
         };
     };
     trigger_move_ledger_v1_internal_pipelines_move_ledger_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+        };
+    };
+    trigger_news_v1_internal_pipelines_news_post: {
         parameters: {
             query?: never;
             header?: never;

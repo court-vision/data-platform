@@ -5898,6 +5898,33 @@
         ]
       }
     },
+    "/v1/internal/pipelines/news": {
+      "post": {
+        "description": "Trigger the news feed pipeline: ESPN's injury notes and per-player news,\nRotowire and RealGM into nba.news_items, linked to the players and teams\neach item is about; new items about players go to Dime's event check-ins.\n\nCalled every 5 minutes by the 'news' cron job. No gate: each tick reads its\nshare of the sources (pipelines/news_feed.py).",
+        "operationId": "trigger_news_v1_internal_pipelines_news_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger News",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/player-advanced-stats": {
       "post": {
         "description": "Trigger the player advanced stats pipeline.\n\nPass ?date=YYYY-MM-DD to backfill a specific date.",
