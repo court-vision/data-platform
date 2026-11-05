@@ -36,6 +36,7 @@ from pipelines.cv_projection import CVProjectionPipeline
 from pipelines.scheduled_pickups import ScheduledPickupsPipeline
 from pipelines.availability import AvailabilityPipeline
 from pipelines.dime_checkins import DimeCheckinsPipeline
+from pipelines.news_feed import NewsFeedPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -81,6 +82,8 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "availability": AvailabilityPipeline,
     # Dime's check-ins, in shadow (every 15 minutes; its route gates on a switched-on team).
     "dime_checkins": DimeCheckinsPipeline,
+    # Player news from ESPN, Rotowire and RealGM (every 5 minutes; no gate).
+    "news_feed": NewsFeedPipeline,
 }
 
 

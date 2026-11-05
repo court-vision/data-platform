@@ -1,7 +1,8 @@
 """
 Backend internal API client — the lineup-alerts pipeline's one call per team, the
 scheduled-pickups pipeline's one call per tick, the move-ledger pipeline's one
-call per night, and the dime-checkins pipeline's one call per tick.
+call per night, the dime-checkins pipeline's one call per tick, and the events
+the availability and news pipelines hand to Dime.
 
     POST {BACKEND_INTERNAL_URL}/v1/internal/jobs/lineup/evaluate
     Authorization: Bearer <PIPELINE_API_TOKEN>      (the token both services share)
@@ -45,6 +46,14 @@ backend starts the Dime check-ins that are due (the Dime autopilot plan, step 3)
 and answers what it started. The check-ins run on in the backend after the
 answer, so the call is quick; one request, no retry (each check-in is claimed
 once per team, kind and day, and the next tick fifteen minutes later is the retry).
+
+`post_events` is the fifth, POST /v1/internal/jobs/checkins/events with
+`{"availability": [{"player_id", "game_date"}], "news": [news_item_id]}`: what came
+in about players this tick (the Dime autopilot plan, step 6). Keys only; the
+backend reads the verdicts and items itself, records an event on each team Dime
+runs that rosters the player, and starts a check-in about it. One request, no
+retry: an event is recorded once per verdict change or item, so a repeat is
+harmless, and a lost one is still read by the next scheduled check-in's tools.
 """
 
 from __future__ import annotations
@@ -63,6 +72,7 @@ EVALUATE_PATH = "/v1/internal/jobs/lineup/evaluate"
 EXECUTE_PICKUPS_PATH = "/v1/internal/jobs/pickups/execute"
 RUN_LEDGER_PATH = "/v1/internal/jobs/ledger/run"
 RUN_CHECKINS_PATH = "/v1/internal/jobs/checkins/run"
+POST_EVENTS_PATH = "/v1/internal/jobs/checkins/events"
 CONNECT_TIMEOUT_SECONDS = 5.0
 
 # Outcomes the backend returns for a 200.
@@ -387,6 +397,38 @@ class CheckinsRun:
             return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
 
 
+@dataclass(frozen=True)
+class EventsPost:
+    """The backend's answer to a post of events, or why there is none (`ok` False)."""
+
+    ok: bool
+    off: bool = False
+    teams: int = 0
+    facts: int = 0
+    recorded: int = 0
+    started: list[CheckinStarted] = field(default_factory=list)
+    reason: Optional[str] = None
+    error: Optional[str] = None
+
+    @classmethod
+    def unavailable(cls, reason: str, error: Optional[str] = None) -> "EventsPost":
+        return cls(ok=False, reason=reason, error=error)
+
+    @classmethod
+    def from_payload(cls, data: Any) -> "EventsPost":
+        if not isinstance(data, dict) or not isinstance(data.get("started"), list):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        started = [CheckinStarted.from_payload(item) for item in data["started"]]
+        if any(s is None for s in started):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        try:
+            return cls(ok=True, off=bool(data.get("off")), teams=int(data.get("teams") or 0),
+                       facts=int(data.get("facts") or 0), recorded=int(data.get("recorded") or 0),
+                       started=[s for s in started if s is not None])
+        except (TypeError, ValueError):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+
+
 class BackendClient:
     """Talks to the backend's pipeline-token routes. Disabled when no base URL is configured."""
 
@@ -620,6 +662,88 @@ class BackendClient:
             error=run.error,
         )
         return run
+
+    def post_events(
+        self,
+        *,
+        availability: list[tuple[int, date]] = (),
+        news: list[int] = (),
+        correlation_id: Optional[str] = None,
+    ) -> EventsPost:
+        """Hand the backend what came in this tick: verdict changes (player, game date) and news item ids.
+
+        Never raises: transport and protocol failures come back as a post that is not `ok`.
+        """
+        if not self.enabled:
+            return EventsPost.unavailable(reason="backend_not_configured")
+        body = {
+            "availability": [{"player_id": int(pid), "game_date": day.isoformat()} for pid, day in availability],
+            "news": [int(i) for i in news],
+        }
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+
+        started = time.monotonic()
+        status_code: Optional[int] = None
+        try:
+            response = requests.post(
+                f"{self._base_url}{POST_EVENTS_PATH}",
+                json=body,
+                headers=headers,
+                timeout=self._timeout,
+            )
+            status_code = response.status_code
+            post = self._parse_events_response(response)
+        except requests.Timeout as exc:
+            post = EventsPost.unavailable(reason="timeout", error=_excerpt(str(exc)))
+        except requests.RequestException as exc:
+            post = EventsPost.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+        except Exception as exc:  # a client bug must degrade the run, not raise
+            post = EventsPost.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        log = self._log.info if post.ok else self._log.warning
+        log(
+            "backend_post_events",
+            ok=post.ok,
+            off=post.off,
+            availability=len(body["availability"]),
+            news=len(body["news"]),
+            teams=post.teams,
+            facts=post.facts,
+            recorded=post.recorded,
+            started=len(post.started),
+            reason=post.reason,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            error=post.error,
+        )
+        return post
+
+    @staticmethod
+    def _parse_events_response(response: requests.Response) -> EventsPost:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if status == 200:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            return EventsPost.from_payload(data)
+
+        if status == 401:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            return EventsPost.unavailable(reason="unauthorized", error=_excerpt(str(detail or response.text)))
+
+        detail: Optional[str] = None
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
+        return EventsPost.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
 
     @staticmethod
     def _parse_checkins_response(response: requests.Response) -> CheckinsRun:
