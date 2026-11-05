@@ -5336,6 +5336,57 @@
         ]
       }
     },
+    "/v1/internal/pipelines/dime-checkins": {
+      "post": {
+        "description": "Trigger the dime-checkins pipeline: Dime's check-ins, in shadow (the Dime\nautopilot plan, step 3).\n\nCalled every 15 minutes by the 'dime-checkins' cron job. Gates on whether any\nteam is switched on (usr.autopilot, one query, no run row); when one is, asks\nthe backend to start the check-ins that are due. The backend owns the\nschedule and runs each check-in once per team, kind and day.",
+        "operationId": "trigger_dime_checkins_v1_internal_pipelines_dime_checkins_post",
+        "parameters": [
+          {
+            "description": "Run even when no team is switched on (the dashboard's Run button).",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Run even when no team is switched on (the dashboard's Run button).",
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Dime Checkins",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/espn-injury-status": {
       "post": {
         "description": "Trigger the ESPN injury status pipeline.\n\nFetches player injury/availability status from ESPN Fantasy API and upserts\nto nba.player_injuries. Free alternative to the BALLDONTLIE injury endpoint.\nPass ?date=YYYY-MM-DD to backfill a specific date.",

@@ -608,6 +608,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/dime-checkins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Dime Checkins
+         * @description Trigger the dime-checkins pipeline: Dime's check-ins, in shadow (the Dime
+         *     autopilot plan, step 3).
+         *
+         *     Called every 15 minutes by the 'dime-checkins' cron job. Gates on whether any
+         *     team is switched on (usr.autopilot, one query, no run row); when one is, asks
+         *     the backend to start the check-ins that are due. The backend owns the
+         *     schedule and runs each check-in once per team, kind and day.
+         */
+        post: operations["trigger_dime_checkins_v1_internal_pipelines_dime_checkins_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/espn-injury-status": {
         parameters: {
             query?: never;
@@ -3594,6 +3620,38 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_dime_checkins_v1_internal_pipelines_dime_checkins_post: {
+        parameters: {
+            query?: {
+                /** @description Run even when no team is switched on (the dashboard's Run button). */
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
                 };
             };
             /** @description Validation Error */

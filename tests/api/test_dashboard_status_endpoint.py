@@ -136,8 +136,9 @@ def test_dashboard_status_returns_expected_payload(monkeypatch) -> None:
 @pytest.mark.api
 def test_the_overview_rows_tell_the_run_button_to_force_only_the_gated_ticks() -> None:
     # The Overview's Run button posts what its row says. The scheduled-pickups
-    # route skips a tick with no pickup due, and the availability route one with
-    # no source due, so without ?force=true Run did nothing.
+    # route skips a tick with no pickup due, the availability route one with
+    # no source due, and the dime-checkins route one with no team switched on,
+    # so without ?force=true Run did nothing.
     # The run tables are bound to in-memory SQLite (schema stripped), empty.
     models = [PipelineRun, CronJobRun]
     saved = {model: model._meta.schema for model in models}
@@ -152,7 +153,7 @@ def test_the_overview_rows_tell_the_run_button_to_force_only_the_gated_ticks() -
         for model, schema in saved.items():
             model._meta.schema = schema
 
-    assert [row.name for row in rows if row.force_on_run] == ["scheduled_pickups", "availability"]
+    assert [row.name for row in rows if row.force_on_run] == ["scheduled_pickups", "availability", "dime_checkins"]
 
 
 # --- GET /v1/dashboard/services -------------------------------------------

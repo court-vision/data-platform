@@ -35,6 +35,7 @@ from pipelines.game_history import GameHistoryPipeline
 from pipelines.cv_projection import CVProjectionPipeline
 from pipelines.scheduled_pickups import ScheduledPickupsPipeline
 from pipelines.availability import AvailabilityPipeline
+from pipelines.dime_checkins import DimeCheckinsPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -78,6 +79,8 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     # Injury lists and pre-tip box scores into per-game verdicts (every 2 minutes;
     # its route gates on a source being due).
     "availability": AvailabilityPipeline,
+    # Dime's check-ins, in shadow (every 15 minutes; its route gates on a switched-on team).
+    "dime_checkins": DimeCheckinsPipeline,
 }
 
 

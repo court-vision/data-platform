@@ -57,15 +57,17 @@ DATE_COLUMNS = ("game_date", "as_of_date", "snapshot_date", "report_date",
                 "notification_date", "nba_date", "date")
 
 # The column that says when a row was last written, by preference.
-WRITE_COLUMNS = ("updated_at", "last_updated", "captured_at", "created_at", "sent_at")
+WRITE_COLUMNS = ("updated_at", "last_updated", "captured_at", "created_at", "sent_at", "started_at")
 
 # Pipelines that write only when there is something to say. A quiet night
 # leaves their table untouched, so its age says nothing about their health.
 # lineup_alerts: only when a lineup needs attention. breakout_detection: only
 # when a prominent player is out (`no_prominent_injuries_today` returns
 # without a row). move_ledger: its rows are dated by the move, so a night when
-# no team moved leaves the table's last date where it was.
-CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection", "move_ledger"})
+# no team moved leaves the table's last date where it was. dime_checkins: only
+# when a switched-on team has a check-in due, so the off-season (or every team
+# paused) leaves it as it was.
+CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection", "move_ledger", "dime_checkins"})
 
 # Tables dated by the run, not by the game night, and how far ahead that is.
 # daily_matchup_scores stamps its rows with the Central calendar date it ran
