@@ -4,6 +4,7 @@ import { AppShell } from "@/components/shell/AppShell"
 import { TokenGate } from "@/components/shell/TokenGate"
 import { DeskFrame } from "@/desk/DeskFrame"
 import { useToken } from "@/lib/token"
+import { Availability } from "@/routes/Availability"
 import { Freshness } from "@/routes/Freshness"
 import { Latency } from "@/routes/Latency"
 import { LatencyRoute } from "@/routes/LatencyRoute"
@@ -34,6 +35,7 @@ const router = createBrowserRouter([
       { path: "projections", element: <Projections /> },
       { path: "latency", element: <Latency /> },
       { path: "latency/route", element: <LatencyRoute /> },
+      { path: "availability", element: <Availability /> },
       { path: "*", element: <NotFound /> },
     ],
   },
