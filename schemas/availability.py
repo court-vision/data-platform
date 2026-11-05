@@ -55,7 +55,9 @@ class AvailabilityCall(ApiModel):
         default=None, description="espn_at minus ours_at; positive when we were first",
     )
     verdict_at_tip: Optional[str] = Field(
-        default=None, description="The stored verdict at the tip, ESPN fantasy's floor included",
+        default=None,
+        description="The full verdict at the tip, ESPN fantasy's floor included, replayed from the report "
+        "log with the current resolver (not read from nba.player_availability)",
     )
     verdict_by: Optional[str] = None
     espn_at_tip: Optional[str] = Field(default=None, description="ESPN fantasy's status at the tip")
@@ -69,7 +71,9 @@ class AvailabilityDay(ApiModel):
     games: int
     first_tip: Optional[datetime] = None
     first_poll: Optional[datetime] = Field(default=None, description="The pipeline's first report for the date")
-    covered: bool = Field(description="The first poll came before the first tip; only covered dates are scored")
+    covered: bool = Field(
+        description="Both ESPN sources were first read before the first tip; only covered dates are scored",
+    )
     calls: int = 0
 
 

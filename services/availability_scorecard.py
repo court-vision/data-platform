@@ -38,8 +38,11 @@ And otherwise:
 
 A player the box score lists inactive whom no other source ever named (a
 two-way player, mostly) is left out, as is one neither side called who played.
-A date is scored only when the pipeline's first poll came before its first
-tip: the pipeline first polled at 3:30 AM ET on Nov 3, inside Nov 2's game date.
+A date is scored only when both ESPN sources were first read before its first
+tip, so neither side can win a date the other was not watching: the pipeline
+first polled at 3:30 AM ET on Nov 3, inside Nov 2's game date. (A source that
+goes down after its first read of a date is not caught here: a quiet poll and a
+failed one both write nothing.)
 
 Blocking DB: call `build_scorecard` through `run_in_db_thread`.
 """
@@ -72,8 +75,11 @@ from schemas.availability import (
 MAX_DAYS = 30
 FLOOR = "espn_fantasy"
 BOX = "nba_boxscore"
-# Two calls this close came from the same tick (or adjacent ones): neither won.
-SAME_POLL = timedelta(minutes=TICK_MINUTES)
+# Two calls this close came from the same tick or the next one (each run's
+# start drifts by seconds): neither won.
+SAME_POLL = timedelta(minutes=TICK_MINUTES, seconds=30)
+# Both sides must have read a date before its first tip for the date to count.
+WATCHED = ("espn_injuries", FLOOR)
 RACES = ("us_first", "same_poll", "espn_first", "us_only", "espn_only")
 BOTH_CALLED = ("us_first", "same_poll", "espn_first")
 ORDER = {outcome: i for i, outcome in enumerate(
@@ -118,7 +124,7 @@ def _race(ours_at: Optional[datetime], espn_at: Optional[datetime]) -> str:
         return "espn_only"
     if espn_at is None:
         return "us_only"
-    if abs(espn_at - ours_at) < SAME_POLL:
+    if abs(espn_at - ours_at) <= SAME_POLL:
         return "same_poll"
     return "us_first" if ours_at < espn_at else "espn_first"
 
@@ -227,7 +233,7 @@ def summarize(calls: Sequence[AvailabilityCall]) -> AvailabilitySummary:
     return AvailabilitySummary(
         races=races,
         **{o: counts[o] for o in (*RACES, "carried", "unannounced", "not_in_box", "pending")},
-        first_share=round(share, 3) if share is not None else None,
+        first_share=share,
         median_lead_minutes=round(statistics.median(leads), 1) if leads else None,
         first_by=dict(Counter(c.ours_by or "unknown" for c in calls if c.outcome in ("us_first", "us_only"))),
         false_outs=len(false_outs),
@@ -297,7 +303,8 @@ def build_scorecard(days: int = 7, now: Optional[datetime] = None) -> Availabili
         tips = [g.tip for g in slate.games if g.tip is not None]
         first_tip = min(tips) if tips else None
         first_poll = min(opening[day].values()) if opening.get(day) else None
-        covered = first_poll is not None and first_tip is not None and first_poll < first_tip
+        watched = [opening.get(day, {}).get(source) for source in WATCHED]
+        covered = first_tip is not None and all(at is not None and at < first_tip for at in watched)
         mine: list[AvailabilityCall] = []
         if covered:
             for (game_date, pid), rows in reports.items():

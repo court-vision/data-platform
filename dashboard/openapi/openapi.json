@@ -648,7 +648,7 @@
                 "type": "null"
               }
             ],
-            "description": "The stored verdict at the tip, ESPN fantasy's floor included",
+            "description": "The full verdict at the tip, ESPN fantasy's floor included, replayed from the report log with the current resolver (not read from nba.player_availability)",
             "title": "Verdict At Tip"
           },
           "verdict_by": {
@@ -693,7 +693,7 @@
             "type": "integer"
           },
           "covered": {
-            "description": "The first poll came before the first tip; only covered dates are scored",
+            "description": "Both ESPN sources were first read before the first tip; only covered dates are scored",
             "title": "Covered",
             "type": "boolean"
           },

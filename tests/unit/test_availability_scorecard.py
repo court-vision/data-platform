@@ -81,6 +81,15 @@ def test_calls_in_the_same_tick_are_a_tie():
     assert call.outcome == "same_poll"
 
 
+def test_calls_a_tick_apart_are_a_tie_and_two_ticks_are_not():
+    def race(ours, espn):
+        return score(injuries("out", ours), fantasy("out", espn), box("inactive")).outcome
+
+    assert race("2026-11-04T22:00:00", "2026-11-04T22:02:00") == "same_poll"
+    assert race("2026-11-04T22:00:00", "2026-11-04T22:02:20") == "same_poll"   # the next run started late
+    assert race("2026-11-04T22:00:00", "2026-11-04T22:04:00") == "us_first"
+
+
 def test_only_we_had_him_out_at_the_tip():
     call = score(injuries("out", "2026-11-04T20:00"), fantasy("questionable", "2026-11-04T20:00"), box("inactive"))
 

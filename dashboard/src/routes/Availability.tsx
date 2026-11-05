@@ -114,7 +114,7 @@ function GateTiles({ summary }: { summary: AvailabilitySummary }) {
       tiles={[
         {
           label: "Us first",
-          value: formatPercent(summary.first_share),
+          value: formatPercent(summary.first_share, 1),
           tone: shareTone,
           note: `${first} of ${summary.races} ${summary.races === 1 ? "scratch" : "scratches"}, first or only`,
         },
@@ -217,7 +217,7 @@ function CallsBlock({ calls, show, onShow }: { calls: AvailabilityCall[]; show: 
       title="Players"
       count={rows.length}
       right={<Choice label="Show" options={SHOWS} value={show} onChange={onShow} />}
-      text="Newest date first, then by tip. Times are Central. Ours is the verdict from every source but ESPN fantasy; at the tip is the stored verdict, ESPN fantasy's floor included."
+      text="Newest date first, then by tip. Times are Central. Ours is the verdict from every source but ESPN fantasy; at the tip is the full verdict, ESPN fantasy's floor included, replayed from the report log."
     >
       {rows.length === 0 ? (
         <p className={s.empty}>Nobody here yet.</p>
@@ -289,7 +289,7 @@ function DatesBlock({ dates }: { dates: AvailabilityDay[] }) {
     <Block
       title="Dates"
       count={dates.length}
-      text="A date is scored only when the pipeline's first poll came before its first tip, so the date it went live on (Nov 2, its games already over) is not."
+      text="A date is scored only when both ESPN sources were first read before its first tip, so the date the pipeline went live on (Nov 2, its games already over) is not."
     >
       <div className={s.bleed}>
         <table className={s.table}>

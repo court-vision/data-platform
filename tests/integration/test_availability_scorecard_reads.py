@@ -108,6 +108,18 @@ def test_scores_the_covered_dates_and_names_each_player(log):
     assert not s.gate_met  # Tatum's false out was ours
 
 
+def test_a_date_espn_fantasy_never_read_before_the_tip_is_not_scored(log):
+    AvailabilityReport.delete().where(
+        (AvailabilityReport.game_date == WEDNESDAY) & (AvailabilityReport.source == "espn_fantasy")
+    ).execute()
+
+    card = build_scorecard(2, now=NOW)
+
+    assert [(d.game_date, d.covered) for d in card.dates] == [(WEDNESDAY, False), (TUESDAY, False)]
+    assert card.calls == []
+    assert card.summary.races == 0
+
+
 def test_an_empty_window_is_not_available(log):
     card = build_scorecard(1, now=datetime.fromisoformat("2026-11-20T18:00:00+00:00"))
 

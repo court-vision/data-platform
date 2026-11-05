@@ -1507,7 +1507,7 @@ export interface components {
             tip: string;
             /**
              * Verdict At Tip
-             * @description The stored verdict at the tip, ESPN fantasy's floor included
+             * @description The full verdict at the tip, ESPN fantasy's floor included, replayed from the report log with the current resolver (not read from nba.player_availability)
              */
             verdict_at_tip: string | null;
             /** Verdict By */
@@ -1522,7 +1522,7 @@ export interface components {
             calls: number;
             /**
              * Covered
-             * @description The first poll came before the first tip; only covered dates are scored
+             * @description Both ESPN sources were first read before the first tip; only covered dates are scored
              */
             covered: boolean;
             /**

@@ -71,7 +71,7 @@ describe("Availability", () => {
   test("the tiles read the gate: first share, lead, our false outs and the floor's", () => {
     const html = render("/availability", "7", scorecard())
 
-    expect(html).toContain(">75%</dd>")
+    expect(html).toContain(">75.0%</dd>")
     expect(html).toContain("3 of 4 scratches, first or only")
     expect(html).toContain(">+45m</dd>")
     expect(html).toContain("ours; 1 more from ESPN fantasy&#x27;s floor")

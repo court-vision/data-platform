@@ -80,8 +80,9 @@ export function formatLead(minutes: number | null | undefined): string {
   return `${sign}${body}`
 }
 
-export function formatPercent(share: number | null | undefined): string {
-  return share == null ? "—" : `${Math.round(share * 100)}%`
+/** "62%", or "50.2%" with `digits`: the gate's share is read against 50%, so it keeps a decimal. */
+export function formatPercent(share: number | null | undefined, digits = 0): string {
+  return share == null ? "—" : `${(share * 100).toFixed(digits)}%`
 }
 
 /** The false outs our own sources made: the floor's are ESPN fantasy's rule, not our call. */

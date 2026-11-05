@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   formatLead,
+  formatPercent,
   ownFalseOuts,
   parseDays,
   parseShow,
@@ -44,6 +45,12 @@ describe("availability", () => {
     expect(shownCalls(calls, "false_outs").map((c) => c.outcome)).toEqual(["false_out"])
     expect(shownCalls(calls, "others").map((c) => c.outcome)).toEqual(["carried", "pending"])
     expect(shownCalls(calls, "all")).toHaveLength(5)
+  })
+
+  test("the gate's share keeps a decimal so 50.2% does not read as 50%", () => {
+    expect(formatPercent(0.502, 1)).toBe("50.2%")
+    expect(formatPercent(0.62)).toBe("62%")
+    expect(formatPercent(null, 1)).toBe("—")
   })
 
   test("the floor's false outs are not ours", () => {
