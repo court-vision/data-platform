@@ -67,7 +67,7 @@ from services.alert_service import AlertEvent, get_alert_service
 
 # The gate routes here (pre-game, post-game, live-stats) are `async def`, so
 # they run on the private process's one event loop, which they share with
-# /health, the scheduled-pickups and availability ticks and cron-run ingestion. Every blocking
+# /health, the scheduled-pickups, dime-checkins and availability ticks and cron-run ingestion. Every blocking
 # call in them goes to a worker thread: run_in_db_thread for Peewee,
 # asyncio.to_thread for the NBA scoreboard, whose sync tenacity retry sleeps
 # 2-30 s between attempts. Run inline, the live-stats gate stalled the loop
@@ -1244,6 +1244,44 @@ def _has_due_pickups() -> bool:
 
 async def _due_pickups_exist() -> bool:
     return await run_in_db_thread(_has_due_pickups)
+
+
+@router.post("/dime-checkins", response_model=PipelineResponse)
+async def trigger_dime_checkins(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(False, description="Run even when no team is switched on (the dashboard's Run button)."),
+) -> PipelineResponse:
+    """
+    Trigger the dime-checkins pipeline: Dime's check-ins, in shadow (the Dime
+    autopilot plan, step 3).
+
+    Called every 15 minutes by the 'dime-checkins' cron job. Gates on whether any
+    team is switched on (usr.autopilot, one query, no run row); when one is, asks
+    the backend to start the check-ins that are due. The backend owns the
+    schedule and runs each check-in once per team, kind and day.
+    """
+    if not force and not await _autopilot_on():
+        return PipelineResponse(status=ApiStatus.SKIPPED, message="No team has Dime's check-ins switched on")
+    result = await run_pipeline("dime_checkins")
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+# The table is the backend's (migration 0042); until that has run, nothing is switched on
+AUTOPILOT_TABLE_SQL = "SELECT to_regclass('usr.autopilot') IS NOT NULL"
+AUTOPILOT_ON_SQL = "SELECT EXISTS (SELECT 1 FROM usr.autopilot WHERE paused_at IS NULL)"
+
+
+def _has_autopilot_on() -> bool:
+    from db.base import db
+    table = db.execute_sql(AUTOPILOT_TABLE_SQL).fetchone()
+    if not (table and table[0]):
+        return False
+    row = db.execute_sql(AUTOPILOT_ON_SQL).fetchone()
+    return bool(row and row[0])
+
+
+async def _autopilot_on() -> bool:
+    return await run_in_db_thread(_has_autopilot_on)
 
 
 @router.post("/availability", response_model=PipelineResponse)

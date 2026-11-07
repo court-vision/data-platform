@@ -159,6 +159,7 @@ class Settings(BaseSettings):
         "deploy": 1,
         "scheduled-pickups": 5,   # one-minute cadence: five misses is five minutes
         "availability": 3,        # two-minute cadence: three misses is six minutes
+        "dime-checkins": 3,       # fifteen-minute cadence: three misses is most of a check-in's window
     }
     alert_cron_streak_default_threshold: int = 2
 

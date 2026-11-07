@@ -28,6 +28,7 @@ CRON_RUNNER_JOBS = {
     "preseason-market",
     "scheduled-pickups",
     "availability",
+    "dime-checkins",
 }
 
 # SCHEDULED pipelines that no cron-runner job fires (manual trigger only).
@@ -174,4 +175,4 @@ class TestForceOnRun:
         # which made the Run button a no-op. cv-projection's route takes `force`
         # too, but there it means "outside the preseason window" - not what a
         # Run click means.
-        assert [name for name, _ in FORCED] == ["availability", "scheduled_pickups"]
+        assert [name for name, _ in FORCED] == ["availability", "dime_checkins", "scheduled_pickups"]

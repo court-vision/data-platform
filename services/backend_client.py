@@ -1,7 +1,7 @@
 """
 Backend internal API client — the lineup-alerts pipeline's one call per team, the
-scheduled-pickups pipeline's one call per tick, and the move-ledger pipeline's one
-call per night.
+scheduled-pickups pipeline's one call per tick, the move-ledger pipeline's one
+call per night, and the dime-checkins pipeline's one call per tick.
 
     POST {BACKEND_INTERNAL_URL}/v1/internal/jobs/lineup/evaluate
     Authorization: Bearer <PIPELINE_API_TOKEN>      (the token both services share)
@@ -39,6 +39,12 @@ snapshot and answers one result per league. A rebuild replaces a league's rows
 whole, so a lost answer is safe to repeat; still one request, no retry (the
 post-game batch's next poll is the retry). It reads a season of snapshots per
 league, so it has its own read timeout.
+
+`run_checkins` is the fourth, POST /v1/internal/jobs/checkins/run with `{}`: the
+backend starts the Dime check-ins that are due (the Dime autopilot plan, step 3)
+and answers what it started. The check-ins run on in the backend after the
+answer, so the call is quick; one request, no retry (each check-in is claimed
+once per team, kind and day, and the next tick fifteen minutes later is the retry).
 """
 
 from __future__ import annotations
@@ -56,6 +62,7 @@ from core.settings import settings as default_settings
 EVALUATE_PATH = "/v1/internal/jobs/lineup/evaluate"
 EXECUTE_PICKUPS_PATH = "/v1/internal/jobs/pickups/execute"
 RUN_LEDGER_PATH = "/v1/internal/jobs/ledger/run"
+RUN_CHECKINS_PATH = "/v1/internal/jobs/checkins/run"
 CONNECT_TIMEOUT_SECONDS = 5.0
 
 # Outcomes the backend returns for a 200.
@@ -326,6 +333,60 @@ class LedgerRun:
         return cls(ok=True, leagues=leagues)
 
 
+@dataclass(frozen=True)
+class CheckinStarted:
+    checkin_id: int
+    team_id: int
+    kind: str
+    date: str
+
+    @classmethod
+    def from_payload(cls, item: Any) -> Optional["CheckinStarted"]:
+        if not isinstance(item, dict):
+            return None
+        try:
+            return cls(checkin_id=int(item["checkin_id"]), team_id=int(item["team_id"]), kind=str(item["kind"]),
+                       date=str(item["date"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+@dataclass(frozen=True)
+class CheckinsRun:
+    """The backend's answer to one check-ins tick, or why there is none (`ok` False)."""
+
+    ok: bool
+    off: bool = False
+    teams: int = 0
+    started: list[CheckinStarted] = field(default_factory=list)
+    missed: int = 0
+    skipped: int = 0
+    stale: int = 0
+    reason: Optional[str] = None
+    error: Optional[str] = None
+
+    @classmethod
+    def unavailable(cls, reason: str, error: Optional[str] = None) -> "CheckinsRun":
+        return cls(ok=False, reason=reason, error=error)
+
+    @classmethod
+    def from_payload(cls, data: Any) -> "CheckinsRun":
+        if not isinstance(data, dict) or not isinstance(data.get("started"), list):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        started: list[CheckinStarted] = []
+        for item in data["started"]:
+            one = CheckinStarted.from_payload(item)
+            if one is None:
+                return cls.unavailable(reason="malformed_response", error=f"unexpected check-in: {_excerpt(repr(item))}")
+            started.append(one)
+        try:
+            return cls(ok=True, off=bool(data.get("off")), teams=int(data.get("teams") or 0), started=started,
+                       missed=int(data.get("missed") or 0), skipped=int(data.get("skipped") or 0),
+                       stale=int(data.get("stale") or 0))
+        except (TypeError, ValueError):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+
+
 class BackendClient:
     """Talks to the backend's pipeline-token routes. Disabled when no base URL is configured."""
 
@@ -508,6 +569,78 @@ class BackendClient:
             error=run.error,
         )
         return run
+
+    def run_checkins(self, *, correlation_id: Optional[str] = None) -> CheckinsRun:
+        """Ask the backend to start the Dime check-ins that are due.
+
+        Never raises: transport and protocol failures come back as a run that is not `ok`.
+        """
+        if not self.enabled:
+            return CheckinsRun.unavailable(reason="backend_not_configured")
+
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+
+        started = time.monotonic()
+        status_code: Optional[int] = None
+        try:
+            response = requests.post(
+                f"{self._base_url}{RUN_CHECKINS_PATH}",
+                json={},
+                headers=headers,
+                timeout=self._timeout,
+            )
+            status_code = response.status_code
+            run = self._parse_checkins_response(response)
+        except requests.Timeout as exc:
+            run = CheckinsRun.unavailable(reason="timeout", error=_excerpt(str(exc)))
+        except requests.RequestException as exc:
+            run = CheckinsRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+        except Exception as exc:  # a client bug must degrade the run, not raise
+            run = CheckinsRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        log = self._log.info if run.ok else self._log.warning
+        log(
+            "backend_run_checkins",
+            ok=run.ok,
+            off=run.off,
+            teams=run.teams,
+            started=len(run.started),
+            missed=run.missed,
+            skipped=run.skipped,
+            stale=run.stale,
+            reason=run.reason,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            error=run.error,
+        )
+        return run
+
+    @staticmethod
+    def _parse_checkins_response(response: requests.Response) -> CheckinsRun:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if status == 200:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            return CheckinsRun.from_payload(data)
+
+        if status == 401:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            return CheckinsRun.unavailable(reason="unauthorized", error=_excerpt(str(detail or response.text)))
+
+        detail: Optional[str] = None
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
+        return CheckinsRun.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
 
     @staticmethod
     def _parse_ledger_response(response: requests.Response) -> LedgerRun:
