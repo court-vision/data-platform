@@ -38,6 +38,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Availability
+         * @description Each scratch on the covered dates: whether our verdict or ESPN fantasy said
+         *     out first, and by how many minutes; every player out at his tip who was
+         *     active in the box score; and the summary the dark-week gate is read from.
+         */
+        get: operations["get_availability_v1_dashboard_availability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/freshness": {
         parameters: {
             query?: never;
@@ -1447,6 +1469,245 @@ export interface components {
          * @enum {string}
          */
         ApiStatus: "success" | "error" | "skipped" | "bad_request" | "validation_error" | "authentication_error" | "authorization_error" | "not_found" | "conflict" | "rate_limited" | "server_error";
+        /**
+         * AvailabilityCall
+         * @description One player on one game date, as the scorecard judges him.
+         */
+        AvailabilityCall: {
+            /**
+             * Box
+             * @description The box score's last word on him
+             */
+            box: ("inactive" | "active") | null;
+            /** Detail */
+            detail: string | null;
+            /**
+             * Espn At
+             * @description When our ESPN fantasy poll saw his status go out and stay out to the tip
+             */
+            espn_at: string | null;
+            /**
+             * Espn At Tip
+             * @description ESPN fantasy's status at the tip
+             */
+            espn_at_tip: string | null;
+            /**
+             * Game Date
+             * Format: date
+             */
+            game_date: string;
+            /** Game Id */
+            game_id: string | null;
+            /**
+             * Lead Minutes
+             * @description espn_at minus ours_at; positive when we were first
+             */
+            lead_minutes: number | null;
+            /** Name */
+            name: string;
+            /**
+             * Ours At
+             * @description When our verdict, ESPN fantasy left out, went out and stayed out to the tip
+             */
+            ours_at: string | null;
+            /**
+             * Ours By
+             * @description The source that decided that out
+             */
+            ours_by: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "us_first" | "same_poll" | "espn_first" | "us_only" | "espn_only" | "carried" | "unannounced" | "false_out" | "not_in_box" | "pending";
+            /** Player Id */
+            player_id: number;
+            /** Reason */
+            reason: string | null;
+            /** Team */
+            team: string | null;
+            /**
+             * Tip
+             * Format: date-time
+             */
+            tip: string;
+            /**
+             * Verdict At Tip
+             * @description The full verdict at the tip, ESPN fantasy's floor included, replayed from the report log with the current resolver (not read from nba.player_availability)
+             */
+            verdict_at_tip: string | null;
+            /** Verdict By */
+            verdict_by: string | null;
+        };
+        /** AvailabilityDay */
+        AvailabilityDay: {
+            /**
+             * Calls
+             * @default 0
+             */
+            calls: number;
+            /**
+             * Covered
+             * @description Both ESPN sources were first read before the first tip; only covered dates are scored
+             */
+            covered: boolean;
+            /**
+             * First Poll
+             * @description The pipeline's first report for the date
+             */
+            first_poll: string | null;
+            /** First Tip */
+            first_tip: string | null;
+            /**
+             * Game Date
+             * Format: date
+             */
+            game_date: string;
+            /** Games */
+            games: number;
+        };
+        /**
+         * AvailabilityResponse
+         * @description Response for GET /v1/dashboard/availability.
+         */
+        AvailabilityResponse: {
+            data: components["schemas"]["AvailabilityScorecard"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /** AvailabilityScorecard */
+        AvailabilityScorecard: {
+            /**
+             * Available
+             * @description False until the pipeline has written a report in the window
+             */
+            available: boolean;
+            /**
+             * Calls
+             * @description Newest date first, then by tip
+             */
+            calls: components["schemas"]["AvailabilityCall"][];
+            /**
+             * Dates
+             * @description Newest first
+             */
+            dates: components["schemas"]["AvailabilityDay"][];
+            /** Days */
+            days: number;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /**
+             * Since
+             * Format: date
+             */
+            since: string;
+            summary: components["schemas"]["AvailabilitySummary"];
+            /**
+             * Until
+             * Format: date
+             */
+            until: string;
+        };
+        /** AvailabilitySummary */
+        AvailabilitySummary: {
+            /**
+             * Carried
+             * @default 0
+             */
+            carried: number;
+            /**
+             * Espn False Outs
+             * @description Active players ESPN fantasy itself had out at the tip
+             * @default 0
+             */
+            espn_false_outs: number;
+            /**
+             * Espn First
+             * @default 0
+             */
+            espn_first: number;
+            /**
+             * Espn Only
+             * @default 0
+             */
+            espn_only: number;
+            /**
+             * False Outs
+             * @description Out at the tip, active in the box score
+             * @default 0
+             */
+            false_outs: number;
+            /**
+             * False Outs Floor
+             * @description False outs that only ESPN fantasy's floor made out
+             * @default 0
+             */
+            false_outs_floor: number;
+            /**
+             * First By
+             * @description The source behind each us_first and us_only
+             */
+            first_by: {
+                [key: string]: number;
+            };
+            /**
+             * First Share
+             * @description (us_first + us_only) / races; None with no races
+             */
+            first_share: number | null;
+            /**
+             * Gate Met
+             * @description races > 0, first_share > 0.5, and no false out beyond the floor's
+             * @default false
+             */
+            gate_met: boolean;
+            /**
+             * Median Lead Minutes
+             * @description Over the races both sides called; positive when we were first
+             */
+            median_lead_minutes: number | null;
+            /**
+             * Not In Box
+             * @default 0
+             */
+            not_in_box: number;
+            /**
+             * Pending
+             * @default 0
+             */
+            pending: number;
+            /**
+             * Races
+             * @description Scratches at least one side called out by the tip, carried ones aside
+             * @default 0
+             */
+            races: number;
+            /**
+             * Same Poll
+             * @default 0
+             */
+            same_poll: number;
+            /**
+             * Unannounced
+             * @default 0
+             */
+            unannounced: number;
+            /**
+             * Us First
+             * @default 0
+             */
+            us_first: number;
+            /**
+             * Us Only
+             * @default 0
+             */
+            us_only: number;
+        };
         /**
          * CronJobRunEntry
          * @description A single cron job run record returned by the API.
@@ -2900,6 +3161,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_availability_v1_dashboard_availability_get: {
+        parameters: {
+            query?: {
+                /** @description Game dates to score, today's included */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AvailabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

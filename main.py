@@ -27,7 +27,7 @@ from core.settings import settings
 from core.telemetry import init_sentry
 from db.base import init_db, close_db
 from services.schedule_service import assert_calendar_available
-from api.v1 import pipelines, live, dashboard, latency, projections, quality, cron
+from api.v1 import pipelines, live, dashboard, latency, projections, quality, cron, availability
 
 # Sentry must be initialised before the app exists so its ASGI integration wraps it.
 # No SENTRY_DSN (dev, tests) -> nothing happens.
@@ -90,6 +90,7 @@ app.include_router(live.router, prefix="/v1/live")
 app.include_router(dashboard.router, prefix="/v1")
 app.include_router(projections.router, prefix="/v1")
 app.include_router(latency.router, prefix="/v1")
+app.include_router(availability.router, prefix="/v1")
 
 
 @app.get("/")
