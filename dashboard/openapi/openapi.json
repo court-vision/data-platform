@@ -480,6 +480,472 @@
         "title": "ApiStatus",
         "type": "string"
       },
+      "AvailabilityCall": {
+        "description": "One player on one game date, as the scorecard judges him.",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "espn_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When our ESPN fantasy poll saw his status go out and stay out to the tip",
+            "title": "Espn At"
+          },
+          "espn_at_tip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ESPN fantasy's status at the tip",
+            "title": "Espn At Tip"
+          },
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "game_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Game Id"
+          },
+          "lead_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "espn_at minus ours_at; positive when we were first",
+            "title": "Lead Minutes"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ours_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When our verdict, ESPN fantasy left out, went out and stayed out to the tip",
+            "title": "Ours At"
+          },
+          "ours_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source that decided that out",
+            "title": "Ours By"
+          },
+          "outcome": {
+            "enum": [
+              "us_first",
+              "same_poll",
+              "espn_first",
+              "us_only",
+              "espn_only",
+              "carried",
+              "unannounced",
+              "false_out",
+              "pending"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "played": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether he played the game (a line in nba.player_game_stats); None until its stats are in",
+            "title": "Played"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          },
+          "tip": {
+            "format": "date-time",
+            "title": "Tip",
+            "type": "string"
+          },
+          "verdict_at_tip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The full verdict at the tip, ESPN fantasy's floor included, replayed from the report log with the current resolver (not read from nba.player_availability)",
+            "title": "Verdict At Tip"
+          },
+          "verdict_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict By"
+          }
+        },
+        "required": [
+          "game_date",
+          "player_id",
+          "name",
+          "team",
+          "game_id",
+          "tip",
+          "outcome",
+          "ours_at",
+          "ours_by",
+          "espn_at",
+          "lead_minutes",
+          "verdict_at_tip",
+          "verdict_by",
+          "espn_at_tip",
+          "played",
+          "reason",
+          "detail"
+        ],
+        "title": "AvailabilityCall",
+        "type": "object"
+      },
+      "AvailabilityDay": {
+        "properties": {
+          "calls": {
+            "default": 0,
+            "title": "Calls",
+            "type": "integer"
+          },
+          "covered": {
+            "description": "Both ESPN sources were first read before the first tip; only covered dates are scored",
+            "title": "Covered",
+            "type": "boolean"
+          },
+          "first_poll": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pipeline's first report for the date",
+            "title": "First Poll"
+          },
+          "first_tip": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Tip"
+          },
+          "game_date": {
+            "format": "date",
+            "title": "Game Date",
+            "type": "string"
+          },
+          "games": {
+            "title": "Games",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "game_date",
+          "games",
+          "first_tip",
+          "first_poll",
+          "covered",
+          "calls"
+        ],
+        "title": "AvailabilityDay",
+        "type": "object"
+      },
+      "AvailabilityResponse": {
+        "description": "Response for GET /v1/dashboard/availability.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AvailabilityScorecard"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "AvailabilityResponse",
+        "type": "object"
+      },
+      "AvailabilityScorecard": {
+        "properties": {
+          "available": {
+            "description": "False until the pipeline has written a report in the window",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "calls": {
+            "description": "Newest date first, then by tip",
+            "items": {
+              "$ref": "#/components/schemas/AvailabilityCall"
+            },
+            "title": "Calls",
+            "type": "array"
+          },
+          "dates": {
+            "description": "Newest first",
+            "items": {
+              "$ref": "#/components/schemas/AvailabilityDay"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "since": {
+            "format": "date",
+            "title": "Since",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/AvailabilitySummary"
+          },
+          "until": {
+            "format": "date",
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "days",
+          "since",
+          "until",
+          "generated_at",
+          "available",
+          "summary",
+          "dates",
+          "calls"
+        ],
+        "title": "AvailabilityScorecard",
+        "type": "object"
+      },
+      "AvailabilitySummary": {
+        "properties": {
+          "carried": {
+            "default": 0,
+            "title": "Carried",
+            "type": "integer"
+          },
+          "espn_false_outs": {
+            "default": 0,
+            "description": "Players who played whom ESPN fantasy itself had out at the tip",
+            "title": "Espn False Outs",
+            "type": "integer"
+          },
+          "espn_first": {
+            "default": 0,
+            "title": "Espn First",
+            "type": "integer"
+          },
+          "espn_only": {
+            "default": 0,
+            "title": "Espn Only",
+            "type": "integer"
+          },
+          "false_outs": {
+            "default": 0,
+            "description": "Out at the tip, and he played",
+            "title": "False Outs",
+            "type": "integer"
+          },
+          "false_outs_floor": {
+            "default": 0,
+            "description": "False outs that only ESPN fantasy's floor made out",
+            "title": "False Outs Floor",
+            "type": "integer"
+          },
+          "first_by": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "The source behind each us_first and us_only",
+            "title": "First By",
+            "type": "object"
+          },
+          "first_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "(us_first + us_only) / races; None with no races",
+            "title": "First Share"
+          },
+          "gate_met": {
+            "default": false,
+            "description": "races > 0, first_share > 0.5, and no false out beyond the floor's",
+            "title": "Gate Met",
+            "type": "boolean"
+          },
+          "median_lead_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Over the races both sides called; positive when we were first",
+            "title": "Median Lead Minutes"
+          },
+          "pending": {
+            "default": 0,
+            "title": "Pending",
+            "type": "integer"
+          },
+          "races": {
+            "default": 0,
+            "description": "Scratches at least one side called out by the tip, carried ones aside",
+            "title": "Races",
+            "type": "integer"
+          },
+          "same_poll": {
+            "default": 0,
+            "title": "Same Poll",
+            "type": "integer"
+          },
+          "unannounced": {
+            "default": 0,
+            "title": "Unannounced",
+            "type": "integer"
+          },
+          "us_first": {
+            "default": 0,
+            "title": "Us First",
+            "type": "integer"
+          },
+          "us_only": {
+            "default": 0,
+            "title": "Us Only",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "races",
+          "us_first",
+          "same_poll",
+          "espn_first",
+          "us_only",
+          "espn_only",
+          "carried",
+          "unannounced",
+          "pending",
+          "first_share",
+          "median_lead_minutes",
+          "first_by",
+          "false_outs",
+          "false_outs_floor",
+          "espn_false_outs",
+          "gate_met"
+        ],
+        "title": "AvailabilitySummary",
+        "type": "object"
+      },
       "CronJobRunEntry": {
         "description": "A single cron job run record returned by the API.",
         "properties": {
@@ -4064,6 +4530,59 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/v1/dashboard/availability": {
+      "get": {
+        "description": "Each scratch on the covered dates: whether our verdict or ESPN fantasy said\nout first, and by how many minutes; every player out at his tip who was\nactive in the box score; and the summary the dark-week gate is read from.",
+        "operationId": "get_availability_v1_dashboard_availability_get",
+        "parameters": [
+          {
+            "description": "Game dates to score, today's included",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "description": "Game dates to score, today's included",
+              "maximum": 30,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AvailabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Availability",
+        "tags": [
+          "availability"
+        ]
       }
     },
     "/v1/dashboard/freshness": {

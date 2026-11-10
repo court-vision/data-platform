@@ -309,10 +309,39 @@ def test_before_the_tip_an_active_takes_back_an_inactive():
     assert (1628973, "active") in {(o.player_id, o.report.status) for o in observed}
 
 
-def test_from_the_tip_every_listed_player_is_news():
-    observed = boxscore_observations("0022600101", boxscore_players(BOX), True, {}, NOW)
-    assert len(observed) == 5
+def test_from_the_tip_the_out_and_those_who_played_are_news():
+    played = {"personId": 1630174, "status": "ACTIVE", "played": "1"}
+    box = {**BOX, "gameStatus": 2, "homeTeam": {**BOX["homeTeam"], "players": [*BOX["homeTeam"]["players"], played]}}
+    observed = boxscore_observations("0022600101", boxscore_players(box), True, {}, NOW)
+    assert sorted((o.player_id, o.report.status) for o in observed) == [
+        (1628369, "inactive"), (1628404, "inactive"), (1629011, "inactive"),
+        (1630173, "active"),        # a coach's DNP dressed: he was available
+        (1630174, "active")]
     assert {o.team for o in observed} == {"NYK", "BOS"}
+
+
+def test_from_the_tip_a_listed_player_who_has_not_played_takes_back_nothing():
+    # Jalen Johnson, Nov 4: ruled out, listed ACTIVE with no reason, never played.
+    earlier = {1628973: Report("espn_injuries", "out", NOW - timedelta(hours=1))}
+    observed = boxscore_observations("0022600101", boxscore_players({**BOX, "gameStatus": 2}), True, earlier, NOW)
+    assert 1628973 not in {o.player_id for o in observed}
+
+
+def test_a_hurt_player_on_the_active_list_is_out():
+    box = {"gameStatus": 2, "homeTeam": {"teamTricode": "HOU", "players": [
+        _box_player(203991, "ACTIVE", None, "Right Ankle Sprain"),          # Capela, Nov 4-9
+        _box_player(203500, "ACTIVE", "DNP_INJURY", "Right Soleus Strain"),
+        _box_player(1630173, "ACTIVE", "DNP_COACH", "Coach's Decision"),
+        {"personId": 1630578, "status": "ACTIVE", "played": "0", "statistics": {"minutes": "PT00M40.00S"}},
+        {"personId": 1630579, "status": "ACTIVE", "played": "1", "notPlayingDescription": "Left Knee"},
+    ]}}
+    players = {p.player_id: p for p in boxscore_players(box)}
+    assert (players[203991].status, players[203991].detail, players[203991].played) == (
+        "inactive", "Right Ankle Sprain", False)
+    assert players[203500].status == "inactive"
+    assert players[1630173].status == "active"         # a coach's DNP was available
+    assert (players[1630578].status, players[1630578].played) == ("active", True)   # 40 seconds is played
+    assert (players[1630579].status, players[1630579].played) == ("active", True)   # on the floor wins
 
 
 # ---- reactions -------------------------------------------------------------------------------------
