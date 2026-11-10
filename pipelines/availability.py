@@ -919,14 +919,14 @@ class AvailabilityPipeline(BasePipeline):
                 decided_by=event.decided_by,
                 game_id=event.game_id,
             )
-        swaps = 0
         if held:
-            swaps = self._post_reactions(ctx, game_date, held)
             self._post_events(ctx, game_date, held)
-
         injuries_written = (
             write_injuries_compat(game_date, ctx.run_id) if settings.availability_writes_injuries else 0
         )
+        # The swaps go last: each post waits on the backend's board reads, so a slow one holds up
+        # only the swaps, never Dime's events or the injuries write.
+        swaps = self._post_reactions(ctx, game_date, held) if held else 0
         ctx.log.info(
             "availability_complete",
             game_date=str(game_date),
@@ -941,7 +941,10 @@ class AvailabilityPipeline(BasePipeline):
 
     def _post_reactions(self, ctx: PipelineContext, game_date: date, held: Sequence[VerdictChange]) -> int:
         """Post each change to the late-scratch swap and email the owners it swapped or suggested a
-        swap for; returns the swaps made. Never raises."""
+        swap for; returns the swaps made. Never raises.
+
+        One at a time, in the order they changed: the backend plans each change on the board the
+        last swap left, so two changes on one team must not be planned against the same board."""
         if not settings.post_availability_reactions:
             ctx.increment_skipped(len(held), "reaction_not_posted")
             return 0

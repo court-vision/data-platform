@@ -310,3 +310,14 @@ def test_a_bench_player_cleared_to_play_and_an_unverified_write(service):
     assert "Because Jalen Brunson was upgraded to available (per the NBA box score):" in body
     assert "upgraded again" not in body
     assert body.splitlines()[4].startswith("Applied to ESPN:") and body.splitlines()[4] != "Applied to ESPN:"
+
+
+@pytest.mark.unit
+def test_a_write_that_may_have_gone_through_says_check_espn(service):
+    service.send_late_scratch_result(USER, TEAM, _scratch(outcome="failed", reason="write_uncertain", verified=None))
+    _, subject, body = service.sent[0]
+    assert subject == "Jalen Brunson ruled out: a lineup swap for Hoop Dreams"
+    assert "Sent to ESPN, not confirmed:" in body and "Suggested swap:" not in body
+    assert "Court Vision sent it to ESPN but couldn't confirm it went through: check your lineup on ESPN." in body
+    assert "Nothing was changed on ESPN" not in body
+    assert "If it isn't on ESPN, make it in Court Vision's Week desk or on ESPN." in body
