@@ -17,7 +17,7 @@ function call(outcome: Outcome, player_id = 1): AvailabilityCall {
   return {
     game_date: "2026-11-04", player_id, name: `P${player_id}`, team: "NYK", game_id: "0022600151",
     tip: "2026-11-05T00:30:00Z", outcome, ours_at: null, ours_by: null, espn_at: null, lead_minutes: null,
-    verdict_at_tip: null, verdict_by: null, espn_at_tip: null, box: null, reason: null, detail: null,
+    verdict_at_tip: null, verdict_by: null, espn_at_tip: null, played: null, reason: null, detail: null,
   }
 }
 

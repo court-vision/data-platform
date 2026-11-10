@@ -13,31 +13,38 @@ order we saw the reports:
                 verdict could never be later than ESPN.
     ESPN        ESPN fantasy's own status, after each of its polls.
     at the tip  the full verdict, floor and all: what the reactor would have had.
-    the result  the box score's last word on him: inactive (did not play) or active.
+    the result  whether he played: a line in nba.player_game_stats for the game.
+                Not the live box score's list: it leaves most scratched players
+                off (24 to 30 players a game in the first dark week, Nov 4-9)
+                and lists hurt ones ACTIVE (teams must dress 13), so 264 of 280
+                outs were never graded by it, and 9 that sat read as false outs.
 
 A side's time is when its out began and stayed out to the tip; an out it took
 back does not count. ESPN's time is when our fantasy poll saw the flip (every 15
 minutes from 11 AM ET on a game day, hourly before), so a lead shorter than the
 poll may be the poll, not ESPN.
 
-For a player the box score lists inactive:
+For a player who did not play:
 
     us_first, same_poll, espn_first   both called him out by the tip (same_poll:
                                       within one 2-minute tick of each other)
     us_only, espn_only                only one side did
-    carried                           both had him out at their first read of
-                                      the date: a long absence, not a race
+    carried                           every side that called him had him out at
+                                      its first read of the date: a long
+                                      absence, not a race (in the first week,
+                                      20 of ESPN fantasy's "wins" were G League
+                                      and two-way players ESPN fantasy had out
+                                      all day and ESPN's injury list never names)
     unannounced                       a source named him, neither called him out
 
 And otherwise:
 
-    false_out                         active in the box score, out at the tip
-    not_in_box                        called out, tipped, never on the box score
-    pending                           called out, not tipped yet (nothing is
-                                      graded before the tip)
+    false_out                         he played, and was out at the tip
+    pending                           called out, not graded yet: the game has
+                                      not tipped, or its stats are not in
 
-A player the box score lists inactive whom no other source ever named (a
-two-way player, mostly) is left out, as is one neither side called who played.
+A player who did not play whom only the box score named (a two-way player,
+mostly) is left out, as is one neither side called who played.
 A date is scored only when both ESPN sources were first read before its first
 tip, so neither side can win a date the other was not watching: the pipeline
 first polled at 3:30 AM ET on Nov 3, inside Nov 2's game date. (A source that
@@ -83,13 +90,20 @@ WATCHED = ("espn_injuries", FLOOR)
 RACES = ("us_first", "same_poll", "espn_first", "us_only", "espn_only")
 BOTH_CALLED = ("us_first", "same_poll", "espn_first")
 ORDER = {outcome: i for i, outcome in enumerate(
-    ("false_out", *RACES, "unannounced", "pending", "not_in_box", "carried")
+    ("false_out", *RACES, "unannounced", "pending", "carried")
 )}
 
 REPORTS_SQL = f"""
     SELECT game_date, {_REPORT_COLUMNS}
     FROM nba.availability_reports
     WHERE game_date BETWEEN %s AND %s
+"""
+# Who played each game: a line is written for every player who was on the floor,
+# even for seconds (`min` 0), and for no one who was not.
+PLAYED_SQL = """
+    SELECT DISTINCT game_id, player_id
+    FROM nba.player_game_stats
+    WHERE game_date BETWEEN %s AND %s AND game_id IS NOT NULL
 """
 
 
@@ -134,6 +148,7 @@ def score_call(
     game: GameContext,
     tip: datetime,
     *,
+    played: Optional[bool],
     opening: Mapping[str, datetime],
     now: datetime,
     player_id: int,
@@ -142,12 +157,12 @@ def score_call(
 ) -> Optional[AvailabilityCall]:
     """One (player, date): his outcome, or None when he is not part of the scorecard.
 
+    `played` is the result: True when he has a stats line for the game, False
+    when the game's lines are in and he has none, None until they are.
     `opening` is the date's first poll per source (its earliest report), which
     tells a long absence from a call made today.
     """
     before = [r for r in reports if r.observed_at < tip]
-    box_rows = [r for r in reports if r.source == BOX and r.status in ("inactive", "active")]
-    box = max(box_rows, key=lambda r: r.observed_at).status if box_rows else None
 
     ours = our_timeline(before, game)
     ours_at = out_since([(at, v.verdict if v else None) for at, v in ours])
@@ -162,32 +177,28 @@ def score_call(
     called = ours_at is not None or espn_at is not None
     named = any(r.source != BOX for r in reports)
 
-    if now < tip:
-        # Nothing is graded before the tip: a pre-tip INACTIVE can still be taken back.
+    if now < tip or played is None:
+        # Nothing is graded before the tip (a pre-tip INACTIVE can still be taken
+        # back), or before the game's stats say who played.
         if not called:
             return None
         outcome = "pending"
-    elif box == "active":
+    elif played:
         if not out_at_tip:
             return None
         outcome = "false_out"
-    elif box == "inactive":
+    else:
         if not named:
             return None
+        ours_carried = ours_at is None or _at_opening(
+            ours_at, ours_verdict.decided_by if ours_verdict else None, opening)
+        espn_carried = espn_at is None or _at_opening(espn_at, FLOOR, opening)
         if not called:
             outcome = "unannounced"
-        elif (
-            ours_at is not None and espn_at is not None
-            and _at_opening(ours_at, ours_verdict.decided_by if ours_verdict else None, opening)
-            and _at_opening(espn_at, FLOOR, opening)
-        ):
+        elif ours_carried and espn_carried:
             outcome = "carried"
         else:
             outcome = _race(ours_at, espn_at)
-    else:
-        if not called:
-            return None
-        outcome = "not_in_box"
 
     shown = full if outcome == "false_out" or ours_verdict is None else ours_verdict
     lead = (espn_at - ours_at).total_seconds() / 60 if ours_at and espn_at else None
@@ -206,7 +217,7 @@ def score_call(
         verdict_at_tip=full.verdict if full else None,
         verdict_by=full.decided_by if full else None,
         espn_at_tip=espn_at_tip,
-        box=box,
+        played=played,
         reason=shown.reason if shown else None,
         detail=shown.detail if shown else None,
     )
@@ -232,7 +243,7 @@ def summarize(calls: Sequence[AvailabilityCall]) -> AvailabilitySummary:
     floor = sum(1 for c in false_outs if c.verdict_by == FLOOR)
     return AvailabilitySummary(
         races=races,
-        **{o: counts[o] for o in (*RACES, "carried", "unannounced", "not_in_box", "pending")},
+        **{o: counts[o] for o in (*RACES, "carried", "unannounced", "pending")},
         first_share=share,
         median_lead_minutes=round(statistics.median(leads), 1) if leads else None,
         first_by=dict(Counter(c.ours_by or "unknown" for c in calls if c.outcome in ("us_first", "us_only"))),
@@ -293,6 +304,9 @@ def build_scorecard(days: int = 7, now: Optional[datetime] = None) -> Availabili
             opening[game_date][report.source] = report.observed_at
 
     slates = _slates(since, until)
+    lines: dict[str, set[int]] = defaultdict(set)
+    for game_id, player_id in db.execute_sql(PLAYED_SQL, (since, until)).fetchall():
+        lines[game_id].add(player_id)
     names, teams = _players({pid for _, pid in reports})
 
     calls: list[AvailabilityCall] = []
@@ -315,8 +329,10 @@ def build_scorecard(days: int = 7, now: Optional[datetime] = None) -> Availabili
                 scheduled = slate.by_id(game.game_id)
                 if not game.has_game or scheduled is None or scheduled.tip is None:
                     continue
+                stats = lines.get(scheduled.game_id)
                 call = score_call(
-                    rows, game, scheduled.tip, opening=opening[day], now=now,
+                    rows, game, scheduled.tip, played=None if stats is None else pid in stats,
+                    opening=opening[day], now=now,
                     player_id=pid, name=names.get(pid, str(pid)), team=teams.get(pid),
                 )
                 if call is not None:

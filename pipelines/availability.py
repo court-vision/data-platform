@@ -470,10 +470,20 @@ def boxscore_observations(
     INACTIVE is news at any time. Before the tip an ACTIVE means nothing: the
     spike watched six games to the tip and none flagged anyone INACTIVE before
     it, so the pre-tip list is not the inactive list. A pre-tip ACTIVE is
-    observed only to take back an INACTIVE; from the tip, ACTIVE is final.
+    observed only to take back an INACTIVE.
+
+    From the tip an ACTIVE is final, but only for a player who has been on the
+    floor, or one the box score says was a coach's DNP. Teams must dress 13, so
+    the active list carries hurt players: in the first dark week (Nov 4-9)
+    twelve players ESPN had ruled out were listed ACTIVE with no reason, none
+    played, and each one's verdict went final `available` (and Available into
+    nba.player_injuries) at the first read after the tip. A listed player who
+    has not played says nothing yet; he is news when he checks in.
     """
     observations: list[Observation] = []
     for p in players:
+        if p.status == "active" and tipped and not (p.played or p.coach_dnp):
+            continue
         if p.status == "active" and not tipped:
             earlier = latest.get(p.player_id)
             if earlier is None or earlier.status != "inactive":

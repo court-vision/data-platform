@@ -13,7 +13,7 @@ import { pressed } from "@/test-helpers"
 
 const SUMMARY: AvailabilitySummary = {
   races: 4, us_first: 2, same_poll: 0, espn_first: 1, us_only: 1, espn_only: 0,
-  carried: 6, unannounced: 1, not_in_box: 0, pending: 2,
+  carried: 6, unannounced: 1, pending: 2,
   first_share: 0.75, median_lead_minutes: 45, first_by: { espn_injuries: 3 },
   false_outs: 1, false_outs_floor: 1, espn_false_outs: 1, gate_met: true,
 }
@@ -24,7 +24,7 @@ function call(overrides: Partial<AvailabilityCall>): AvailabilityCall {
     tip: "2026-11-05T00:30:00+00:00", outcome: "us_first",
     ours_at: "2026-11-04T20:00:00+00:00", ours_by: "espn_injuries",
     espn_at: "2026-11-04T21:15:00+00:00", lead_minutes: 75,
-    verdict_at_tip: "out", verdict_by: "espn_injuries", espn_at_tip: "out", box: "inactive",
+    verdict_at_tip: "out", verdict_by: "espn_injuries", espn_at_tip: "out", played: false,
     reason: "Ankle", detail: "Brunson won't play Wednesday against Boston.",
     ...overrides,
   }
@@ -42,7 +42,7 @@ function scorecard(overrides: Partial<AvailabilityScorecard> = {}): Availability
       call({}),
       call({
         player_id: 1628369, name: "Jayson Tatum", team: "BOS", outcome: "false_out", ours_at: null, ours_by: null,
-        espn_at: "2026-11-04T20:00:00+00:00", lead_minutes: null, verdict_by: "espn_fantasy", box: "active",
+        espn_at: "2026-11-04T20:00:00+00:00", lead_minutes: null, verdict_by: "espn_fantasy", played: true,
         reason: null, detail: null,
       }),
     ],

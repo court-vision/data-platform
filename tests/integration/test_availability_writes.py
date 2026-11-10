@@ -365,6 +365,29 @@ def test_live_stats_hands_over_its_box_scores_from_the_tip(night):
     assert len(reports()) == 3
 
 
+def test_a_hurt_player_on_the_active_list_stays_out_after_the_tip(night):
+    # Nov 4-9: Capela and Adams were listed ACTIVE for Houston games they sat,
+    # one with only an injury description, and went final `available` (and
+    # Available on Scout) at the first read after the tip.
+    night.injuries = [listed(BRUNSON, detail="Brunson (knee) will not play Tuesday against Boston."),
+                      listed(HART, reason="Hamstring")]
+    night.fantasy = fantasy(brunson="OUT", hart="OUT")
+    night.tick("2026-10-27T16:00:00")
+    hart = on_box(HART, "ACTIVE", None, "Left Hamstring Strain")
+    brunson = on_box(BRUNSON, "ACTIVE")                 # no reason, no description
+    for sat in (hart, brunson):
+        sat["statistics"]["minutes"] = "PT00M00.00S"    # never checked in
+    game = box(2, [brunson, hart], [on_box(TATUM, points=4)])
+
+    _live_poll("2026-10-28T00:00:00", game)
+
+    assert (verdict(HART).verdict, verdict(HART).decided_by, verdict(HART).final) == ("out", "nba_boxscore", True)
+    assert (verdict(BRUNSON).verdict, verdict(BRUNSON).final) == ("out", False)
+    assert (BRUNSON, "nba_boxscore", "active") not in reports(BRUNSON)
+    injuries = injury_rows()
+    assert injuries[HART][0] == "Out" and injuries[BRUNSON][0] == "Out"
+
+
 def test_record_boxscore_trusts_a_pre_tip_active_only_to_take_back_an_inactive(night):
     now = _utc("2026-10-27T22:40:00")
     inactive = box(1, [on_box(HART, "INACTIVE", "INACTIVE_INJURY", "Left Hamstring; Strain")])
