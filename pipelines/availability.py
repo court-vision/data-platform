@@ -921,9 +921,7 @@ class AvailabilityPipeline(BasePipeline):
             )
         if held:
             self._post_events(ctx, game_date, held)
-        injuries_written = (
-            write_injuries_compat(game_date, ctx.run_id) if settings.availability_writes_injuries else 0
-        )
+        injuries_written = self._write_injuries(ctx, game_date)
         # The swaps go last: each post waits on the backend's board reads, so a slow one holds up
         # only the swaps, never Dime's events or the injuries write.
         swaps = self._post_reactions(ctx, game_date, held) if held else 0
@@ -938,6 +936,20 @@ class AvailabilityPipeline(BasePipeline):
             swaps_applied=swaps,
             injuries_written=injuries_written,
         )
+
+    @staticmethod
+    def _write_injuries(ctx: PipelineContext, game_date: date) -> int:
+        """The nba.player_injuries copy of today's verdicts. A failure is counted and the run goes
+        on: the verdicts are committed, so the swaps they call for must still be posted."""
+        if not settings.availability_writes_injuries:
+            return 0
+        try:
+            return write_injuries_compat(game_date, ctx.run_id)
+        except Exception as exc:
+            ctx.increment_failed(1, "injuries_write_failed")
+            ctx.log.error("availability_injuries_write_failed", game_date=str(game_date),
+                          error=f"{type(exc).__name__}: {exc}")
+            return 0
 
     def _post_reactions(self, ctx: PipelineContext, game_date: date, held: Sequence[VerdictChange]) -> int:
         """Post each change to the late-scratch swap and email the owners it swapped or suggested a

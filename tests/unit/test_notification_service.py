@@ -317,7 +317,7 @@ def test_a_write_that_may_have_gone_through_says_check_espn(service):
     service.send_late_scratch_result(USER, TEAM, _scratch(outcome="failed", reason="write_uncertain", verified=None))
     _, subject, body = service.sent[0]
     assert subject == "Jalen Brunson ruled out: a lineup swap for Hoop Dreams"
-    assert "Sent to ESPN, not confirmed:" in body and "Suggested swap:" not in body
-    assert "Court Vision sent it to ESPN but couldn't confirm it went through: check your lineup on ESPN." in body
+    assert "Tried on ESPN, not confirmed:" in body and "Suggested swap:" not in body
+    assert "Court Vision tried to make it but couldn't confirm whether ESPN took it: check your lineup on ESPN." in body
     assert "Nothing was changed on ESPN" not in body
     assert "If it isn't on ESPN, make it in Court Vision's Week desk or on ESPN." in body
