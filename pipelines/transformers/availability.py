@@ -40,6 +40,8 @@ from datetime import date, datetime
 from typing import Iterable, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo
 
+from pipelines.transformers.minutes import seconds_played
+
 ET = ZoneInfo("America/New_York")
 
 SOURCE_RANK: tuple[str, ...] = ("nba_boxscore", "nba_report", "espn_injuries", "espn_fantasy", "news_claim")
@@ -69,8 +71,10 @@ FANTASY_STATUSES: Mapping[str, str] = {
 }
 
 # notPlayingReason prefixes for a player on the active list who is not playing:
-# did not dress, not with the team. INACTIVE_* comes with status INACTIVE.
-_BOX_OUT_REASONS: tuple[str, ...] = ("DND", "NWT")
+# did not dress, not with the team, out hurt or ill. INACTIVE_* comes with status
+# INACTIVE. A coach's DNP (DNP_COACH) was available.
+_BOX_OUT_REASONS: tuple[str, ...] = ("DND", "NWT", "DNP_INJURY", "DNP_ILLNESS", "DNP_PERSONAL")
+_BOX_COACH_REASON = "DNP_COACH"
 
 # The words a blurb uses for each team: city (or its short form) and nickname.
 TEAM_WORDS: Mapping[str, tuple[str, ...]] = {
@@ -383,6 +387,12 @@ class BoxPlayer:
     status: str                    # inactive | active
     reason: Optional[str]          # notPlayingReason: INACTIVE_INJURY, DND_ILLNESS, DNP_COACH, ...
     detail: Optional[str]          # notPlayingDescription: "Left Knee; Soreness"
+    played: bool = False           # has been on the floor (`played` "1", or any seconds)
+
+    @property
+    def coach_dnp(self) -> bool:
+        """Dressed and available, and the coach kept him on the bench."""
+        return (self.reason or "").upper().startswith(_BOX_COACH_REASON)
 
 
 def boxscore_tipped(game: Mapping) -> bool:
@@ -396,9 +406,15 @@ def boxscore_tipped(game: Mapping) -> bool:
 def boxscore_players(game: Mapping) -> list[BoxPlayer]:
     """Every listed player of a cdn.nba.com live box score (`game`), home then away.
 
-    INACTIVE is out, and so is a player on the active list who did not dress or is
-    not with the team (DND_*, NWT_*). The rest are active; a coach's DNP was
-    available. Whether a pre-tip ACTIVE means anything yet is the caller's call.
+    INACTIVE is out, and so is a player on the active list who did not dress, is
+    not with the team or is out hurt (DND_*, NWT_*, DNP_INJURY, ...). So is one
+    listed with a `notPlayingDescription` and no coach's reason: the description
+    only says why a player is not playing. Teams must dress 13, so the active list
+    carries hurt players; in the first dark week (Nov 4-9) Capela and Adams were
+    listed ACTIVE for every Houston game they sat, with "Right Ankle Sprain" and
+    "Right Soleus Strain" and no reason. The rest are active; a coach's DNP was
+    available. `played` says whether he has been on the floor yet. What an ACTIVE
+    means before he has is the caller's call.
     """
     players: list[BoxPlayer] = []
     for side in ("homeTeam", "awayTeam"):
@@ -410,15 +426,23 @@ def boxscore_players(game: Mapping) -> list[BoxPlayer]:
             except (TypeError, ValueError):
                 continue
             reason = str(entry.get("notPlayingReason") or "").strip() or None
+            detail = str(entry.get("notPlayingDescription") or "").strip() or None
+            coach = reason is not None and reason.upper().startswith(_BOX_COACH_REASON)
             out = (
                 str(entry.get("status") or "").strip().upper() == "INACTIVE"
                 or (reason or "").upper().startswith(_BOX_OUT_REASONS)
+                or (detail is not None and not coach)
             )
+            stats = entry.get("statistics") or {}
+            played = str(entry.get("played") or "").strip() == "1" or seconds_played(
+                stats.get("minutes") or stats.get("minutesCalculated")
+            ) > 0
             players.append(BoxPlayer(
                 player_id=player_id,
                 team=tricode,
-                status="inactive" if out else "active",
+                status="inactive" if out and not played else "active",
                 reason=reason,
-                detail=str(entry.get("notPlayingDescription") or "").strip() or None,
+                detail=detail,
+                played=played,
             ))
     return players
