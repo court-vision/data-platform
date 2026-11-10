@@ -5,6 +5,7 @@ parser keeps, the kind table, the cross-source hash, the name scan and the watch
 """
 
 import json
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,7 +20,9 @@ from pipelines.extractors.news_feeds import (
     parse_rss_date,
     watch_slice,
 )
-from pipelines.news_feed import Stored, choose_watch, event_items
+from pipelines.availability import PlayerIndex
+from pipelines.news_feed import Stored, choose_watch, event_items, link_players
+from pipelines.transformers import normalize_name
 from pipelines.transformers.news import NameScanner, classify, content_hash, kind_for, linked_teams
 
 pytestmark = pytest.mark.unit
@@ -109,9 +112,30 @@ def test_rss_dates(value, expected):
     assert parse_rss_date(value) == _utc(expected)
 
 
-@pytest.mark.parametrize("value", [None, "", "yesterday", "Wed, 04 Nov 2026 10:00:00 PM XYZ"])
+@pytest.mark.parametrize("value", [
+    None, "", "yesterday", "Wed, 04 Nov 2026 10:00:00 PM XYZ",
+    # Rotowire's 12-hour shape with an impossible clock or calendar date
+    "Wed, 04 Nov 2026 10:99:00 PM EST", "Mon, 31 Nov 2026 10:00:00 PM EST",
+    "Wed, 04 Nov 2026 13:00:00 PM EST", "Wed, 04 Nov 2026 00:30:00 AM EST",
+])
 def test_an_rss_date_that_cannot_be_read_is_none(value):
     assert parse_rss_date(value) is None
+
+
+def test_an_injury_note_names_its_player_and_the_name_is_tried_only_without_a_known_espn_id():
+    entries, _ = parse_espn_injuries(INJURIES)
+    gilbert = next(i for i in items_from_injuries(entries) if i.espn_ids == (4585618,))
+    assert gilbert.names == ("Keshon Gilbert",)
+
+    by_name = {normalize_name("Keshon Gilbert"): 77}
+    skips = Counter()
+    # ESPN id known: linked by it, and the name is not tried (no second, weaker link)
+    known = PlayerIndex(by_espn_id={4585618: 11}, by_name=by_name)
+    assert link_players(gilbert, known, NameScanner(known.by_name), skips) == [(11, "espn_id")]
+    # A player new to nba.players (no ESPN id on file yet): the name still finds him
+    new = PlayerIndex(by_name=by_name)
+    assert link_players(gilbert, new, NameScanner(new.by_name), skips) == [(77, "name")]
+    assert not skips
 
 
 # ---- kinds -----------------------------------------------------------------------------

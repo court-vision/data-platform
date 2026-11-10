@@ -27,13 +27,15 @@ the players, behind its own DIME_EVENTS_ENABLED switch. A backend that can't be 
 logged, never a failed run.
 
 Counters: records = items stored. Skipped = an item already stored (`seen`), the same text
-from another source (`duplicate`), an item naming no one (`unlinked`), a Rotowire name that
-matched no player or two (`name_unmatched`). Failed = a source that could not be read; the
+from another source (`duplicate`), an item naming no one (`unlinked`), a name that matched no
+player or two (`name_unmatched`), a watched player's read put off to a later tick because this
+one ran out of time (`player_reads_over_budget`). Failed = a source that could not be read; the
 run goes on with the others.
 """
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -159,13 +161,14 @@ def _known_hashes(hashes: Iterable[str], now: datetime) -> set[str]:
 
 def link_players(item: RawItem, index: PlayerIndex, scanner: NameScanner,
                  skips: Counter) -> list[tuple[int, str]]:
-    """(NBA player_id, linked_by) for the players the item is about."""
+    """(NBA player_id, linked_by) for the players the item is about. An item's names are tried
+    only when none of its ESPN ids is a player we know (a player new to nba.players)."""
     links: list[tuple[int, str]] = []
     for espn_id in item.espn_ids:
         pid = index.by_espn_id.get(espn_id)
         if pid is not None:
             links.append((pid, "espn_id"))
-    for name in item.names:
+    for name in item.names if not links else ():
         pid = index.match(None, name)
         if pid is None:
             skips["name_unmatched"] += 1
@@ -278,7 +281,13 @@ class NewsFeedPipeline(BasePipeline):
             items += items_from_injuries(injuries[0])
         watch = watch_set(settings.news_free_agents, settings.news_watch_max)
         due_ids = watch_slice(watch, tick, max(1, settings.news_watch_slices))
-        for espn_id in due_ids:
+        # A slow ESPN must not eat the whole run: past the budget, this tick's other players wait
+        # for their next turn (counted), and the RSS sources and the store still run.
+        started = time.monotonic()
+        for n, espn_id in enumerate(due_ids):
+            if time.monotonic() - started >= settings.news_player_read_budget_seconds:
+                ctx.increment_skipped(len(due_ids) - n, "player_reads_over_budget")
+                break
             items += self._read(ctx, "espn_player_news", self.fetcher.espn_player_news, espn_id,
                                 settings.news_player_items) or []
         items += self._read(ctx, "rotowire_rss", self.fetcher.rotowire) or []
@@ -292,11 +301,12 @@ class NewsFeedPipeline(BasePipeline):
         for reason, count in sorted(result.skips.items()):
             if count:
                 ctx.increment_skipped(count, reason)
-        pruned = prune_raw(now)
-
+        # Dime hears first: these items are stored, so a tick that failed after this point would
+        # never hand them over again.
         events = event_items(result.stored, now)
         if events:
             self._post_events(ctx, events)
+        pruned = prune_raw(now)
         ctx.log.info(
             "news_feed_complete",
             items=len(items),

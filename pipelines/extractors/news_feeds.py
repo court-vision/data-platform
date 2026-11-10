@@ -107,8 +107,13 @@ def parse_rss_date(value: Optional[str]) -> Optional[datetime]:
         day, mon, year, hh, mm, ss, ampm, zone = match.groups()
         if mon not in _MONTHS or zone not in _ZONES:
             return None
+        if not 1 <= int(hh) <= 12:
+            return None
         hour = int(hh) % 12 + (12 if ampm == "PM" else 0)
-        local = datetime(int(year), _MONTHS[mon], int(day), hour, int(mm), int(ss))
+        try:
+            local = datetime(int(year), _MONTHS[mon], int(day), hour, int(mm), int(ss))
+        except ValueError:  # minute 99, 31 Nov: unreadable, like a bad RFC date
+            return None
         return (local - timedelta(hours=_ZONES[zone])).replace(tzinfo=timezone.utc)
     try:
         out = parsedate_to_datetime(value)
@@ -140,7 +145,7 @@ def items_from_injuries(entries: Iterable[EspnInjury]) -> list[RawItem]:
             attribution=None,
             blurb=e.detail,
             espn_ids=(e.espn_id,) if e.espn_id else (),
-            names=(e.name,) if e.name and not e.espn_id else (),
+            names=(e.name,) if e.name else (),
             teams=(e.team,) if e.team else (),
             raw={"status": e.espn_status, "fantasy_status": e.fantasy_status, "reason": e.reason,
                  "expected_return": e.expected_return.isoformat() if e.expected_return else None},

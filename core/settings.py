@@ -141,6 +141,8 @@ class Settings(BaseSettings):
     news_watch_max: int = 200
     news_watch_slices: int = 3
     news_player_items: int = 5
+    # Seconds a tick may spend on those per-player reads (the run's timeout is 240)
+    news_player_read_budget_seconds: int = 90
     # RealGM's Wiretap moves hourly: read it on one tick in this many
     news_realgm_every: int = 3
 

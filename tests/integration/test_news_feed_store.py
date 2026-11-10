@@ -203,6 +203,15 @@ def test_realgm_waits_for_its_tick_and_a_source_that_is_down_is_counted(feeds):
     assert {s for s, _ in items()} == {"espn_player_news"}
 
 
+def test_past_the_read_budget_the_other_players_wait_and_the_rest_of_the_tick_runs(feeds, monkeypatch):
+    monkeypatch.setattr(settings, "news_player_read_budget_seconds", 0)
+
+    _, skips, failures = feeds.tick(PLAIN_TICK)
+
+    assert feeds.fetcher.player_reads == [] and skips["player_reads_over_budget"] == 2
+    assert not failures and ("rotowire_rss", "nba537626") in items()
+
+
 def test_the_watch_set_reads_tracked_rosters_then_the_most_rostered_others(feeds):
     assert watch_set(free_agents=1, cap=10) == [4432816, 4277905]
     assert watch_set(free_agents=2, cap=10) == [4432816, 4277905, 4592402]
