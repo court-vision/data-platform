@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>RotoWire.com Latest NBA News</title>
+    <copyright>Copyright (c) 2026 Roto Sports, Inc, All rights reserved.</copyright>
+    <description>Fantasy Sports from RotoWire.com</description>
+    <category>Fantasy Sports</category>
+    <language>en-us</language>
+    <ttl>10</ttl>
+    <image>
+      <title>RotoWire.com Fantasy Sports</title>
+      <width>120</width>
+      <height>30</height>
+      <link>https://www.rotowire.com</link>
+      <url>https://assets.rotowire.com/images/logo_roto_small.gif</url>
+    </image>
+    <link>https://www.rotowire.com</link>
+    <item>
+        <guid>nba537630</guid>
+        <title>Devin Booker: Nets game-high 33 points in loss</title>
+        <link>https://www.rotowire.com//basketball/player/devin-booker-3711</link>
+        <description>Booker finished with 33 points (9-19 FG, 2-8 3Pt, 13-13 FT), one rebound, two assists and two turnovers across 34 minutes in Wednesday's 132-119 loss to the Trail Blazers.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Wed, 04 Nov 2026 10:00:00 PM PST</pubDate>
+    </item>
+    <item>
+        <guid>nba537629</guid>
+        <title>Victor Wembanyama: Posts monster double-double in win</title>
+        <link>https://www.rotowire.com//basketball/player/victor-wembanyama-5809</link>
+        <description>Wembanyama went off for 52 points (16-28 FG, 1-8 3Pt, 19-23 FT), 24 rebounds, two assists, two steals and eight blocks over 34 minutes in Wednesday's 112-111 win over the Mavs.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Wed, 04 Nov 2026 9:49:00 PM PST</pubDate>
+    </item>
+    <item>
+        <guid>nba537628</guid>
+        <title>LaMelo Ball: Nets 20 points with four stocks in win</title>
+        <link>https://www.rotowire.com//basketball/player/lamelo-ball-5151</link>
+        <description>Ball totaled 20 points (6-11 FG, 4-7 3Pt, 4-5 FT), two rebounds, six assists, three steals, one block and seven turnovers across 31 minutes in Wednesday's 117-107 win over the Rockets.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Wed, 04 Nov 2026 9:39:00 PM PST</pubDate>
+    </item>
+    <item>
+        <guid>nba537627</guid>
+        <title>Keyonte George: Erupts for 39 points with nine dimes</title>
+        <link>https://www.rotowire.com//basketball/player/keyonte-george-5899</link>
+        <description>George registered 39 points (14-26 FG, 2-9 3Pt, 9-13 FT), two rebounds, nine assists, four steals and one block over 44 minutes in Wednesday's 120-113 overtime loss to the Pelicans.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Wed, 04 Nov 2026 9:33:00 PM PST</pubDate>
+    </item>
+    <item>
+        <guid>nba537626</guid>
+        <title>Vit Krejci: Suffers leg fracture</title>
+        <link>https://www.rotowire.com//basketball/player/vit-krejci-5233</link>
+        <description>Head coach Micah Nori said that Krejci suffered a left leg fracture during Wednesday's 132-119 win over the Suns, Brett Siegel of ClutchPoints.com reports.
+
+        Visit RotoWire.com for more analysis on this update.</description>
+        <pubDate>Wed, 04 Nov 2026 9:17:00 PM PST</pubDate>
+    </item>
+  </channel>
+</rss>

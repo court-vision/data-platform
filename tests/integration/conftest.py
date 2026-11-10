@@ -8,7 +8,8 @@ from db.models.nba.availability import AvailabilityReport, PlayerAvailability
 from db.models.nba.games import Game
 from db.models.nba.live_game_score_snapshots import LiveGameScoreSnapshot
 from db.models.nba.live_player_stats import LivePlayerStats
-from db.models.nba.news import NewsItem
+from db.models.nba.news import NewsItem, NewsItemPlayer, NewsItemTeam
+from db.models.nba.player_ownership import PlayerOwnership
 from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.player_injuries import PlayerInjury
 from db.models.nba.player_rolling_stats import PlayerRollingStats
@@ -44,6 +45,11 @@ INTEGRATION_MODELS = [
     # Written by the availability pipeline, and by live-stats' hand-off to it
     # (tests/integration/test_availability_writes.py). A report may cite a news item.
     NewsItem,
+    # Written by the news feed with the items (tests/integration/test_news_feed_store.py),
+    # which reads player_ownership for its watch set.
+    NewsItemPlayer,
+    NewsItemTeam,
+    PlayerOwnership,
     AvailabilityReport,
     PlayerAvailability,
     PlayerInjury,
@@ -82,7 +88,10 @@ def clean_integration_tables(integration_db):
           nba.availability_reports,
           nba.player_availability,
           nba.player_injuries,
+          nba.news_item_players,
+          nba.news_item_teams,
           nba.news_items,
+          nba.player_ownership,
           nba.player_rolling_stats,
           nba.team_stats,
           nba.live_player_stats,

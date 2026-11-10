@@ -29,6 +29,7 @@ CRON_RUNNER_JOBS = {
     "scheduled-pickups",
     "availability",
     "dime-checkins",
+    "news",
 }
 
 # SCHEDULED pipelines that no cron-runner job fires (manual trigger only).

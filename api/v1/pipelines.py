@@ -1284,6 +1284,22 @@ async def _autopilot_on() -> bool:
     return await run_in_db_thread(_has_autopilot_on)
 
 
+@router.post("/news", response_model=PipelineResponse)
+async def trigger_news(
+    _: str = Security(verify_pipeline_token),
+) -> PipelineResponse:
+    """
+    Trigger the news feed pipeline: ESPN's injury notes and per-player news,
+    Rotowire and RealGM into nba.news_items, linked to the players and teams
+    each item is about; new items about players go to Dime's event check-ins.
+
+    Called every 5 minutes by the 'news' cron job. No gate: each tick reads its
+    share of the sources (pipelines/news_feed.py).
+    """
+    result = await run_pipeline("news_feed")
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
 @router.post("/availability", response_model=PipelineResponse)
 async def trigger_availability(
     _: str = Security(verify_pipeline_token),

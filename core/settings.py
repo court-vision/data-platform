@@ -125,6 +125,27 @@ class Settings(BaseSettings):
     # § 1). Off leaves the table to the PRE_GAME espn_injury_status pipeline alone.
     availability_writes_injuries: bool = True
 
+    # What came in about players goes to Dime (the Dime autopilot plan, step 6): the
+    # availability pipeline's late-scratch events (verdict changes for games not yet
+    # tipped) and the news feed's new items are posted to the backend, which starts a
+    # check-in on each team Dime runs that rosters the player. The backend's
+    # DIME_EVENTS_ENABLED is the switch; this one stops the posts themselves.
+    post_dime_events: bool = True
+
+    # The news feed (pipelines/news_feed.py; the plan's § 3), every 5 minutes. ESPN's
+    # per-player news has no league-wide feed, so it is read for a watch set: the
+    # players on every Court Vision league's latest lineup snapshot plus the
+    # `news_free_agents` most-rostered others, at most `news_watch_max`, a
+    # `news_watch_slices`-th of it per tick (so each player every 15 minutes).
+    news_free_agents: int = 50
+    news_watch_max: int = 200
+    news_watch_slices: int = 3
+    news_player_items: int = 5
+    # Seconds a tick may spend on those per-player reads (the run's timeout is 240)
+    news_player_read_budget_seconds: int = 90
+    # RealGM's Wiretap moves hourly: read it on one tick in this many
+    news_realgm_every: int = 3
+
     # Development mode
     development_mode: bool = False
 

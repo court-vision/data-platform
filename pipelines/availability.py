@@ -35,7 +35,11 @@ latest reports with the writes that depend on it.
 
 Dark for now (build step 2): a verdict change the late-scratch reactor would
 hear about (out, doubtful or available, for a game not yet tipped) is logged
-and counted as skipped `reaction_not_posted`; nothing goes to the backend.
+and counted as skipped `reaction_not_posted`; no lineup is re-planned. The same
+changes do go to Dime (the Dime autopilot plan, step 6, `post_dime_events`): the
+backend records them as events on the teams Dime runs that roster the player
+and starts a check-in about them, behind its own DIME_EVENTS_ENABLED switch. A
+backend that can't be reached is logged, never a failed run.
 
 nba.player_injuries keeps its readers: each run copies the date's verdicts
 there (`write_injuries_compat`, settings.availability_writes_injuries), which
@@ -56,6 +60,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, Iterator, Mapping, Optional, Sequence
 
 from core.locks import NAMESPACE, lock_key
+from core.logging import get_correlation_id
 from core.nba_calendar import nba_date_et
 from core.settings import settings
 from db.base import db
@@ -74,6 +79,7 @@ from pipelines.extractors.espn import ESPNExtractor
 from pipelines.extractors.espn_injuries import ESPNInjuriesExtractor, EspnInjury
 from pipelines.extractors.nba_api import NBAApiExtractor
 from pipelines.transformers import normalize_name
+from services.backend_client import backend_client_from_settings
 from pipelines.transformers.availability import (
     CONFIDENCE,
     ET,
@@ -821,6 +827,7 @@ class AvailabilityPipeline(BasePipeline):
         self.injuries_extractor = ESPNInjuriesExtractor()
         self.espn_extractor = ESPNExtractor()
         self.nba_extractor = NBAApiExtractor()
+        self.backend_client = backend_client_from_settings()
 
     def execute(self, ctx: PipelineContext) -> None:
         now = datetime.now(timezone.utc)
@@ -888,6 +895,7 @@ class AvailabilityPipeline(BasePipeline):
             )
         if held:
             ctx.increment_skipped(len(held), "reaction_not_posted")
+            self._post_events(ctx, game_date, held)
 
         injuries_written = (
             write_injuries_compat(game_date, ctx.run_id) if settings.availability_writes_injuries else 0
@@ -901,6 +909,18 @@ class AvailabilityPipeline(BasePipeline):
             verdicts_changed=len(result.changes),
             reactions_held=len(held),
             injuries_written=injuries_written,
+        )
+
+    def _post_events(self, ctx: PipelineContext, game_date: date, held: Sequence[VerdictChange]) -> None:
+        """Hand this tick's verdict changes to Dime's event check-ins (backend; plan step 6)."""
+        if not settings.post_dime_events:
+            return
+        keys = sorted({(e.player_id, game_date) for e in held})
+        post = self.backend_client.post_events(availability=keys, correlation_id=get_correlation_id())
+        ctx.log.info(
+            "availability_events_posted",
+            ok=post.ok, off=post.off, sent=len(keys), recorded=post.recorded, started=len(post.started),
+            reason=post.reason,
         )
 
     @staticmethod
