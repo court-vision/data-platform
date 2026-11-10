@@ -4,7 +4,8 @@ player's reports for a date in, his outcome out. Pure: the reads are tested in
 tests/integration/test_availability_scorecard_reads.py.
 
 WEDNESDAY's game tips at 7 PM ET (00:00 UTC Thursday). Both ESPN sources first
-polled the date at 6 AM ET (11:00 UTC).
+polled the date at 6 AM ET (11:00 UTC). Unless a test says otherwise, the player
+did not play (no stats line for the game).
 """
 
 from datetime import date, datetime, timezone
@@ -48,15 +49,17 @@ def box(status, at="2026-11-05T00:01"):
     return rep("nba_boxscore", status, at, game_id=GAME.game_id)
 
 
-def score(*reports, now=AFTER, opening=OPENING):
-    return score_call(list(reports), GAME, TIP, opening=opening, now=now, player_id=1, name="Jalen Brunson", team="NYK")
+def score(*reports, played=False, now=AFTER, opening=OPENING):
+    """`played` is the result: False (no stats line, the default), True, or None (stats not in)."""
+    return score_call(list(reports), GAME, TIP, played=played, opening=opening, now=now,
+                      player_id=1, name="Jalen Brunson", team="NYK")
 
 
 # ---- the race ----------------------------------------------------------------------
 
 
 def test_we_called_him_out_two_hours_before_espn_fantasy_flipped():
-    call = score(injuries("out", "2026-11-04T20:10", reason="Ankle"), fantasy("out", "2026-11-04T22:15"), box("inactive"))
+    call = score(injuries("out", "2026-11-04T20:10", reason="Ankle"), fantasy("out", "2026-11-04T22:15"))
 
     assert call.outcome == "us_first"
     assert call.ours_by == "espn_injuries"
@@ -64,26 +67,26 @@ def test_we_called_him_out_two_hours_before_espn_fantasy_flipped():
     assert call.espn_at == _utc("2026-11-04T22:15")
     assert call.lead_minutes == 125.0
     assert call.reason == "Ankle"
-    assert (call.verdict_at_tip, call.verdict_by, call.box) == ("out", "espn_injuries", "inactive")
+    assert (call.verdict_at_tip, call.verdict_by, call.played) == ("out", "espn_injuries", False)
     assert call.tip == _utc("2026-11-05T00:00")
 
 
 def test_espn_fantasy_first_is_a_negative_lead():
-    call = score(fantasy("out", "2026-11-04T20:00"), injuries("out", "2026-11-04T21:30"), box("inactive"))
+    call = score(fantasy("out", "2026-11-04T20:00"), injuries("out", "2026-11-04T21:30"))
 
     assert call.outcome == "espn_first"
     assert call.lead_minutes == -90.0
 
 
 def test_calls_in_the_same_tick_are_a_tie():
-    call = score(injuries("out", "2026-11-04T22:00"), fantasy("out", "2026-11-04T22:01"), box("inactive"))
+    call = score(injuries("out", "2026-11-04T22:00"), fantasy("out", "2026-11-04T22:01"))
 
     assert call.outcome == "same_poll"
 
 
 def test_calls_a_tick_apart_are_a_tie_and_two_ticks_are_not():
     def race(ours, espn):
-        return score(injuries("out", ours), fantasy("out", espn), box("inactive")).outcome
+        return score(injuries("out", ours), fantasy("out", espn)).outcome
 
     assert race("2026-11-04T22:00:00", "2026-11-04T22:02:00") == "same_poll"
     assert race("2026-11-04T22:00:00", "2026-11-04T22:02:20") == "same_poll"   # the next run started late
@@ -91,7 +94,7 @@ def test_calls_a_tick_apart_are_a_tie_and_two_ticks_are_not():
 
 
 def test_only_we_had_him_out_at_the_tip():
-    call = score(injuries("out", "2026-11-04T20:00"), fantasy("questionable", "2026-11-04T20:00"), box("inactive"))
+    call = score(injuries("out", "2026-11-04T20:00"), fantasy("questionable", "2026-11-04T20:00"))
 
     assert call.outcome == "us_only"
     assert call.espn_at is None
@@ -100,7 +103,7 @@ def test_only_we_had_him_out_at_the_tip():
 
 
 def test_only_espn_fantasy_had_him_out_and_the_floor_made_the_verdict():
-    call = score(injuries("questionable", "2026-11-04T15:00"), fantasy("out", "2026-11-04T23:15"), box("inactive"))
+    call = score(injuries("questionable", "2026-11-04T15:00"), fantasy("out", "2026-11-04T23:15"))
 
     assert call.outcome == "espn_only"
     assert call.ours_at is None
@@ -113,7 +116,6 @@ def test_an_out_we_took_back_starts_the_clock_again():
         injuries("available", "2026-11-04T17:00"),
         fantasy("out", "2026-11-04T20:00"),
         injuries("out", "2026-11-04T22:00"),
-        box("inactive"),
     )
 
     assert call.ours_at == _utc("2026-11-04T22:00")
@@ -122,14 +124,14 @@ def test_an_out_we_took_back_starts_the_clock_again():
 
 def test_an_espn_status_cleared_before_the_tip_is_not_a_call():
     call = score(injuries("out", "2026-11-04T18:00"), fantasy("out", "2026-11-04T16:00"),
-                 fantasy("available", "2026-11-04T23:00"), box("inactive"))
+                 fantasy("available", "2026-11-04T23:00"))
 
     assert call.outcome == "us_only"
     assert call.espn_at_tip == "available"
 
 
 def test_what_came_after_the_tip_does_not_count():
-    call = score(fantasy("questionable", "2026-11-04T15:00"), injuries("out", "2026-11-05T00:10"), box("inactive"))
+    call = score(fantasy("questionable", "2026-11-04T15:00"), injuries("out", "2026-11-05T00:10"))
 
     assert call.outcome == "unannounced"
     assert call.ours_at is None
@@ -139,28 +141,45 @@ def test_what_came_after_the_tip_does_not_count():
 
 
 def test_out_at_both_first_reads_of_the_date_is_a_long_absence():
-    call = score(injuries("out", OPEN, reason="Knee"), fantasy("out", OPEN), box("inactive"))
+    call = score(injuries("out", OPEN, reason="Knee"), fantasy("out", OPEN))
 
     assert call.outcome == "carried"
 
 
+def test_out_all_day_on_one_side_only_is_a_long_absence_too():
+    # A G League player ESPN fantasy has out all day and ESPN's list never names.
+    assert score(fantasy("out", OPEN)).outcome == "carried"
+    assert score(injuries("out", OPEN), fantasy("questionable", OPEN)).outcome == "carried"
+    # Out at ESPN's first read, and at ours only later in the day: a race.
+    assert score(fantasy("out", OPEN), injuries("questionable", OPEN),
+                 injuries("out", "2026-11-04T19:00")).outcome == "espn_first"
+
+
 def test_out_at_our_first_read_and_later_at_espns_is_still_a_race():
-    call = score(injuries("out", OPEN), fantasy("questionable", OPEN), fantasy("out", "2026-11-04T19:00"), box("inactive"))
+    call = score(injuries("out", OPEN), fantasy("questionable", OPEN), fantasy("out", "2026-11-04T19:00"))
 
     assert call.outcome == "us_first"
     assert call.lead_minutes == 480.0
 
 
-def test_an_out_player_who_was_active_is_a_false_out():
-    call = score(injuries("out", "2026-11-04T20:00"), box("active"))
+def test_an_out_player_who_played_is_a_false_out():
+    call = score(injuries("out", "2026-11-04T20:00"), played=True)
 
     assert call.outcome == "false_out"
     assert (call.verdict_at_tip, call.verdict_by) == ("out", "espn_injuries")
-    assert call.box == "active"
+    assert call.played is True
+
+
+def test_a_hurt_player_the_box_score_listed_active_who_sat_is_a_scratch():
+    # Capela, Nov 4-9: ruled out, listed ACTIVE after the tip, never played.
+    call = score(injuries("out", "2026-11-04T18:50"), fantasy("out", "2026-11-04T18:46"),
+                 box("active", "2026-11-05T01:41"))
+
+    assert (call.outcome, call.lead_minutes, call.played) == ("espn_first", -4.0, False)
 
 
 def test_a_false_out_only_espn_fantasy_made_is_the_floors():
-    call = score(injuries("questionable", "2026-11-04T15:00"), fantasy("out", "2026-11-04T20:00"), box("active"))
+    call = score(injuries("questionable", "2026-11-04T15:00"), fantasy("out", "2026-11-04T20:00"), played=True)
 
     assert call.outcome == "false_out"
     assert call.verdict_by == "espn_fantasy"
@@ -171,18 +190,19 @@ def test_players_the_scorecard_leaves_out():
     # On the inactive list and named by nobody else: a two-way player.
     assert score(box("inactive")) is None
     # Listed questionable, played: nobody called him out.
-    assert score(injuries("questionable", "2026-11-04T15:00"), box("active")) is None
+    assert score(injuries("questionable", "2026-11-04T15:00"), played=True) is None
     # Listed questionable, game not played yet: nothing to judge.
     assert score(injuries("questionable", "2026-11-04T15:00"), now=BEFORE) is None
 
 
-def test_a_call_for_a_game_not_tipped_is_pending_and_one_never_on_the_box_score_is_not_in_box():
+def test_a_call_is_pending_until_the_tip_and_until_the_games_stats_are_in():
     reports = (injuries("out", "2026-11-04T20:00"), fantasy("out", "2026-11-04T20:30"))
 
     assert score(*reports, now=BEFORE).outcome == "pending"
-    tipped = score(*reports, now=AFTER)
-    assert tipped.outcome == "not_in_box"
-    assert tipped.lead_minutes == 30.0
+    waiting = score(*reports, played=None)
+    assert waiting.outcome == "pending"
+    assert waiting.lead_minutes == 30.0
+    assert score(*reports).outcome == "us_first"
 
 
 def test_a_pre_tip_inactive_is_not_graded_before_the_tip():
@@ -192,8 +212,8 @@ def test_a_pre_tip_inactive_is_not_graded_before_the_tip():
     assert call.ours_by == "nba_boxscore"
 
 
-def test_a_pre_tip_inactive_taken_back_by_the_box_score_is_a_false_out():
-    call = score(box("inactive", "2026-11-04T23:40"), box("active", "2026-11-05T00:02"))
+def test_a_pre_tip_inactive_for_a_player_who_played_is_a_false_out():
+    call = score(box("inactive", "2026-11-04T23:40"), box("active", "2026-11-05T00:02"), played=True)
 
     assert call.outcome == "false_out"
     assert call.verdict_by == "nba_boxscore"

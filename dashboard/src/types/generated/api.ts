@@ -1448,11 +1448,6 @@ export interface components {
          * @description One player on one game date, as the scorecard judges him.
          */
         AvailabilityCall: {
-            /**
-             * Box
-             * @description The box score's last word on him
-             */
-            box: ("inactive" | "active") | null;
             /** Detail */
             detail: string | null;
             /**
@@ -1493,7 +1488,12 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "us_first" | "same_poll" | "espn_first" | "us_only" | "espn_only" | "carried" | "unannounced" | "false_out" | "not_in_box" | "pending";
+            outcome: "us_first" | "same_poll" | "espn_first" | "us_only" | "espn_only" | "carried" | "unannounced" | "false_out" | "pending";
+            /**
+             * Played
+             * @description Whether he played the game (a line in nba.player_game_stats); None until its stats are in
+             */
+            played: boolean | null;
             /** Player Id */
             player_id: number;
             /** Reason */
@@ -1596,7 +1596,7 @@ export interface components {
             carried: number;
             /**
              * Espn False Outs
-             * @description Active players ESPN fantasy itself had out at the tip
+             * @description Players who played whom ESPN fantasy itself had out at the tip
              * @default 0
              */
             espn_false_outs: number;
@@ -1612,7 +1612,7 @@ export interface components {
             espn_only: number;
             /**
              * False Outs
-             * @description Out at the tip, active in the box score
+             * @description Out at the tip, and he played
              * @default 0
              */
             false_outs: number;
@@ -1645,11 +1645,6 @@ export interface components {
              * @description Over the races both sides called; positive when we were first
              */
             median_lead_minutes: number | null;
-            /**
-             * Not In Box
-             * @default 0
-             */
-            not_in_box: number;
             /**
              * Pending
              * @default 0

@@ -143,7 +143,7 @@ function GateTiles({ summary }: { summary: AvailabilitySummary }) {
   )
 }
 
-const OUTCOME_ROWS: readonly Outcome[] = [...RACES, "false_out", "carried", "unannounced", "pending", "not_in_box"]
+const OUTCOME_ROWS: readonly Outcome[] = [...RACES, "false_out", "carried", "unannounced", "pending"]
 
 function OutcomesBlock({ summary, right }: { summary: AvailabilitySummary; right: ReactNode }) {
   const count = (outcome: Outcome) => (outcome === "false_out" ? summary.false_outs : summary[outcome])
@@ -234,7 +234,7 @@ function CallsBlock({ calls, show, onShow }: { calls: AvailabilityCall[]; show: 
                 <th scope="col">ESPN</th>
                 <th scope="col" className={s.num}>Lead</th>
                 <th scope="col">At the tip</th>
-                <th scope="col">Box</th>
+                <th scope="col">Played</th>
                 <th scope="col">Why</th>
               </tr>
             </thead>
@@ -263,7 +263,9 @@ function CallsBlock({ calls, show, onShow }: { calls: AvailabilityCall[]; show: 
                     {call.verdict_at_tip ?? "—"}
                     {call.verdict_by && <span className={s.under}>{sourceLabel(call.verdict_by)}</span>}
                   </td>
-                  <td className={call.box === "active" && call.outcome === "false_out" ? s.bad : undefined}>{call.box ?? "—"}</td>
+                  <td className={call.played && call.outcome === "false_out" ? s.bad : undefined}>
+                    {call.played == null ? "—" : call.played ? "yes" : "no"}
+                  </td>
                   <td className={s.muted} style={{ maxWidth: "18rem" }}>
                     <span className={s.clip} title={call.detail ?? undefined}>
                       {[call.reason, call.detail].filter(Boolean).join(" · ") || "—"}

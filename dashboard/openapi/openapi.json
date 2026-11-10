@@ -483,22 +483,6 @@
       "AvailabilityCall": {
         "description": "One player on one game date, as the scorecard judges him.",
         "properties": {
-          "box": {
-            "anyOf": [
-              {
-                "enum": [
-                  "inactive",
-                  "active"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The box score's last word on him",
-            "title": "Box"
-          },
           "detail": {
             "anyOf": [
               {
@@ -602,11 +586,22 @@
               "carried",
               "unannounced",
               "false_out",
-              "not_in_box",
               "pending"
             ],
             "title": "Outcome",
             "type": "string"
+          },
+          "played": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether he played the game (a line in nba.player_game_stats); None until its stats are in",
+            "title": "Played"
           },
           "player_id": {
             "title": "Player Id",
@@ -678,7 +673,7 @@
           "verdict_at_tip",
           "verdict_by",
           "espn_at_tip",
-          "box",
+          "played",
           "reason",
           "detail"
         ],
@@ -834,7 +829,7 @@
           },
           "espn_false_outs": {
             "default": 0,
-            "description": "Active players ESPN fantasy itself had out at the tip",
+            "description": "Players who played whom ESPN fantasy itself had out at the tip",
             "title": "Espn False Outs",
             "type": "integer"
           },
@@ -850,7 +845,7 @@
           },
           "false_outs": {
             "default": 0,
-            "description": "Out at the tip, active in the box score",
+            "description": "Out at the tip, and he played",
             "title": "False Outs",
             "type": "integer"
           },
@@ -898,11 +893,6 @@
             "description": "Over the races both sides called; positive when we were first",
             "title": "Median Lead Minutes"
           },
-          "not_in_box": {
-            "default": 0,
-            "title": "Not In Box",
-            "type": "integer"
-          },
           "pending": {
             "default": 0,
             "title": "Pending",
@@ -944,7 +934,6 @@
           "espn_only",
           "carried",
           "unannounced",
-          "not_in_box",
           "pending",
           "first_share",
           "median_lead_minutes",

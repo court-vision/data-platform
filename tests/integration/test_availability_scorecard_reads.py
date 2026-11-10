@@ -5,8 +5,9 @@ each pattern of reports gets is tested in tests/unit/test_availability_scorecard
 this is the window, the dates it scores, and what each call is told about its player.
 
 Wednesday Nov 4 has Knicks-Celtics at 7:30 PM ET (00:30 UTC) and Lakers-Warriors
-at 10 (03:00 UTC); it is 8 PM ET, between the two. Tuesday's only game tipped
-before the pipeline first polled the date, so Tuesday is not scored.
+at 10 (03:00 UTC); it is 8 PM ET, between the two, and Knicks-Celtics' stats are
+in. Tuesday's only game tipped before the pipeline first polled the date, so
+Tuesday is not scored.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import pytest
 
 from db.models.nba.availability import AvailabilityReport
 from db.models.nba.games import Game
+from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.player_profiles import PlayerProfile
 from db.models.nba.players import Player
 from pipelines.transformers import normalize_name
@@ -74,11 +76,21 @@ def log(integration_db):
     report(TATUM, WEDNESDAY, "espn_injuries", "out", "2026-11-04T22:00:00")
     # Curry's game has not tipped.
     report(CURRY, WEDNESDAY, "espn_fantasy", "out", "2026-11-04T23:00:00")
-    # The Knicks-Celtics box score at the tip.
-    for pid, status in ((BRUNSON, "inactive"), (HART, "inactive"), (TATUM, "active")):
+    # The Knicks-Celtics box score at the tip. It lists Brunson ACTIVE though he
+    # sits (teams must dress 13); the result is the stats line, not the list.
+    for pid, status in ((BRUNSON, "active"), (HART, "inactive"), (TATUM, "active")):
         report(pid, WEDNESDAY, "nba_boxscore", status, "2026-11-05T00:31:00", game_id=KNICKS_CELTICS)
+    # Who played Knicks-Celtics: Tatum, for the whole game so far.
+    line(TATUM, "BOS", KNICKS_CELTICS)
     # LeBron sits a game in which no source named him.
     report(JAMES, WEDNESDAY, "nba_boxscore", "inactive", "2026-11-05T03:01:00", game_id=LAKERS_WARRIORS)
+
+
+def line(pid: int, team: str, game_id: str, day: date = WEDNESDAY) -> None:
+    PlayerGameStats.create(
+        player=pid, team=team, game_date=day, game=game_id, fpts=20, pts=10, reb=3, ast=2, stl=1, blk=0,
+        tov=1, min=30, fgm=4, fga=9, fg3m=1, fg3a=3, ftm=1, fta=2,
+    )
 
 
 def test_scores_the_covered_dates_and_names_each_player(log):
@@ -101,11 +113,24 @@ def test_scores_the_covered_dates_and_names_each_player(log):
     ]
     brunson = card.calls[1]
     assert (brunson.game_id, brunson.lead_minutes, brunson.ours_by) == (KNICKS_CELTICS, 75.0, "espn_injuries")
+    assert (brunson.played, card.calls[0].played, card.calls[3].played) == (False, True, None)
 
     s = card.summary
     assert (s.races, s.us_first, s.carried, s.pending, s.false_outs, s.false_outs_floor) == (1, 1, 1, 1, 1, 0)
     assert s.first_share == 1.0
     assert not s.gate_met  # Tatum's false out was ours
+
+
+def test_a_tipped_game_without_its_stats_is_not_graded_yet(log):
+    PlayerGameStats.delete().execute()
+
+    card = build_scorecard(2, now=NOW)
+
+    assert {(c.name, c.outcome) for c in card.calls} == {
+        ("Jalen Brunson", "pending"), ("Josh Hart", "pending"), ("Jayson Tatum", "pending"),
+        ("Stephen Curry", "pending"),
+    }
+    assert card.summary.races == 0
 
 
 def test_a_date_espn_fantasy_never_read_before_the_tip_is_not_scored(log):

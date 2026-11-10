@@ -26,10 +26,8 @@ AvailabilityOutcome = Literal[
     "carried",
     "unannounced",
     "false_out",
-    "not_in_box",
     "pending",
 ]
-BoxResult = Literal["inactive", "active"]
 
 
 class AvailabilityCall(ApiModel):
@@ -61,7 +59,10 @@ class AvailabilityCall(ApiModel):
     )
     verdict_by: Optional[str] = None
     espn_at_tip: Optional[str] = Field(default=None, description="ESPN fantasy's status at the tip")
-    box: Optional[BoxResult] = Field(default=None, description="The box score's last word on him")
+    played: Optional[bool] = Field(
+        default=None,
+        description="Whether he played the game (a line in nba.player_game_stats); None until its stats are in",
+    )
     reason: Optional[str] = None
     detail: Optional[str] = None
 
@@ -86,7 +87,6 @@ class AvailabilitySummary(ApiModel):
     espn_only: int = 0
     carried: int = 0
     unannounced: int = 0
-    not_in_box: int = 0
     pending: int = 0
     first_share: Optional[float] = Field(
         default=None, description="(us_first + us_only) / races; None with no races",
@@ -97,9 +97,9 @@ class AvailabilitySummary(ApiModel):
     first_by: dict[str, int] = Field(
         default_factory=dict, description="The source behind each us_first and us_only",
     )
-    false_outs: int = Field(default=0, description="Out at the tip, active in the box score")
+    false_outs: int = Field(default=0, description="Out at the tip, and he played")
     false_outs_floor: int = Field(default=0, description="False outs that only ESPN fantasy's floor made out")
-    espn_false_outs: int = Field(default=0, description="Active players ESPN fantasy itself had out at the tip")
+    espn_false_outs: int = Field(default=0, description="Players who played whom ESPN fantasy itself had out at the tip")
     gate_met: bool = Field(
         default=False,
         description="races > 0, first_share > 0.5, and no false out beyond the floor's",

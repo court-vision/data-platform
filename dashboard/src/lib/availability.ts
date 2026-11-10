@@ -27,15 +27,17 @@ export const OUTCOMES: Record<Outcome, { label: string; note: string; tone?: Ton
   espn_first: { label: "ESPN first", note: "both called him out; ESPN fantasy came first", tone: "warn" },
   us_only: { label: "Us only", note: "only our verdict had him out at the tip", tone: "up" },
   espn_only: { label: "ESPN only", note: "only ESPN fantasy had him out at the tip", tone: "warn" },
-  carried: { label: "Carried", note: "out at both sides' first read of the date: a long absence, not a race" },
+  carried: {
+    label: "Carried",
+    note: "every side that called him had him out at its first read of the date: a long absence, not a race",
+  },
   unannounced: { label: "Unannounced", note: "a source named him, neither called him out, he sat" },
-  false_out: { label: "False out", note: "out at the tip, active in the box score", tone: "down" },
-  not_in_box: { label: "Not in box", note: "called out, the game tipped, the box score never listed him" },
-  pending: { label: "Pending", note: "called out, the game has not tipped", tone: "live" },
+  false_out: { label: "False out", note: "out at the tip, and he played", tone: "down" },
+  pending: { label: "Pending", note: "called out; the game has not tipped, or its stats are not in", tone: "live" },
 }
 
 export const RACES: readonly Outcome[] = ["us_first", "same_poll", "espn_first", "us_only", "espn_only"]
-const OTHERS: readonly Outcome[] = ["carried", "unannounced", "pending", "not_in_box"]
+const OTHERS: readonly Outcome[] = ["carried", "unannounced", "pending"]
 
 export type Show = "races" | "false_outs" | "others" | "all"
 
