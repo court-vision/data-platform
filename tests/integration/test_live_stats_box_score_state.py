@@ -260,6 +260,23 @@ def test_a_missed_box_score_does_not_put_the_game_back_where_the_scoreboard_has_
     assert _snapshots(KNICKS)[-1] == (2, 2, "PT02M00.00S", 55, 53)
 
 
+def test_a_missed_box_score_does_not_wind_the_clock_back(integration_db):
+    """Level on period and score the scoreboard can still be the older word, and its clock says so."""
+    feed = Feed()
+    feed.scoreboard = [_listed(KNICKS, 2, 2, "PT06M00.00S", 49, 51)]
+    feed.boxes[KNICKS] = _box(2, 2, "PT04M41.00S", 49, 51, [_player(BRUNSON, "Jalen Brunson", 14)])
+    feed.poll("2026-03-05T01:00:00")
+
+    feed.boxes[KNICKS] = None
+    feed.poll("2026-03-05T01:00:30")
+    assert _snapshots(KNICKS) == [(2, 2, "PT04M41.00S", 49, 51)]
+
+    # The scoreboard's clock has run past the stored one: it is the newer word again.
+    feed.scoreboard = [_listed(KNICKS, 2, 2, "PT04M10.00S", 49, 51)]
+    feed.poll("2026-03-05T01:01:00")
+    assert _snapshots(KNICKS)[-1] == (2, 2, "PT04M10.00S", 49, 51)
+
+
 def test_a_missed_box_score_after_the_final_keeps_the_settle_margin_running(integration_db):
     feed = Feed()
     feed.scoreboard = [_listed(KNICKS, 2, 4, "PT05M00.00S", 95, 90)]
@@ -290,18 +307,18 @@ def test_a_tipped_game_with_no_box_score_counts_as_a_failed_read_whatever_the_sc
 
 
 def test_latest_by_game_is_each_games_newest_snapshot(integration_db):
-    for minute, (game_id, status, period, home, away) in enumerate([
-        (KNICKS, 2, 1, 10, 8), (KNICKS, 2, 2, 50, 48), (LAKERS, 1, None, 0, 0),
+    for minute, (game_id, status, period, clock, home, away) in enumerate([
+        (KNICKS, 2, 1, "PT03M00.00S", 10, 8), (KNICKS, 2, 2, "PT04M41.00S", 50, 48), (LAKERS, 1, None, None, 0, 0),
     ]):
         LiveGameScoreSnapshot.create(
             game_id=game_id, game_date=GAME_DATE, home_team="NYK", away_team="BOS",
-            home_score=home, away_score=away, period=period, game_status=status,
+            home_score=home, away_score=away, period=period, game_clock=clock, game_status=status,
             captured_at=datetime(2026, 3, 5, 1, minute),
         )
 
     latest = LiveGameScoreSnapshot.latest_by_game([KNICKS, LAKERS, SUNS])
 
-    assert latest == {KNICKS: LatestSnapshot(2, 2, 98), LAKERS: LatestSnapshot(1, 0, 0)}
+    assert latest == {KNICKS: LatestSnapshot(2, 2, 98, "PT04M41.00S"), LAKERS: LatestSnapshot(1, 0, 0, None)}
     assert latest[KNICKS].ahead_of(_listed(KNICKS, 2, 1, "", 28, 25))
     assert latest[KNICKS].ahead_of(_listed(KNICKS, 1, 2, "", 50, 48))
     assert not latest[KNICKS].ahead_of(_listed(KNICKS, 2, 2, "", 50, 48))

@@ -21,7 +21,7 @@ import pytest
 
 from core.settings import settings
 from db.models.nba import LiveGameScoreSnapshot, LivePlayerStats
-from db.models.nba.live_game_score_snapshots import LatestSnapshot
+from db.models.nba.live_game_score_snapshots import LatestSnapshot, clock_seconds
 from pipelines import live_game_stats
 from pipelines.availability import WriteResult
 from pipelines.context import PipelineContext
@@ -117,6 +117,31 @@ def test_a_snapshot_is_ahead_of_an_older_word_on_the_game() -> None:
     assert not stored.ahead_of(_listed(status=3, period=4, home=110, away=106))
     # Before the tip the scoreboard has no period and no score.
     assert not LatestSnapshot(1, 0, 0).ahead_of({"game_status": 1, "period": 0, "home_score": None})
+
+
+@pytest.mark.parametrize(
+    ("clock", "seconds"),
+    [("PT06M30.00S", 390.0), ("PT00M04.70S", 4.7), ("PT12M00.00S", 720.0), ("PT00M00.00S", 0.0),
+     ("", None), (None, None), ("Final", None), (390, None)],
+)
+def test_a_game_clock_is_the_seconds_left_in_its_period(clock, seconds) -> None:
+    assert clock_seconds(clock) == seconds
+
+
+def test_level_in_play_the_clock_says_which_word_is_the_older() -> None:
+    """A stretch with no score: the scoreboard can match the stored period and points and still be minutes behind."""
+    stored = LatestSnapshot(game_status=2, period=3, score=150, game_clock="PT06M30.00S")
+    level = {"status": 2, "period": 3, "home": 76, "away": 74}
+
+    assert stored.ahead_of(_listed(clock="PT08M00.00S", **level))
+    assert not stored.ahead_of(_listed(clock="PT06M30.00S", **level))
+    assert not stored.ahead_of(_listed(clock="PT05M10.00S", **level))
+    # A clock that cannot be read settles nothing, whichever side lacks it.
+    assert not stored.ahead_of(_listed(clock="", **level))
+    assert not LatestSnapshot(2, 3, 150).ahead_of(_listed(clock="PT08M00.00S", **level))
+    # Nor does a final's: its snapshots have to keep coming for the game to settle.
+    final = LatestSnapshot(3, 4, 216, "PT00M00.00S")
+    assert not final.ahead_of(_listed(status=3, period=4, clock="PT00M01.20S", home=110, away=106))
 
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ run deletes only its pre-tip ones (game_status 1), and the rest are the margin
 line of each game's sheet after the fact.
 """
 
+import re
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import NamedTuple
@@ -33,30 +34,46 @@ from peewee import (
 from db.base import BaseModel, db
 
 
+_GAME_CLOCK = re.compile(r"^PT(\d+)M(\d+(?:\.\d+)?)S$")
+
+
+def clock_seconds(clock) -> float | None:
+    """Seconds left in the period on an NBA game clock ("PT06M30.00S"); None for anything else."""
+    match = _GAME_CLOCK.match(clock) if isinstance(clock, str) else None
+    return int(match[1]) * 60 + float(match[2]) if match else None
+
+
 class LatestSnapshot(NamedTuple):
     """How far the newest stored snapshot of a game had it."""
 
     game_status: int
     period: int
     score: int  # both teams' points
+    game_clock: str | None = None
 
     def ahead_of(self, game: Mapping) -> bool:
         """Whether `game` (a scoreboard entry, or a box score's state in that
         shape) is older than this: an earlier status, an earlier period or
-        fewer points on the board."""
-        return (
-            (game.get("game_status") or 1) < self.game_status
-            or (game.get("period") or 0) < self.period
-            or (game.get("home_score") or 0) + (game.get("away_score") or 0) < self.score
-        )
+        fewer points on the board. Level on all three in play, the one with
+        more of the period left on its clock is the older; a clock that
+        cannot be read settles nothing."""
+        status = game.get("game_status") or 1
+        period = game.get("period") or 0
+        score = (game.get("home_score") or 0) + (game.get("away_score") or 0)
+        if status < self.game_status or period < self.period or score < self.score:
+            return True
+        if status == self.game_status == 2 and (period, score) == (self.period, self.score):
+            stored, theirs = clock_seconds(self.game_clock), clock_seconds(game.get("game_clock"))
+            return stored is not None and theirs is not None and theirs > stored
+        return False
 
 
 # One index probe a game (game_id, captured_at), whatever the night has stored.
 LATEST_SNAPSHOTS_SQL = """
-    SELECT g.game_id, s.game_status, s.period, s.home_score, s.away_score
+    SELECT g.game_id, s.game_status, s.period, s.home_score, s.away_score, s.game_clock
     FROM unnest(%(game_ids)s::varchar[]) AS g(game_id)
     CROSS JOIN LATERAL (
-        SELECT game_status, period, home_score, away_score
+        SELECT game_status, period, home_score, away_score, game_clock
         FROM nba.live_game_score_snapshots
         WHERE game_id = g.game_id
         ORDER BY captured_at DESC
@@ -176,8 +193,8 @@ class LiveGameScoreSnapshot(BaseModel):
             return {}
         rows = db.execute_sql(LATEST_SNAPSHOTS_SQL, {"game_ids": game_ids}).fetchall()
         return {
-            game_id: LatestSnapshot(status, period or 0, (home or 0) + (away or 0))
-            for game_id, status, period, home, away in rows
+            game_id: LatestSnapshot(status, period or 0, (home or 0) + (away or 0), clock)
+            for game_id, status, period, home, away, clock in rows
         }
 
     @classmethod
