@@ -144,8 +144,9 @@ class Settings(BaseSettings):
     # What came in about players goes to Dime (the Dime autopilot plan, step 6): the
     # availability pipeline's late-scratch events (verdict changes for games not yet
     # tipped) and the news feed's new items are posted to the backend, which starts a
-    # check-in on each team Dime runs that rosters the player. The backend's
-    # DIME_EVENTS_ENABLED is the switch; this one stops the posts themselves.
+    # check-in on each team Dime runs that rosters the player. The backend hears them
+    # only for a team on its AUTOPILOT_TEAM_IDS with Late scratches at AI; this switch
+    # stops the posts themselves.
     post_dime_events: bool = True
 
     # The late-scratch swap (the news plan's step 3b): each verdict change the

@@ -22,9 +22,9 @@ player or team Court Vision knows is not stored. `raw` is cleared after 30 days.
 
 New items about players, of the kinds Dime reacts to (injury, availability, lineup,
 transaction) and written in the last three hours, are posted to the backend
-(`post_dime_events`), which starts a check-in on each team Dime runs that rosters one of
-the players, behind its own DIME_EVENTS_ENABLED switch. A backend that can't be reached is
-logged, never a failed run.
+(`post_dime_events`), which starts a check-in on each team Dime runs (on its
+AUTOPILOT_TEAM_IDS, Late scratches at AI) that rosters one of the players. A backend that
+can't be reached is logged, never a failed run.
 
 Counters: records = items stored. Skipped = an item already stored (`seen`), the same text
 from another source (`duplicate`), an item naming no one (`unlinked`), a name that matched no

@@ -40,9 +40,9 @@ the one swap the change calls for on every team whose Late scratches level is
 notify or act, and makes it at act; the owner of each team it swapped or
 suggested a swap on is emailed what happened and why. The same changes go to
 Dime (the Dime autopilot plan, step 6, `post_dime_events`): the backend records
-them as events on the teams Dime runs (Late scratches at AI) that roster the
-player and starts a check-in about them, behind its own DIME_EVENTS_ENABLED
-switch. A backend that can't be reached is logged and the change counted as
+them as events on the teams Dime runs (on its AUTOPILOT_TEAM_IDS, Late scratches
+at AI) that roster the player and starts a check-in about them. A backend that
+can't be reached is logged and the change counted as
 skipped `reaction_not_posted`, never a failed run; it is not posted again.
 
 nba.player_injuries keeps its readers: each run copies the date's verdicts
