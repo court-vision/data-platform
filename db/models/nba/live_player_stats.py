@@ -1,13 +1,14 @@
 """
 Live Player Stats Table
 
-In-progress game statistics for NBA players, updated every ~60 seconds
-during live games. This is a continuously-overwritten snapshot table,
+In-progress game statistics for NBA players, rewritten on every live-stats
+poll (30 seconds apart) during live games. This is a continuously-overwritten snapshot table,
 separate from the finalized player_game_stats fact table.
 
 One row per player per game, uniquely keyed on (player_id, game_id).
 """
 
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -30,7 +31,7 @@ class LivePlayerStats(BaseModel):
     """
     In-progress game statistics for a player.
 
-    Updated on every live polling cycle (~60s). Stores current box score
+    Updated on every live polling cycle (30 s). Stores current box score
     stats for all active games. Records persist until the next game day.
 
     Attributes:
@@ -105,63 +106,64 @@ class LivePlayerStats(BaseModel):
             f"status={self.game_status})>"
         )
 
+    # What a poll writes on a line: everything but its key and its id.
+    LINE_FIELDS = (
+        "game_date", "period", "game_clock", "game_status", "fpts",
+        "pts", "reb", "ast", "stl", "blk", "tov", "min",
+        "fgm", "fga", "fg3m", "fg3a", "ftm", "fta",
+    )
+
     @classmethod
-    def upsert_live_stats(
+    def upsert_lines(
         cls,
-        player_id: int,
         game_id: str,
-        game_date,
-        stats: dict,
+        lines: Iterable[Mapping],
         pipeline_run_id: UUID | None = None,
-    ) -> "LivePlayerStats":
+    ) -> int:
         """
-        Insert or update live game statistics for a player.
+        Insert or update one game's lines in a single statement.
+
+        A poll used to cost three statements a player (the player, a read of
+        his line, the write): about 600 round trips for a full night's 200
+        lines. Every line is written on every poll, changed or not: the
+        `pipeline_run_id` and `last_updated` it leaves are how a settled game
+        is told (pipelines/live_game_stats.py) and how a stuck one is finalized
+        (`finalize_stale_by_time`).
 
         Args:
-            player_id: NBA player ID
             game_id: NBA game ID
-            game_date: Date of the game
-            stats: Dictionary with stat values and live game metadata
-            pipeline_run_id: Optional pipeline run UUID
+            lines: One mapping per player with `player_id` and the LINE_FIELDS
+                (a missing stat is 0; `game_status` 1; `period` and
+                `game_clock` null). The last line wins for a player listed twice.
+            pipeline_run_id: The run writing them
 
         Returns:
-            The created or updated LivePlayerStats instance
+            The number of lines written
         """
-        defaults = {
-            "game_date": game_date,
-            "period": stats.get("period"),
-            "game_clock": stats.get("game_clock"),
-            "game_status": stats.get("game_status", 1),
-            "fpts": stats.get("fpts", 0),
-            "pts": stats.get("pts", 0),
-            "reb": stats.get("reb", 0),
-            "ast": stats.get("ast", 0),
-            "stl": stats.get("stl", 0),
-            "blk": stats.get("blk", 0),
-            "tov": stats.get("tov", 0),
-            "min": stats.get("min", 0),
-            "fgm": stats.get("fgm", 0),
-            "fga": stats.get("fga", 0),
-            "fg3m": stats.get("fg3m", 0),
-            "fg3a": stats.get("fg3a", 0),
-            "ftm": stats.get("ftm", 0),
-            "fta": stats.get("fta", 0),
-            "last_updated": datetime.utcnow(),
-            "pipeline_run_id": pipeline_run_id,
-        }
-
-        live_stats, created = cls.get_or_create(
-            player_id=player_id,
-            game_id=game_id,
-            defaults=defaults,
+        now = datetime.utcnow()
+        absent = {"period": None, "game_clock": None, "game_status": 1}
+        rows: dict[int, dict] = {}
+        for line in lines:
+            row = {name: line.get(name, absent.get(name, 0)) for name in cls.LINE_FIELDS}
+            row.update(
+                player=line["player_id"],
+                game_id=game_id,
+                last_updated=now,
+                pipeline_run_id=pipeline_run_id,
+            )
+            rows[line["player_id"]] = row
+        if not rows:
+            return 0
+        (
+            cls.insert_many(list(rows.values()))
+            .on_conflict(
+                conflict_target=[cls.player, cls.game_id],
+                preserve=[getattr(cls, name) for name in cls.LINE_FIELDS]
+                + [cls.last_updated, cls.pipeline_run_id],
+            )
+            .execute()
         )
-
-        if not created:
-            for key, value in defaults.items():
-                setattr(live_stats, key, value)
-            live_stats.save()
-
-        return live_stats
+        return len(rows)
 
     @classmethod
     def finalize_stale_games(cls, game_date) -> int:

@@ -31,10 +31,20 @@ not multiplied by four: a call takes no longer than its first request or the
 budget, whichever is longer. Each re-ask is logged (``stats_reask``), so a
 night of flaky answers that all came good is still visible.
 
+cdn.nba.com requests go over kept connections (``_kept_get``). The live-stats
+pipeline reads the scoreboard and every box score of the night each 30 s, and
+with a connection of its own every one of those requests opened a proxy tunnel
+and a TLS session first (0.3-0.9 s a file on 2026-11-09, handshakes included).
+nba_api's own ``send_api_request`` keeps one ``requests.Session``; this
+replacement had dropped it. Only the connection is kept: each request still
+goes out with the same headers and no cookies. ``NBA_CDN_KEEP_CONNECTIONS=false``
+goes back to a connection per request.
+
 This module must be imported early in application startup (see main.py) so the
 patch is applied before any nba_api call is made.
 """
 
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -59,6 +69,73 @@ STATS_RETRY_DELAY = 1.0
 # with less than STATS_MIN_TIMEOUT left after the pause no re-ask is made.
 STATS_BUDGET = 20.0
 STATS_MIN_TIMEOUT = 1.0
+
+CDN_HOST = "cdn.nba.com"
+# Idle sessions kept per proxy. The live pipeline's box score readers
+# (settings.live_box_score_workers) and a scoreboard read fit with room to
+# spare; a session that comes back to a full shelf is closed.
+CDN_KEPT = 16
+
+# Sessions not in use, most recently used last, by the proxy they go through
+# (a curl handle keeps the proxy it was last given). Each holds one curl handle
+# and its open connection. A request takes one for itself, so a handle is never
+# used by two threads at once, and takes the one used last, so a quiet night
+# keeps reusing the same warm connections rather than cycling through cold ones.
+_kept: dict[str | None, list] = {}
+_kept_lock = threading.Lock()
+
+
+def _new_session():
+    """A session with one curl handle of its own (not one per thread: `_kept_get` hands it to one request at a time)."""
+    return requests.Session(use_thread_local_curl=False)
+
+
+def _close(session) -> None:
+    try:
+        session.close()
+    except Exception:
+        pass
+
+
+def _kept_get(url: str, proxy_url: str | None, **kwargs):
+    """GET `url` on a kept connection through `proxy_url`; the session goes back on the shelf when it answers.
+
+    A request that raises closes its session: whatever state the connection was
+    left in, the retry starts on a new one. libcurl itself drops a kept
+    connection the other end has closed, or one idle past its
+    CURLOPT_MAXAGE_CONN (118 s), and connects again within the same request.
+    """
+    with _kept_lock:
+        idle = _kept.get(proxy_url)
+        session = idle.pop() if idle else None
+    if session is None:
+        session = _new_session()
+    try:
+        response = session.get(url, **kwargs)
+        # Only the connection is kept. A session would also send back whatever
+        # cookies the last answer set; a request of its own never had any, and
+        # each one here still goes out as that request did.
+        session.cookies.clear()
+    except BaseException:
+        _close(session)
+        raise
+    with _kept_lock:
+        idle = _kept.setdefault(proxy_url, [])
+        if len(idle) < CDN_KEPT:
+            idle.append(session)
+            session = None
+    if session is not None:
+        _close(session)
+    return response
+
+
+def close_kept_sessions() -> None:
+    """Close every idle kept session (tests; a session in use closes itself if it fails)."""
+    with _kept_lock:
+        sessions = [session for idle in _kept.values() for session in idle]
+        _kept.clear()
+    for session in sessions:
+        _close(session)
 
 
 def _stats_failure(status_code: int, text: str, endpoint: str, valid_json: bool) -> Exception | None:
@@ -108,23 +185,28 @@ def browser_impersonation_request(
     proxy_url = proxy or settings.nba_api_proxy_url
     proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
 
-    is_stats = urlsplit(base_url).netloc == STATS_HOST
+    host = urlsplit(base_url).netloc
+    is_stats = host == STATS_HOST
     attempts = STATS_ATTEMPTS if is_stats else 1
+    kept = host == CDN_HOST and settings.nba_cdn_keep_connections
 
     request_timeout = timeout or 30
     started = time.monotonic()
     failure = None
 
     for attempt in range(1, attempts + 1):
+        request = dict(
+            params=clean_params,
+            headers=request_headers,
+            timeout=request_timeout,
+            impersonate=IMPERSONATE,
+            proxies=proxies,
+        )
         try:
-            response = requests.get(
-                base_url,
-                params=clean_params,
-                headers=request_headers,
-                timeout=request_timeout,
-                impersonate=IMPERSONATE,
-                proxies=proxies,
-            )
+            if kept:
+                response = _kept_get(base_url, proxy_url, **request)
+            else:
+                response = requests.get(base_url, **request)
         except requests.exceptions.Timeout as e:
             if failure is None:
                 raise

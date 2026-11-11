@@ -11,9 +11,14 @@ the live box score reads an empty body as "no data yet".
 
 The re-asks share one budget: answers that are slow as well as bad must not be
 multiplied by four under a trigger that runs inside its HTTP request.
+
+cdn.nba.com requests go over kept connections (`TestKeptConnections`): the
+live pipeline reads the same host every 30 s, and a connection per file was
+most of what a run took.
 """
 
 import json
+import threading
 
 import pytest
 from circuitbreaker import CircuitBreakerMonitor
@@ -75,13 +80,42 @@ def stats(monkeypatch):
             self.sleeps.append(seconds)
             self.now += seconds
 
+        # A kept session (cdn.nba.com) is the same wire; `sessions` counts the ones opened.
+        def session(self):
+            opened = KeptSession(self)
+            self.sessions.append(opened)
+            return opened
+
+    class KeptSession:
+        def __init__(self, wire):
+            self.wire = wire
+            self.closed = False
+            self.gets = 0
+            self.cookies = {}
+            self.sent_cookies = []
+
+        def get(self, url, **kwargs):
+            assert not self.closed, "a closed session was used again"
+            self.gets += 1
+            self.sent_cookies.append(dict(self.cookies))
+            response = self.wire.get(url, **kwargs)
+            self.cookies["ak_bmsc"] = f"set-by-answer-{self.gets}"  # as a real session keeps Set-Cookie
+            return response
+
+        def close(self):
+            self.closed = True
+
     wire = Wire()
+    wire.sessions = []
     monkeypatch.setattr(patches.requests, "get", wire.get)
+    monkeypatch.setattr(patches, "_new_session", wire.session)
+    patches.close_kept_sessions()
     # `patches.time` is the time module itself, so this also takes the wait out
     # of tenacity's backoff in the extractor tests below.
     monkeypatch.setattr(patches.time, "sleep", wire.sleep)
     monkeypatch.setattr(patches.time, "monotonic", lambda: wire.now)
-    return wire
+    yield wire
+    patches.close_kept_sessions()
 
 
 @pytest.fixture
@@ -153,6 +187,112 @@ def test_cdn_host_is_left_alone(stats):
     data = NBALiveHTTP().send_api_request(endpoint="boxscore/boxscore_0022500001.json", parameters={})
     assert len(stats.urls) == 1 and stats.sleeps == []
     assert not data.valid_json()
+
+
+def _live(endpoint="boxscore/boxscore_0022500001.json", **kwargs):
+    return NBALiveHTTP().send_api_request(endpoint=endpoint, parameters={}, **kwargs)
+
+
+def _together(stats, count):
+    """`count` live requests, every one of them on the wire before any is answered."""
+    on_the_wire = threading.Barrier(count, timeout=5)
+    answer = stats.get
+
+    def held(url, **kwargs):
+        on_the_wire.wait()
+        return answer(url, **kwargs)
+
+    stats.get = held
+    try:
+        readers = [
+            threading.Thread(target=_live, args=(f"boxscore/boxscore_002250000{n}.json",)) for n in range(count)
+        ]
+        for reader in readers:
+            reader.start()
+        for reader in readers:
+            reader.join(timeout=5)
+    finally:
+        del stats.get
+
+
+class TestKeptConnections:
+    """cdn.nba.com is read every 30 s all night: its requests reuse their connections."""
+
+    def test_the_next_request_reuses_the_session(self, stats):
+        stats.answers = [(200, "{}")]
+        for _ in range(3):
+            _live()
+        (session,) = stats.sessions
+        assert session.gets == 3 and not session.closed
+
+    def test_the_connection_is_kept_and_the_cookies_are_not(self, stats):
+        """Each request goes out as a request of its own did: with no cookies from the answer before."""
+        stats.answers = [(200, "{}")]
+        for _ in range(3):
+            _live()
+        (session,) = stats.sessions
+        assert session.sent_cookies == [{}, {}, {}]
+
+    def test_stats_nba_com_keeps_a_connection_per_request(self, stats):
+        stats.answers = [(200, OK_BODY)]
+        _send()
+        assert stats.sessions == [] and len(stats.urls) == 1
+
+    def test_a_request_that_fails_does_not_put_its_session_back(self, stats):
+        """Whatever state the connection was left in, the retry starts on a new one."""
+        stats.answers = [(200, "{}")]
+        stats.latency = 31.0
+        with pytest.raises(patches.requests.exceptions.Timeout):
+            _live()
+        stats.latency = 0.0
+        _live()
+
+        broken, fresh = stats.sessions
+        assert broken.closed and broken.gets == 1
+        assert fresh.gets == 1 and not fresh.closed
+
+    def test_requests_at_the_same_time_each_have_their_own_session(self, stats):
+        """A curl handle is one request at a time; the live pipeline reads a night's box scores together."""
+        stats.answers = [(200, "{}")]
+        _together(stats, 4)
+        assert [session.gets for session in stats.sessions] == [1, 1, 1, 1]
+
+        # And the next poll's four reads reuse those four.
+        _together(stats, 4)
+        assert [session.gets for session in stats.sessions] == [2, 2, 2, 2]
+
+    def test_a_lone_request_takes_the_session_used_last(self, stats):
+        """So a quiet stretch keeps one connection warm instead of cycling through cold ones."""
+        stats.answers = [(200, "{}")]
+        first, second = patches._new_session(), patches._new_session()
+        patches._kept[None] = [first, second]
+        _live()
+        _live()
+        assert (first.gets, second.gets) == (0, 2)
+
+    def test_another_proxy_is_another_session(self, stats):
+        """A curl handle keeps the proxy it was last given."""
+        stats.answers = [(200, "{}")]
+        _live()
+        _live(proxy="http://user:pass@proxy.example:1001")
+        _live()
+        direct, proxied = stats.sessions
+        assert (direct.gets, proxied.gets) == (2, 1)
+
+    def test_no_more_than_the_shelf_holds_are_kept(self, stats, monkeypatch):
+        """A burst opens the sessions it needs; the ones over CDN_KEPT are closed as they come back."""
+        monkeypatch.setattr(patches, "CDN_KEPT", 2)
+        stats.answers = [(200, "{}")]
+        _together(stats, 3)
+        assert sorted(session.closed for session in stats.sessions) == [False, False, True]
+
+    def test_the_setting_turns_it_off(self, stats, monkeypatch):
+        from core.settings import settings
+
+        monkeypatch.setattr(settings, "nba_cdn_keep_connections", False)
+        stats.answers = [(200, "{}")]
+        _live()
+        assert stats.sessions == [] and len(stats.urls) == 1
 
 
 class TestTheReaskLog:

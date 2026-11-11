@@ -7,8 +7,8 @@ and also a 40-second appearance. The NBA counts the second one as a game played
 `min` 0. The settled pipeline (`nba.player_game_stats`) and the live one
 (`nba.live_player_stats`) apply the same rule, so they agree about who played.
 
-The model writers are captured rather than run: these tests are about which
-rows the pipelines choose to write.
+The writers are captured rather than run: these tests are about which rows the
+pipelines choose to write.
 """
 
 from __future__ import annotations
@@ -159,19 +159,23 @@ def live_rows(monkeypatch):
 
     monkeypatch.setattr(LivePlayerStats, "delete", classmethod(lambda cls: _NoRows()))
     monkeypatch.setattr(LiveGameScoreSnapshot, "delete", classmethod(lambda cls: _NoRows()))
-    monkeypatch.setattr(LiveGameScoreSnapshot, "record_snapshot", classmethod(lambda cls, **kw: None))
     # Nothing stored yet, so no game is skipped as already final.
     monkeypatch.setattr(
         live_game_stats,
         "stored_final_games",
         lambda _d, settle_minutes=None: StoredFinalGames(frozenset(), frozenset(), False),
     )
-    monkeypatch.setattr(Player, "upsert_player", classmethod(lambda cls, **kw: None))
-    monkeypatch.setattr(
-        LivePlayerStats,
-        "upsert_live_stats",
-        classmethod(lambda cls, player_id, stats, **kw: stored.__setitem__(player_id, stats)),
-    )
+
+    # A game's write, captured: its lines by player, and the game as they were stored under.
+    states: list[dict] = []
+
+    def store_game(game_id, game_date, state, lines, run_id) -> int:
+        states.append(dict(state))
+        for line in lines:
+            stored[line["player_id"]] = line
+        return len(lines)
+
+    monkeypatch.setattr(live_game_stats, "store_game", store_game)
     # The availability hand-off, captured: (game_date, [(game_id, box score, tipped)]) per run.
     handed: list[tuple[date, list]] = []
     monkeypatch.setattr(
@@ -181,7 +185,7 @@ def live_rows(monkeypatch):
     )
 
     def run(
-        home: list[dict], away: list[dict] | None = None, game_status: int = 2
+        home: list[dict], away: list[dict] | None = None, game_status: int = 2, **box
     ) -> tuple[dict[int, dict], PipelineContext]:
         pipeline = LiveGameStatsPipeline()
         pipeline.nba_extractor.get_scoreboard_games = lambda _d: [
@@ -190,12 +194,14 @@ def live_rows(monkeypatch):
         pipeline.nba_extractor.get_live_box_score = lambda _id: {
             "homeTeam": {"players": home},
             "awayTeam": {"players": away or []},
+            **box,
         }
         ctx = PipelineContext("live_game_stats", nba_date=GAME_DATE)
         pipeline.execute(ctx)
         return stored, ctx
 
     run.handed = handed
+    run.states = states
     return run
 
 
@@ -339,6 +345,19 @@ def test_live_hands_each_box_score_to_the_availability_log(live_rows, game_statu
     assert (game_date, game_id, was_tipped) == (GAME_DATE, GAME_ID, tipped)
     assert [p["personId"] for p in game["homeTeam"]["players"]] == [2, 1628973]
     assert 2 not in stored
+
+
+@pytest.mark.unit
+def test_a_game_the_box_score_says_has_tipped_is_handed_over_as_tipped(live_rows) -> None:
+    """The scoreboard file is up to ten minutes behind: at the tip it still says "scheduled"."""
+    live_rows(
+        home=[_live_player(1628973, "Jalen Brunson", "PT02M10.00S", "PT02M", points=4)],
+        game_status=1,
+        gameStatus=2,
+    )
+
+    ((_, ((_, _, was_tipped),)),) = live_rows.handed
+    assert was_tipped
 
 
 @pytest.mark.unit
