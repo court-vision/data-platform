@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Format: http://username:password@host:port
     nba_api_proxy_url: Optional[str] = None
 
+    # cdn.nba.com (the live scoreboard and box scores) over kept connections
+    # rather than a new one per file (utils/patches.py). False is the old
+    # behaviour, should the proxy or the CDN ever mishandle a reused connection.
+    nba_cdn_keep_connections: bool = True
+
     # Resilience
     retry_max_attempts: int = 3
     retry_base_delay: float = 2.0
@@ -111,13 +116,20 @@ class Settings(BaseSettings):
     # (6 x 15 min polls = ~90 minutes of period-before-totals slack).
     espn_gate_max_attempts: int = 6
 
-    # Live stats: how long after the scoreboard calls a game final the
-    # live-stats pipeline keeps re-reading its box score. After that, once one
-    # successful run has stored the box score, the game is settled and later
-    # polls skip it (pipelines/live_game_stats.py, stored_final_games). The
-    # margin covers a box score that lags the scoreboard and a stat corrected
-    # after the buzzer; a final taken back by a review starts it again.
+    # Live stats: how long after a game goes final (by its box score or the
+    # scoreboard, whichever says so first) the live-stats pipeline keeps
+    # re-reading its box score. After that, once one successful run has stored
+    # the box score, the game is settled and later polls skip it
+    # (pipelines/live_game_stats.py, stored_final_games). The margin covers a
+    # stat corrected after the buzzer; a final taken back by a review starts
+    # it again.
     live_stats_settle_minutes: int = 15
+
+    # Live stats: how many box scores one run reads at a time. A night's games
+    # were read one after another (0.3-0.9 s each, so about 8 s for 8 games);
+    # together they take about as long as the slowest. 1 reads them in turn
+    # again, in the pipeline's own thread.
+    live_box_score_workers: int = 8
 
     # The availability pipeline copies each date's verdicts into nba.player_injuries
     # for that table's readers (Scout's status chip, team rosters, the AI tool), which

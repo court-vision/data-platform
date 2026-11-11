@@ -1,9 +1,15 @@
 """
 Live Game Score Snapshots Table
 
-Periodic snapshots of NBA game scores, captured every ~60 seconds during
+Periodic snapshots of NBA game scores, captured every 30 seconds during
 active game windows by the LiveGameStatsPipeline. Used to build score-over-time
-charts showing how leads changed throughout a game.
+charts showing how leads changed throughout a game, and read by the backend as
+each game's current score, clock and status.
+
+A snapshot is the game as its live box score had it on that poll. Until
+2026-11 it was the scoreboard file's word, which moves about once in ten
+minutes; a poll that cannot read the box score still stores the scoreboard's,
+unless that is older than what is already here (`LatestSnapshot.ahead_of`).
 
 One row is appended per game per pipeline run — this is a pure time series,
 not a rolling snapshot. A night's rows outlive it: the next night's first live
@@ -11,7 +17,9 @@ run deletes only its pre-tip ones (game_status 1), and the rest are the margin
 line of each game's sheet after the fact.
 """
 
+from collections.abc import Iterable, Mapping
 from datetime import datetime
+from typing import NamedTuple
 
 from peewee import (
     AutoField,
@@ -22,14 +30,46 @@ from peewee import (
     UUIDField,
 )
 
-from db.base import BaseModel
+from db.base import BaseModel, db
+
+
+class LatestSnapshot(NamedTuple):
+    """How far the newest stored snapshot of a game had it."""
+
+    game_status: int
+    period: int
+    score: int  # both teams' points
+
+    def ahead_of(self, game: Mapping) -> bool:
+        """Whether `game` (a scoreboard entry, or a box score's state in that
+        shape) is older than this: an earlier status, an earlier period or
+        fewer points on the board."""
+        return (
+            (game.get("game_status") or 1) < self.game_status
+            or (game.get("period") or 0) < self.period
+            or (game.get("home_score") or 0) + (game.get("away_score") or 0) < self.score
+        )
+
+
+# One index probe a game (game_id, captured_at), whatever the night has stored.
+LATEST_SNAPSHOTS_SQL = """
+    SELECT g.game_id, s.game_status, s.period, s.home_score, s.away_score
+    FROM unnest(%(game_ids)s::varchar[]) AS g(game_id)
+    CROSS JOIN LATERAL (
+        SELECT game_status, period, home_score, away_score
+        FROM nba.live_game_score_snapshots
+        WHERE game_id = g.game_id
+        ORDER BY captured_at DESC
+        LIMIT 1
+    ) s
+"""
 
 
 class LiveGameScoreSnapshot(BaseModel):
     """
     Score snapshot for an NBA game at a specific point in time.
 
-    One row per game per ~30-second pipeline poll. Records accumulate throughout
+    One row per game per 30-second pipeline poll. Records accumulate throughout
     a game night (about 300 in play per game, plus the pre-tip polls, which are
     deleted when the next game day starts; the rest are kept).
 
@@ -97,7 +137,8 @@ class LiveGameScoreSnapshot(BaseModel):
         Args:
             game_id: NBA game ID
             game_date: Date of the game
-            game_meta: Dict from get_scoreboard_games() with keys:
+            game_meta: The game in the shape get_scoreboard_games() gives
+                (pipelines.live_game_stats.game_state), with keys:
                 home_team, away_team, home_score, away_score,
                 period, game_clock, game_status
             pipeline_run_id: Optional pipeline run UUID
@@ -118,6 +159,26 @@ class LiveGameScoreSnapshot(BaseModel):
             captured_at=datetime.utcnow(),
             pipeline_run_id=pipeline_run_id,
         )
+
+    @classmethod
+    def latest_by_game(cls, game_ids: Iterable[str]) -> dict[str, LatestSnapshot]:
+        """
+        The newest snapshot of each of `game_ids` that has one, in one query.
+
+        Args:
+            game_ids: NBA game IDs
+
+        Returns:
+            game_id -> LatestSnapshot; a game never snapshotted is absent
+        """
+        game_ids = list(game_ids)
+        if not game_ids:
+            return {}
+        rows = db.execute_sql(LATEST_SNAPSHOTS_SQL, {"game_ids": game_ids}).fetchall()
+        return {
+            game_id: LatestSnapshot(status, period or 0, (home or 0) + (away or 0))
+            for game_id, status, period, home, away in rows
+        }
 
     @classmethod
     def get_snapshots_for_game(cls, game_id: str) -> list["LiveGameScoreSnapshot"]:

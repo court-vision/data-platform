@@ -5,9 +5,10 @@ cron-runner polls live-stats every 30 s until 4 AM ET. Until 2026-10 every
 poll after the last final fetched every box score again and rewrote every row
 (about 138 rows a run, half of all DB execution time in prod). A game is now
 *settled*, and skipped, once a successful run has stored its box score at
-least `live_stats_settle_minutes` after the scoreboard first called it final
-and none of its rows is still live (`pipelines/live_game_stats.py`,
-`stored_final_games`).
+least `live_stats_settle_minutes` after it went final and none of its rows is
+still live (`pipelines/live_game_stats.py`, `stored_final_games`). Here the
+box score and the scoreboard say final together; a box score that says so
+first is tests/integration/test_live_stats_box_score_state.py.
 
 What must not happen is a game going quiet with stats that are not its final
 ones. The case that matters is a row marked final by the endpoint's finalize
