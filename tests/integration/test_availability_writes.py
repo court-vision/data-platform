@@ -433,6 +433,25 @@ def test_with_the_copy_off_player_injuries_is_left_alone(night, monkeypatch):
     assert injury_rows() == {}
 
 
+def test_a_failed_injuries_copy_still_posts_the_swaps(night, monkeypatch):
+    from pipelines import availability as module
+
+    def broken(game_date, run_id):
+        raise RuntimeError("player_injuries is locked")
+
+    posted = []
+    monkeypatch.setattr(module, "write_injuries_compat", broken)
+    monkeypatch.setattr(module.AvailabilityPipeline, "_post_reactions",
+                        lambda self, ctx, game_date, held: posted.extend(e.player_id for e in held) or 0)
+    night.injuries = [listed(BRUNSON)]
+
+    tick = night.tick("2026-10-27T16:00:00")
+
+    assert verdict(BRUNSON).verdict == "out"
+    assert posted == [BRUNSON]
+    assert tick.failures == {"injuries_write_failed": 1}
+
+
 # ---- the write lock ---------------------------------------------------------------------
 
 

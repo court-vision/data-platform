@@ -60,7 +60,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Optional
 
 import requests
@@ -73,6 +73,7 @@ EXECUTE_PICKUPS_PATH = "/v1/internal/jobs/pickups/execute"
 RUN_LEDGER_PATH = "/v1/internal/jobs/ledger/run"
 RUN_CHECKINS_PATH = "/v1/internal/jobs/checkins/run"
 POST_EVENTS_PATH = "/v1/internal/jobs/checkins/events"
+REACT_LINEUP_PATH = "/v1/internal/jobs/lineup/react"
 CONNECT_TIMEOUT_SECONDS = 5.0
 
 # Outcomes the backend returns for a 200.
@@ -429,11 +430,75 @@ class EventsPost:
             return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
 
 
+@dataclass(frozen=True)
+class ReactTeam:
+    """What one verdict change did to one team whose Late scratches level is notify or act
+    (the backend's LineupReactTeam)."""
+
+    team_id: int
+    user_id: int
+    outcome: str                     # applied | planned | noop | skipped | rejected | failed
+    level: str = "act"               # notify | act
+    reason: Optional[str] = None
+    player_name: Optional[str] = None
+    moves: list[dict] = field(default_factory=list)
+    verified: Optional[bool] = None
+    audit_id: Optional[int] = None
+    nba_date: Optional[str] = None
+    team_name: str = ""
+
+    @property
+    def emails(self) -> bool:
+        """The owner hears about it: a swap made, or one to make (suggested at notify, or one
+        act couldn't make)."""
+        return bool(self.moves) and self.outcome in ("applied", "planned", "rejected", "failed")
+
+    @classmethod
+    def from_payload(cls, item: Any) -> Optional["ReactTeam"]:
+        if not isinstance(item, dict) or item.get("outcome") not in BACKEND_OUTCOMES:
+            return None
+        try:
+            return cls(
+                team_id=int(item["team_id"]), user_id=int(item["user_id"]), outcome=item["outcome"],
+                level=str(item.get("level") or "act"), reason=item.get("reason"),
+                player_name=item.get("player_name"),
+                moves=[m for m in (item.get("moves") or []) if isinstance(m, dict)],
+                verified=item.get("verified"), audit_id=item.get("audit_id"), nba_date=item.get("nba_date"),
+                team_name=item.get("team_name") or "",
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+@dataclass(frozen=True)
+class LineupReaction:
+    """The backend's answer to one verdict change, or why there is none (`ok` False)."""
+
+    ok: bool
+    teams: list[ReactTeam] = field(default_factory=list)
+    reason: Optional[str] = None
+    error: Optional[str] = None
+
+    @classmethod
+    def unavailable(cls, reason: str, error: Optional[str] = None) -> "LineupReaction":
+        return cls(ok=False, reason=reason, error=error)
+
+    @classmethod
+    def from_payload(cls, data: Any) -> "LineupReaction":
+        if not isinstance(data, dict) or not isinstance(data.get("teams"), list):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        teams = [ReactTeam.from_payload(item) for item in data["teams"]]
+        if any(t is None for t in teams):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        return cls(ok=True, teams=[t for t in teams if t is not None])
+
+
 class BackendClient:
     """Talks to the backend's pipeline-token routes. Disabled when no base URL is configured."""
 
     def __init__(self, base_url: Optional[str], token: str, timeout_seconds: float,
-                 pickups_timeout_seconds: Optional[float] = None, ledger_timeout_seconds: Optional[float] = None):
+                 pickups_timeout_seconds: Optional[float] = None, ledger_timeout_seconds: Optional[float] = None,
+                 react_timeout_seconds: Optional[float] = None):
         self._base_url = (base_url or "").strip().rstrip("/")
         self._token = token
         self._timeout = (CONNECT_TIMEOUT_SECONDS, float(timeout_seconds))
@@ -441,6 +506,8 @@ class BackendClient:
         self._pickups_timeout = (CONNECT_TIMEOUT_SECONDS, float(pickups_timeout_seconds or timeout_seconds))
         # A ledger rebuild reads a season of snapshots and box scores per league.
         self._ledger_timeout = (CONNECT_TIMEOUT_SECONDS, float(ledger_timeout_seconds or timeout_seconds))
+        # A verdict change reads the board of every team at notify or act and may write one or more.
+        self._react_timeout = (CONNECT_TIMEOUT_SECONDS, float(react_timeout_seconds or timeout_seconds))
         self._log = get_logger("backend_client")
 
     @property
@@ -724,6 +791,96 @@ class BackendClient:
         )
         return post
 
+    def react_lineup(
+        self,
+        *,
+        player_id: int,
+        game_date: date,
+        verdict: str,
+        previous_verdict: Optional[str] = None,
+        reason: Optional[str] = None,
+        source: Optional[str] = None,
+        changed_at: Optional[datetime] = None,
+        correlation_id: Optional[str] = None,
+    ) -> LineupReaction:
+        """Hand the backend one verdict change (out, doubtful or available, game not tipped): it
+        swaps or plans on every team whose Late scratches level is notify or act.
+
+        Never raises: transport and protocol failures come back as a reaction that is not `ok`.
+        """
+        if not self.enabled:
+            return LineupReaction.unavailable(reason="backend_not_configured")
+        body = {
+            "player_id": int(player_id),
+            "game_date": game_date.isoformat(),
+            "verdict": verdict,
+            "previous_verdict": previous_verdict,
+            "reason": (reason or "")[:100] or None,
+            "source": (source or "")[:16] or None,
+            "changed_at": changed_at.isoformat() if changed_at else None,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+
+        started = time.monotonic()
+        status_code: Optional[int] = None
+        try:
+            response = requests.post(
+                f"{self._base_url}{REACT_LINEUP_PATH}",
+                json=body,
+                headers=headers,
+                timeout=self._react_timeout,
+            )
+            status_code = response.status_code
+            reaction = self._parse_react_response(response)
+        except requests.Timeout as exc:
+            reaction = LineupReaction.unavailable(reason="timeout", error=_excerpt(str(exc)))
+        except requests.RequestException as exc:
+            reaction = LineupReaction.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+        except Exception as exc:  # a client bug must degrade the run, not raise
+            reaction = LineupReaction.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        log = self._log.info if reaction.ok else self._log.warning
+        log(
+            "backend_react_lineup",
+            ok=reaction.ok,
+            player_id=body["player_id"],
+            verdict=verdict,
+            teams=len(reaction.teams),
+            applied=sum(1 for t in reaction.teams if t.outcome == "applied"),
+            reason=reaction.reason,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            error=reaction.error,
+        )
+        return reaction
+
+    @staticmethod
+    def _parse_react_response(response: requests.Response) -> LineupReaction:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if status == 200:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            return LineupReaction.from_payload(data)
+
+        if status == 401:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            return LineupReaction.unavailable(reason="unauthorized", error=_excerpt(str(detail or response.text)))
+
+        detail: Optional[str] = None
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
+        return LineupReaction.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
+
     @staticmethod
     def _parse_events_response(response: requests.Response) -> EventsPost:
         status = response.status_code
@@ -848,4 +1005,5 @@ def backend_client_from_settings(settings: Any = default_settings) -> BackendCli
         timeout_seconds=settings.backend_timeout_seconds,
         pickups_timeout_seconds=getattr(settings, "pickups_backend_timeout_seconds", None),
         ledger_timeout_seconds=getattr(settings, "ledger_backend_timeout_seconds", None),
+        react_timeout_seconds=getattr(settings, "react_backend_timeout_seconds", None),
     )

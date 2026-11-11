@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # The move ledger's nightly rebuild (POST /v1/internal/jobs/ledger/run): every
     # active league's season of lineup snapshots and box scores, read and scored.
     ledger_backend_timeout_seconds: float = 300.0
+    # A late-scratch reaction (POST /v1/internal/jobs/lineup/react): one verdict change,
+    # read against the board of every team whose Late scratches level is notify or act,
+    # and written to those at act (writer call + re-read each).
+    react_backend_timeout_seconds: float = 60.0
     pickups_per_run: int = 4
 
     # Pre-game pipeline scheduling
@@ -131,6 +135,14 @@ class Settings(BaseSettings):
     # check-in on each team Dime runs that rosters the player. The backend's
     # DIME_EVENTS_ENABLED is the switch; this one stops the posts themselves.
     post_dime_events: bool = True
+
+    # The late-scratch swap (the news plan's step 3b): each verdict change the
+    # availability pipeline hears (out, doubtful or available, game not tipped) is
+    # posted to the backend, which swaps or suggests on every team whose Late
+    # scratches level is act or notify, and the owner is emailed what it did. The
+    # level (default off, per team in Dime's settings) is the switch; this one stops
+    # the posts themselves.
+    post_availability_reactions: bool = True
 
     # The news feed (pipelines/news_feed.py; the plan's § 3), every 5 minutes. ESPN's
     # per-player news has no league-wide feed, so it is read for a watch set: the

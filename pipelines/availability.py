@@ -33,13 +33,17 @@ nba.player_availability row. The writes run under one transaction-scoped
 advisory lock, so this pipeline and live-stats never interleave a read of the
 latest reports with the writes that depend on it.
 
-Dark for now (build step 2): a verdict change the late-scratch reactor would
-hear about (out, doubtful or available, for a game not yet tipped) is logged
-and counted as skipped `reaction_not_posted`; no lineup is re-planned. The same
-changes do go to Dime (the Dime autopilot plan, step 6, `post_dime_events`): the
-backend records them as events on the teams Dime runs that roster the player
-and starts a check-in about them, behind its own DIME_EVENTS_ENABLED switch. A
-backend that can't be reached is logged, never a failed run.
+A verdict change the late-scratch swap answers (out, doubtful or available, for
+a game not yet tipped; build step 3b) is posted to the backend once
+(POST /v1/internal/jobs/lineup/react, `post_availability_reactions`). It plans
+the one swap the change calls for on every team whose Late scratches level is
+notify or act, and makes it at act; the owner of each team it swapped or
+suggested a swap on is emailed what happened and why. The same changes go to
+Dime (the Dime autopilot plan, step 6, `post_dime_events`): the backend records
+them as events on the teams Dime runs (Late scratches at AI) that roster the
+player and starts a check-in about them, behind its own DIME_EVENTS_ENABLED
+switch. A backend that can't be reached is logged and the change counted as
+skipped `reaction_not_posted`, never a failed run; it is not posted again.
 
 nba.player_injuries keeps its readers: each run copies the date's verdicts
 there (`write_injuries_compat`, settings.availability_writes_injuries), which
@@ -47,8 +51,8 @@ gives off days and the offseason a status. The PRE_GAME espn_injury_status
 pipeline is retired after the parallel week (decision 9).
 
 Counters: records = report rows written. Skipped = an ESPN entry matched to no
-NBA player, a box score not up yet, a held reaction. Failed = a source that
-could not be read; the run goes on with the others.
+NBA player, a box score not up yet, a reaction not posted, an email not sent.
+Failed = a source that could not be read; the run goes on with the others.
 """
 
 from __future__ import annotations
@@ -79,7 +83,8 @@ from pipelines.extractors.espn import ESPNExtractor
 from pipelines.extractors.espn_injuries import ESPNInjuriesExtractor, EspnInjury
 from pipelines.extractors.nba_api import NBAApiExtractor
 from pipelines.transformers import normalize_name
-from services.backend_client import backend_client_from_settings
+from services.backend_client import ReactTeam, backend_client_from_settings
+from services.notification_service import NotificationResult, NotificationService
 from pipelines.transformers.availability import (
     CONFIDENCE,
     ET,
@@ -534,6 +539,8 @@ class VerdictChange:
     decided_by: str
     game_id: Optional[str]
     changed: bool
+    reason: Optional[str] = None             # "Left Ankle; Sprain"
+    changed_at: Optional[datetime] = None
 
 
 @dataclass
@@ -648,7 +655,8 @@ def _resolve_verdicts(
         )
         rows.append({"player": pid, "game_date": game_date, **row})
         out.append(VerdictChange(pid, verdict.verdict, row["previous_verdict"], verdict.decided_by,
-                                 verdict.game_id, changed))
+                                 verdict.game_id, changed, reason=row.get("reason"),
+                                 changed_at=row.get("changed_at")))
     if rows:
         (PlayerAvailability.insert_many(rows)
          .on_conflict(
@@ -707,6 +715,22 @@ def reaction_events(verdicts: Iterable[VerdictChange], slate: Slate, now: dateti
         v for v in verdicts
         if is_reaction_event(v.changed, v.verdict) and v.game_id and not slate.tipped(v.game_id, now)
     ]
+
+
+def reaction_email(event: VerdictChange, team: ReactTeam) -> dict:
+    """What the late-scratch email says (NotificationService.send_late_scratch_result)."""
+    return {
+        "outcome": team.outcome,
+        "level": team.level,
+        "reason": team.reason,
+        "player_name": team.player_name,
+        "verdict": event.verdict,
+        "injury": event.reason,
+        "source": event.decided_by,
+        "changed_at": event.changed_at.isoformat() if event.changed_at else None,
+        "moves": team.moves,
+        "verified": team.verified,
+    }
 
 
 def record_boxscore(
@@ -805,7 +829,8 @@ def write_injuries_compat(game_date: date, run_id) -> int:
 class AvailabilityPipeline(BasePipeline):
     """
     One availability tick: read the due sources, log what changed, re-resolve
-    the verdicts it touched, hold the reactions (dark), refresh player_injuries.
+    the verdicts it touched, post the reactions (and email what they did),
+    refresh player_injuries.
     """
 
     config = PipelineConfig(
@@ -828,6 +853,7 @@ class AvailabilityPipeline(BasePipeline):
         self.espn_extractor = ESPNExtractor()
         self.nba_extractor = NBAApiExtractor()
         self.backend_client = backend_client_from_settings()
+        self.notification_service = NotificationService()
 
     def execute(self, ctx: PipelineContext) -> None:
         now = datetime.now(timezone.utc)
@@ -886,7 +912,7 @@ class AvailabilityPipeline(BasePipeline):
         held = reaction_events(result.verdicts, slate, now)
         for event in held:
             ctx.log.info(
-                "availability_reaction_held",
+                "availability_reaction",
                 player_id=event.player_id,
                 verdict=event.verdict,
                 previous_verdict=event.previous_verdict,
@@ -894,12 +920,11 @@ class AvailabilityPipeline(BasePipeline):
                 game_id=event.game_id,
             )
         if held:
-            ctx.increment_skipped(len(held), "reaction_not_posted")
             self._post_events(ctx, game_date, held)
-
-        injuries_written = (
-            write_injuries_compat(game_date, ctx.run_id) if settings.availability_writes_injuries else 0
-        )
+        injuries_written = self._write_injuries(ctx, game_date)
+        # The swaps go last: each post waits on the backend's board reads, so a slow one holds up
+        # only the swaps, never Dime's events or the injuries write.
+        swaps = self._post_reactions(ctx, game_date, held) if held else 0
         ctx.log.info(
             "availability_complete",
             game_date=str(game_date),
@@ -907,9 +932,73 @@ class AvailabilityPipeline(BasePipeline):
             reports_written=result.reports,
             verdicts_written=len(result.verdicts),
             verdicts_changed=len(result.changes),
-            reactions_held=len(held),
+            reactions=len(held),
+            swaps_applied=swaps,
             injuries_written=injuries_written,
         )
+
+    @staticmethod
+    def _write_injuries(ctx: PipelineContext, game_date: date) -> int:
+        """The nba.player_injuries copy of today's verdicts. A failure is counted and the run goes
+        on: the verdicts are committed, so the swaps they call for must still be posted."""
+        if not settings.availability_writes_injuries:
+            return 0
+        try:
+            return write_injuries_compat(game_date, ctx.run_id)
+        except Exception as exc:
+            ctx.increment_failed(1, "injuries_write_failed")
+            ctx.log.error("availability_injuries_write_failed", game_date=str(game_date),
+                          error=f"{type(exc).__name__}: {exc}")
+            return 0
+
+    def _post_reactions(self, ctx: PipelineContext, game_date: date, held: Sequence[VerdictChange]) -> int:
+        """Post each change to the late-scratch swap and email the owners it swapped or suggested a
+        swap for; returns the swaps made. Never raises.
+
+        One at a time, in the order they changed: the backend plans each change on the board the
+        last swap left, so two changes on one team must not be planned against the same board."""
+        if not settings.post_availability_reactions:
+            ctx.increment_skipped(len(held), "reaction_not_posted")
+            return 0
+        applied = 0
+        for event in held:
+            reaction = self.backend_client.react_lineup(
+                player_id=event.player_id, game_date=game_date, verdict=event.verdict,
+                previous_verdict=event.previous_verdict, reason=event.reason, source=event.decided_by,
+                changed_at=event.changed_at, correlation_id=get_correlation_id(),
+            )
+            if not reaction.ok:
+                ctx.increment_skipped(1, "reaction_not_posted")
+                ctx.log.warning("availability_reaction_not_posted", player_id=event.player_id,
+                                verdict=event.verdict, reason=reaction.reason, error=reaction.error)
+                continue
+            for team in reaction.teams:
+                if team.outcome == "applied":
+                    applied += 1
+                if team.emails:
+                    self._email_reaction(ctx, event, team)
+        return applied
+
+    def _email_reaction(self, ctx: PipelineContext, event: VerdictChange, team: ReactTeam) -> None:
+        """Email one team's owner the swap made or suggested. Never raises: the swap has happened
+        (or not) whatever happens here."""
+        from pipelines.scheduled_pickups import _lookup_recipient
+        try:
+            found = _lookup_recipient(team.user_id, team.team_id)
+            if found is None:
+                ctx.log.warning("late_scratch_email_no_recipient", user_id=team.user_id, team_id=team.team_id)
+                ctx.increment_skipped(1, "email_no_recipient")
+                return
+            user, owned, prefs = found
+            sent = self.notification_service.send_late_scratch_result(
+                user, owned, reaction_email(event, team), prefs=prefs,
+            )
+        except Exception as exc:  # the recipient lookup's queries, or rendering the email
+            sent = NotificationResult(success=False, error=f"{type(exc).__name__}: {exc}")
+        if not sent.success:
+            ctx.log.warning("late_scratch_email_failed", team_id=team.team_id, player_id=event.player_id,
+                            error=sent.error)
+            ctx.increment_skipped(1, "email_failed")
 
     def _post_events(self, ctx: PipelineContext, game_date: date, held: Sequence[VerdictChange]) -> None:
         """Hand this tick's verdict changes to Dime's event check-ins (backend; plan step 6)."""

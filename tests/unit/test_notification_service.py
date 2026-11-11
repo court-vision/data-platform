@@ -13,6 +13,7 @@ import pytest
 
 from services.notification_service import (
     AUTO_LINEUP_DISCLAIMER,
+    SIGNATURE,
     NotificationResult,
     NotificationService,
 )
@@ -232,3 +233,91 @@ def test_a_missed_day_says_whether_the_lane_ended_with_it(service, ended, line):
     _, subject, body = service.sent[-1]
     assert subject == "Stream lane missed a day for Hoop Dreams"
     assert line in body and ("carries on" in body) is not ended
+
+
+# ---- late scratches ---------------------------------------------------------------
+
+
+SWAP = [
+    {"player_id": 3, "name": "Josh Hart", "from_slot": "BE", "to_slot": "UT", "role": "start", "note": "vs BOS · 7:30 PM"},
+    {"player_id": 2, "name": "Jalen Brunson", "from_slot": "UT", "to_slot": "BE", "role": "bench", "note": "OUT"},
+]
+
+
+def _scratch(**kw):
+    result = {"outcome": "applied", "level": "act", "reason": None, "player_name": "Jalen Brunson",
+              "verdict": "out", "injury": "Left Ankle; Sprain", "source": "espn_injuries",
+              "changed_at": "2026-11-10T21:30:00+00:00", "moves": SWAP, "verified": True}
+    result.update(kw)
+    return result
+
+
+@pytest.mark.unit
+def test_a_late_scratch_swap_made_says_why_and_what_moved(service):
+    service.send_late_scratch_result(USER, TEAM, _scratch())
+
+    _, subject, body = service.sent[0]
+    assert subject == "Jalen Brunson ruled out: Court Vision benched him for Hoop Dreams"
+    assert body == "\n".join([
+        "Team: Hoop Dreams",
+        "",
+        "Because Jalen Brunson was ruled out (Left Ankle; Sprain, per ESPN's injury list) at 4:30 PM ET:",
+        "",
+        "Applied to ESPN:",
+        "  1. Start Josh Hart at UT (vs BOS · 7:30 PM)",
+        "     Bench Jalen Brunson (OUT)",
+        "",
+        "Only this swap was made; the rest of your lineup is as you set it.",
+        "If Jalen Brunson is upgraded again before his game, this swap is not undone.",
+        "",
+        SIGNATURE,
+    ])
+
+
+@pytest.mark.unit
+def test_at_notify_the_swap_is_suggested_and_nothing_changed(service):
+    service.send_late_scratch_result(USER, TEAM, _scratch(outcome="planned", level="notify", reason="notify",
+                                                          verdict="doubtful", verified=None))
+
+    _, subject, body = service.sent[0]
+    assert subject == "Jalen Brunson ruled doubtful: a lineup swap for Hoop Dreams"
+    assert "Suggested swap:" in body and "Applied to ESPN:" not in body
+    assert "didn't make it" not in body
+    assert "Nothing was changed on ESPN. Make the swap in Court Vision's Week desk or on ESPN." in body
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("outcome,reason,line", [
+    ("planned", "writes_disabled", "Court Vision didn't make it: its lineup writes are switched off right now."),
+    ("planned", "can_write:espn_locked",
+     "Court Vision didn't make it: ESPN isn't taking lineup changes for this team right now."),
+    ("rejected", "ESPN says the roster is locked",
+     "Court Vision tried to make it, but ESPN didn't take it (ESPN says the roster is locked)."),
+])
+def test_at_act_a_swap_not_made_says_why(service, outcome, reason, line):
+    service.send_late_scratch_result(USER, TEAM, _scratch(outcome=outcome, reason=reason, verified=None))
+    _, subject, body = service.sent[0]
+    assert subject == "Jalen Brunson ruled out: a lineup swap for Hoop Dreams"
+    assert line in body and "Suggested swap:" in body
+
+
+@pytest.mark.unit
+def test_a_bench_player_cleared_to_play_and_an_unverified_write(service):
+    service.send_late_scratch_result(USER, TEAM, _scratch(verdict="available", injury=None, source="nba_boxscore",
+                                                          changed_at=None, verified=False))
+    _, subject, body = service.sent[0]
+    assert subject == "Jalen Brunson is available: Court Vision started him for Hoop Dreams"
+    assert "Because Jalen Brunson was upgraded to available (per the NBA box score):" in body
+    assert "upgraded again" not in body
+    assert body.splitlines()[4].startswith("Applied to ESPN:") and body.splitlines()[4] != "Applied to ESPN:"
+
+
+@pytest.mark.unit
+def test_a_write_that_may_have_gone_through_says_check_espn(service):
+    service.send_late_scratch_result(USER, TEAM, _scratch(outcome="failed", reason="write_uncertain", verified=None))
+    _, subject, body = service.sent[0]
+    assert subject == "Jalen Brunson ruled out: a lineup swap for Hoop Dreams"
+    assert "Tried on ESPN, not confirmed:" in body and "Suggested swap:" not in body
+    assert "Court Vision tried to make it but couldn't confirm whether ESPN took it: check your lineup on ESPN." in body
+    assert "Nothing was changed on ESPN" not in body
+    assert "If it isn't on ESPN, make it in Court Vision's Week desk or on ESPN." in body

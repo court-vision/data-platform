@@ -369,3 +369,106 @@ def test_slate_context_names_the_opponent():
     assert NIGHT.context("MIA").has_game is False
     box_only = NIGHT.context("MIA", game_id="0042600101")   # a playoff game nba.games does not have yet
     assert (box_only.has_game, box_only.game_id) == (True, "0042600101")
+
+
+# ---- posting reactions and emailing what they did ----------------------------------------------
+
+
+class _Ctx:
+    def __init__(self):
+        self.skips: Counter = Counter()
+        self.log = self
+
+    def increment_skipped(self, count=1, reason=None):
+        self.skips[reason] += count
+
+    def info(self, *a, **kw):
+        pass
+
+    warning = info
+
+
+def _reacting(monkeypatch, reactions, *, recipient=("user", "team", "prefs")):
+    """The pipeline with the backend's answers queued, the recipient lookup faked and emails captured."""
+    from pipelines import availability as module, scheduled_pickups
+    from services.backend_client import LineupReaction, ReactTeam
+    from services.notification_service import NotificationResult
+
+    pipeline = module.AvailabilityPipeline.__new__(module.AvailabilityPipeline)
+    posted, sent = [], []
+    queue = [r if isinstance(r, LineupReaction) else LineupReaction(ok=True, teams=[ReactTeam(**t) for t in r])
+             for r in reactions]
+
+    class Backend:
+        def react_lineup(self, **kw):
+            posted.append(kw)
+            return queue.pop(0)
+
+    class Mail:
+        def send_late_scratch_result(self, user, team, result, prefs=None):
+            sent.append((user, team, result, prefs))
+            return NotificationResult(success=True)
+
+    pipeline.backend_client, pipeline.notification_service = Backend(), Mail()
+    monkeypatch.setattr(scheduled_pickups, "_lookup_recipient", lambda user_id, team_id: recipient)
+    monkeypatch.setattr(module.settings, "post_availability_reactions", True)
+    return pipeline, posted, sent
+
+
+SWAP = [{"player_id": 3, "name": "Josh Hart", "from_slot": "BE", "to_slot": "UT", "role": "start"}]
+OUT = VerdictChange(1628973, "out", "questionable", "espn_injuries", "0022600102", True, reason="Left Ankle; Sprain",
+                    changed_at=datetime(2026, 10, 27, 21, 30, tzinfo=timezone.utc))
+
+
+def test_each_reaction_is_posted_once_and_each_swap_made_or_due_is_emailed(monkeypatch):
+    pipeline, posted, sent = _reacting(monkeypatch, [[
+        dict(team_id=22, user_id=7, outcome="applied", level="act", player_name="Jalen Brunson", moves=SWAP,
+             verified=True),
+        dict(team_id=23, user_id=7, outcome="planned", level="notify", reason="notify", moves=SWAP),
+        dict(team_id=24, user_id=8, outcome="skipped", reason="not_rostered"),
+        dict(team_id=25, user_id=9, outcome="noop", reason="no_better_bench_player"),
+    ]])
+    ctx = _Ctx()
+
+    assert pipeline._post_reactions(ctx, GAME_DAY, [OUT]) == 1
+
+    assert posted == [dict(player_id=1628973, game_date=GAME_DAY, verdict="out", previous_verdict="questionable",
+                           reason="Left Ankle; Sprain", source="espn_injuries", changed_at=OUT.changed_at,
+                           correlation_id=posted[0]["correlation_id"])]
+    assert [r["outcome"] for _, _, r, _ in sent] == ["applied", "planned"]
+    assert sent[0][2] == {"outcome": "applied", "level": "act", "reason": None, "player_name": "Jalen Brunson",
+                          "verdict": "out", "injury": "Left Ankle; Sprain", "source": "espn_injuries",
+                          "changed_at": "2026-10-27T21:30:00+00:00", "moves": SWAP, "verified": True}
+    assert ctx.skips == Counter()
+
+
+def test_a_backend_that_cant_be_reached_or_a_switch_off_posts_nothing_and_counts_it(monkeypatch):
+    from services.backend_client import LineupReaction
+    pipeline, posted, sent = _reacting(monkeypatch, [LineupReaction.unavailable("timeout")])
+    ctx = _Ctx()
+    assert pipeline._post_reactions(ctx, GAME_DAY, [OUT]) == 0
+    assert (sent, ctx.skips) == ([], Counter({"reaction_not_posted": 1}))
+
+    from pipelines import availability as module
+    monkeypatch.setattr(module.settings, "post_availability_reactions", False)
+    ctx = _Ctx()
+    assert pipeline._post_reactions(ctx, GAME_DAY, [OUT, OUT]) == 0
+    assert len(posted) == 1 and ctx.skips == Counter({"reaction_not_posted": 2})
+
+
+def test_an_owner_who_is_gone_or_an_email_that_fails_costs_only_that_email(monkeypatch):
+    team = dict(team_id=22, user_id=7, outcome="applied", level="act", moves=SWAP)
+    pipeline, _, sent = _reacting(monkeypatch, [[team]], recipient=None)
+    ctx = _Ctx()
+    assert pipeline._post_reactions(ctx, GAME_DAY, [OUT]) == 1
+    assert (sent, ctx.skips) == ([], Counter({"email_no_recipient": 1}))
+
+    pipeline, _, _ = _reacting(monkeypatch, [[team]])
+
+    def broken(*a, **kw):
+        raise RuntimeError("resend down")
+
+    pipeline.notification_service.send_late_scratch_result = broken
+    ctx = _Ctx()
+    assert pipeline._post_reactions(ctx, GAME_DAY, [OUT]) == 1
+    assert ctx.skips == Counter({"email_failed": 1})
