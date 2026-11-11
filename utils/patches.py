@@ -32,7 +32,7 @@ budget, whichever is longer. Each re-ask is logged (``stats_reask``), so a
 night of flaky answers that all came good is still visible.
 
 cdn.nba.com requests go over kept connections (``_kept_get``). The live-stats
-pipeline reads the scoreboard and every box score of the night each 30 s, and
+pipeline reads the scoreboard and every box score of the night each 15 s, and
 with a connection of its own every one of those requests opened a proxy tunnel
 and a TLS session first (0.3-0.9 s a file on 2026-11-09, handshakes included).
 nba_api's own ``send_api_request`` keeps one ``requests.Session``; this
