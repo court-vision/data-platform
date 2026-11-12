@@ -2,7 +2,7 @@
 Live Player Stats Table
 
 In-progress game statistics for NBA players, rewritten on every live-stats
-poll (30 seconds apart) during live games. This is a continuously-overwritten snapshot table,
+poll (15 seconds apart) during live games. This is a continuously-overwritten snapshot table,
 separate from the finalized player_game_stats fact table.
 
 One row per player per game, uniquely keyed on (player_id, game_id).
@@ -31,7 +31,7 @@ class LivePlayerStats(BaseModel):
     """
     In-progress game statistics for a player.
 
-    Updated on every live polling cycle (30 s). Stores current box score
+    Updated on every live polling cycle (15 s). Stores current box score
     stats for all active games. Records persist until the next game day.
 
     Attributes:

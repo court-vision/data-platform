@@ -14,7 +14,7 @@ class PipelineCategory(str, Enum):
     """Which trigger group a pipeline belongs to.
 
     PRE_GAME  — runs before today's games (POST /pipelines/pre-game)
-    LIVE      — runs every ~60s during active games (POST /pipelines/live-stats)
+    LIVE      — runs every 15 s during active games (POST /pipelines/live-stats)
     POST_GAME — runs after last night's games complete (POST /pipelines/post-game)
     SCHEDULED — runs on a fixed, hardcoded cron schedule (own Railway service)
     """

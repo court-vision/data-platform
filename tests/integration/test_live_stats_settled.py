@@ -1,7 +1,7 @@
 """
 When the live-stats pipeline stops re-reading a finished game.
 
-cron-runner polls live-stats every 30 s until 4 AM ET. Until 2026-10 every
+cron-runner polls live-stats every 15 s until 4 AM ET. Until 2026-10 every
 poll after the last final fetched every box score again and rewrote every row
 (about 138 rows a run, half of all DB execution time in prod). A game is now
 *settled*, and skipped, once a successful run has stored its box score at
@@ -334,22 +334,23 @@ def test_live_rows_open_is_any_row_of_the_date_not_yet_final(integration_db):
 
 
 # One night shaped like 2026-10-12 in prod, the night that measured these
-# queries: five games, a poll every 30 s from tip to 4 AM ET (1,376 runs and
-# 6,880 snapshots; prod had 6,884), and each game's ~28 rows final.
-POLLS = 1376
+# queries (five games, tip to 4 AM ET, each game's ~28 rows final), at the
+# cadence cron-runner polls on since 2026-11-11: every 15 s, so 2,752 runs and
+# 13,760 snapshots. Prod's night, polled every 30 s, had 6,884 snapshots.
+POLLS = 2752
 GAMES = [f"00225009{g:02d}" for g in range(1, 6)]
 NIGHT_STARTS = "2026-03-04 23:00"
 
 
 def _seed_a_full_night() -> None:
-    """Every game goes final at poll 400 + 100 * g; its rows' last writer reads it 32 polls on."""
+    """Every game goes final at poll 800 + 200 * g; its rows' last writer reads it 64 polls (16 minutes) on."""
     db.execute_sql(
         """
         INSERT INTO nba.pipeline_runs
             (id, pipeline_name, started_at, completed_at, status, records_processed)
         SELECT md5('run' || i)::uuid, 'live_game_stats',
-               %(starts)s::timestamp + i * interval '30 seconds',
-               %(starts)s::timestamp + i * interval '30 seconds' + interval '8 seconds',
+               %(starts)s::timestamp + i * interval '15 seconds',
+               %(starts)s::timestamp + i * interval '15 seconds' + interval '2 seconds',
                'success', 140
         FROM generate_series(1, %(polls)s) i
         """,
@@ -361,8 +362,8 @@ def _seed_a_full_night() -> None:
             (game_id, game_date, home_team, away_team, home_score, away_score,
              period, game_clock, game_status, captured_at, pipeline_run_id)
         SELECT '00225009' || lpad(g::text, 2, '0'), %(game_date)s, 'NYK', 'BOS', 101, 99,
-               4, NULL, CASE WHEN i > 400 + 100 * g THEN 3 ELSE 2 END,
-               %(starts)s::timestamp + i * interval '30 seconds',
+               4, NULL, CASE WHEN i > 800 + 200 * g THEN 3 ELSE 2 END,
+               %(starts)s::timestamp + i * interval '15 seconds',
                md5('run' || i)::uuid
         FROM generate_series(1, %(polls)s) i, generate_series(1, 5) g
         """,
@@ -373,7 +374,7 @@ def _seed_a_full_night() -> None:
         [{"id": pid, "name": f"Player {pid}", "name_normalized": f"player {pid}"} for _, pid in players]
     ).execute()
     writer = db.execute_sql(
-        "SELECT g, md5('run' || (432 + 100 * g))::uuid FROM generate_series(1, 5) g"
+        "SELECT g, md5('run' || (864 + 200 * g))::uuid FROM generate_series(1, 5) g"
     ).fetchall()
     writer = {g: run_id for g, run_id in writer}
     LivePlayerStats.insert_many(

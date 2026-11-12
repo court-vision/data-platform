@@ -311,7 +311,7 @@ class SchedulerRunsData(ApiModel):
     # few that failed or were retried.
     runs: list[CronJobRunEntry]
     # Past a day: every run in the window, counted per job and column. A week
-    # of 30-second polls is too many rows to carry, and is drawn as columns.
+    # of 15-second polls is too many rows to carry, and is drawn as columns.
     buckets: Optional[list[SchedulerBucket]] = None
     bucket_seconds: Optional[int] = None   # a column's width; set with `buckets`
     truncated: bool              # `runs` was cut at the cap: the oldest are missing
