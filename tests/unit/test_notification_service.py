@@ -193,6 +193,26 @@ def test_a_lane_pickup_that_did_not_go_through_and_a_users_own_pickup():
 
 
 @pytest.mark.unit
+def test_a_pickup_whose_drop_was_protected_says_so():
+    """The roster lock (backend services/roster_protection.py): protected after the pickup was scheduled."""
+    subject, body = NotificationService._build_pickup_email("Hoop Dreams", _pickup("executed", "drop_protected"))
+    assert subject == "Court Vision picked up Kawhi Leonard for Hoop Dreams"
+    assert "Added Kawhi Leonard on ESPN." in body and "dropped Anthony Edwards" not in body
+    assert "Anthony Edwards is protected, so this was an add only." in body
+    _, body = NotificationService._build_pickup_email("Hoop Dreams", _pickup("skipped", "drop_protected"))
+    assert "The pickup was not made: Anthony Edwards is protected and there was no open seat." in body
+
+
+@pytest.mark.unit
+def test_a_lane_switch_skipped_for_a_protected_player_says_the_lane_ended():
+    subject, body = NotificationService._build_pickup_email(
+        "Hoop Dreams", _pickup("skipped", "drop_protected", lane={"lane_id": 7, "notify": "email"}))
+    assert subject == "Stream lane skipped Kawhi Leonard for Hoop Dreams"
+    assert "The pickup was not made: Anthony Edwards is protected." in body
+    assert "You protected the spot's player, so the lane has ended." in body and "re-plans" not in body
+
+
+@pytest.mark.unit
 def test_lane_notices(service):
     holder = {"name": "Anthony Edwards"}
     result = service.send_stream_lane_notice(USER, TEAM, {"action": "paused", "reason": "holder_gone", "holder": holder})
