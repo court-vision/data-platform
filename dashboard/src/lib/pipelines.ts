@@ -47,7 +47,7 @@ export interface Category {
 
 /** Display order: what is time-critical tonight first. Mirrors PipelineCategory. */
 export const CATEGORIES: readonly Category[] = [
-  { key: "live", label: "Live", description: "Every ~60s during active game windows" },
+  { key: "live", label: "Live", description: "Every 15 s during active game windows" },
   { key: "pre_game", label: "Pre-game", description: "Timed against first tip-off" },
   { key: "post_game", label: "Post-game", description: "After the night's games and ESPN's flip" },
   { key: "scheduled", label: "Scheduled", description: "Fixed schedule, own cron job" },

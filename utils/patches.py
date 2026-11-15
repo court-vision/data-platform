@@ -22,8 +22,8 @@ if it stays bad, raised as a ``RetryableError`` (``ServerError`` for a 5xx,
 ``NetworkError`` otherwise) with the status code in the message — which is what
 the extractors' ``@with_retry`` retries. The re-asks sit below
 ``nba_api_circuit``, so the circuit counts a call that stayed bad, not each
-flaky response. 4xx is passed through untouched, and so is cdn.nba.com: the
-live extractor reads an empty box score body as "no data yet".
+flaky response. 4xx is passed through untouched, and so is any answer from
+cdn.nba.com: the live extractor reads an empty box score body as "no data yet".
 
 The re-asks share one budget (``STATS_BUDGET``, requests and pauses together)
 rather than a fresh timeout each, so answers that are slow as well as bad are
@@ -32,13 +32,22 @@ budget, whichever is longer. Each re-ask is logged (``stats_reask``), so a
 night of flaky answers that all came good is still visible.
 
 cdn.nba.com requests go over kept connections (``_kept_get``). The live-stats
-pipeline reads the scoreboard and every box score of the night each 30 s, and
+pipeline reads the scoreboard and every box score of the night each 15 s, and
 with a connection of its own every one of those requests opened a proxy tunnel
 and a TLS session first (0.3-0.9 s a file on 2026-11-09, handshakes included).
 nba_api's own ``send_api_request`` keeps one ``requests.Session``; this
 replacement had dropped it. Only the connection is kept: each request still
 goes out with the same headers and no cookies. ``NBA_CDN_KEEP_CONNECTIONS=false``
 goes back to a connection per request.
+
+A cdn.nba.com request that gets no answer is asked once more on a new
+connection (``_cdn_get``), within the caller's own timeout. The proxy's entry
+nodes go silent now and then. On the night of 2026-11-11 a kept tunnel through
+such a node held its request for the whole 30 s five times (five failed runs,
+each a minute without new stats), and a new connection whose first address did
+not answer waited 15 s, the half of the timeout libcurl gives an address,
+before it tried the next (the night's 15 s runs). So a connection gets a few
+seconds to be made and the first ask a few more to be answered, not thirty.
 
 This module must be imported early in application startup (see main.py) so the
 patch is applied before any nba_api call is made.
@@ -71,6 +80,25 @@ STATS_BUDGET = 20.0
 STATS_MIN_TIMEOUT = 1.0
 
 CDN_HOST = "cdn.nba.com"
+# Seconds a cdn.nba.com connection gets to be made (name lookup, the proxy's
+# tunnel and TLS; 0.3-0.9 s as a rule), and the seconds its first ask then gets
+# to be answered. A live file answers in well under a second: on 2026-11-11 a
+# whole night's box scores, read together, took 0.4 s at the median. libcurl
+# gives the first of several addresses half the connect time, so an entry node
+# that does not answer costs 2 s where it cost 15.
+CDN_CONNECT_TIMEOUT = 4.0
+CDN_ANSWER_TIMEOUT = 3.0
+# With less than this left of the caller's timeout, no second ask is made.
+CDN_MIN_TIMEOUT = 1.0
+# What a cdn.nba.com request is asked again for: it got no answer (a timeout, a
+# connection or a proxy tunnel that failed, a broken HTTP/2 stream, a body cut
+# short). An answer, whatever its status, is the caller's to read.
+CDN_REASK_ON = (
+    requests.exceptions.Timeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ProxyError,
+    requests.exceptions.HTTPError,
+)
 # Idle sessions kept per proxy. The live pipeline's box score readers
 # (settings.live_box_score_workers) and a scoreboard read fit with room to
 # spare; a session that comes back to a full shelf is closed.
@@ -97,17 +125,22 @@ def _close(session) -> None:
         pass
 
 
-def _kept_get(url: str, proxy_url: str | None, **kwargs):
+def _kept_get(url: str, proxy_url: str | None, fresh: bool = False, **kwargs):
     """GET `url` on a kept connection through `proxy_url`; the session goes back on the shelf when it answers.
 
-    A request that raises closes its session: whatever state the connection was
-    left in, the retry starts on a new one. libcurl itself drops a kept
-    connection the other end has closed, or one idle past its
-    CURLOPT_MAXAGE_CONN (118 s), and connects again within the same request.
+    A request that raises closes its session, whatever state the connection was
+    left in, and `fresh` asks on a new one, which is how the second ask is made
+    (`_cdn_get`): the next session on the shelf may go through the same silent
+    node. libcurl itself drops a kept connection the other end has closed, or
+    one idle past its CURLOPT_MAXAGE_CONN (118 s), and connects again within the
+    same request; what it cannot see is a connection whose other end has only
+    stopped answering.
     """
-    with _kept_lock:
-        idle = _kept.get(proxy_url)
-        session = idle.pop() if idle else None
+    session = None
+    if not fresh:
+        with _kept_lock:
+            idle = _kept.get(proxy_url)
+            session = idle.pop() if idle else None
     if session is None:
         session = _new_session()
     try:
@@ -127,6 +160,43 @@ def _kept_get(url: str, proxy_url: str | None, **kwargs):
     if session is not None:
         _close(session)
     return response
+
+
+def _cdn_timeout(total: float) -> tuple[float, float]:
+    """curl_cffi's (connect, read) pair for a request that may take `total` seconds in all (it adds the two up)."""
+    connect = min(CDN_CONNECT_TIMEOUT, total)
+    return (connect, total - connect)
+
+
+def _cdn_get(url: str, proxy_url: str | None, kept: bool, timeout: float, endpoint: str, **kwargs):
+    """GET a cdn.nba.com file within `timeout` seconds, asking once more on a new connection if the first ask gets no answer.
+
+    The first ask gets CDN_CONNECT_TIMEOUT + CDN_ANSWER_TIMEOUT seconds and the
+    second what is left of `timeout`, so the call takes no longer than it did
+    as one request. The second ask's failure is raised as it is.
+    """
+
+    def ask(seconds: float, fresh: bool):
+        if kept:
+            return _kept_get(url, proxy_url, fresh=fresh, timeout=_cdn_timeout(seconds), **kwargs)
+        return requests.get(url, timeout=_cdn_timeout(seconds), **kwargs)
+
+    started = time.monotonic()
+    try:
+        return ask(min(timeout, CDN_CONNECT_TIMEOUT + CDN_ANSWER_TIMEOUT), fresh=False)
+    except CDN_REASK_ON as e:
+        waited = time.monotonic() - started
+        left = timeout - waited
+        if left < CDN_MIN_TIMEOUT:
+            raise
+        get_logger("nba_api").warning(
+            "cdn_reask",
+            endpoint=endpoint,
+            waited=round(waited, 3),
+            error_type=type(e).__name__,
+            error=str(e),
+        )
+    return ask(left, fresh=True)
 
 
 def close_kept_sessions() -> None:
@@ -187,8 +257,8 @@ def browser_impersonation_request(
 
     host = urlsplit(base_url).netloc
     is_stats = host == STATS_HOST
+    is_cdn = host == CDN_HOST
     attempts = STATS_ATTEMPTS if is_stats else 1
-    kept = host == CDN_HOST and settings.nba_cdn_keep_connections
 
     request_timeout = timeout or 30
     started = time.monotonic()
@@ -198,15 +268,21 @@ def browser_impersonation_request(
         request = dict(
             params=clean_params,
             headers=request_headers,
-            timeout=request_timeout,
             impersonate=IMPERSONATE,
             proxies=proxies,
         )
         try:
-            if kept:
-                response = _kept_get(base_url, proxy_url, **request)
+            if is_cdn:
+                response = _cdn_get(
+                    base_url,
+                    proxy_url,
+                    kept=settings.nba_cdn_keep_connections,
+                    timeout=request_timeout,
+                    endpoint=endpoint,
+                    **request,
+                )
             else:
-                response = requests.get(base_url, **request)
+                response = requests.get(base_url, timeout=request_timeout, **request)
         except requests.exceptions.Timeout as e:
             if failure is None:
                 raise

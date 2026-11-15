@@ -7,7 +7,7 @@ export type RunBucket = Schemas["SchedulerBucket"]
 
 /**
  * Past a day the reply counts the window's runs per job and column instead of
- * carrying them all: a week of 30-second polls is fourteen thousand rows. The
+ * carrying them all: a week of 15-second polls is forty-five thousand rows. The
  * runs that do come are the ones a mark can open.
  */
 export interface Counted {

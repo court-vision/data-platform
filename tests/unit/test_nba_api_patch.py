@@ -13,8 +13,9 @@ The re-asks share one budget: answers that are slow as well as bad must not be
 multiplied by four under a trigger that runs inside its HTTP request.
 
 cdn.nba.com requests go over kept connections (`TestKeptConnections`): the
-live pipeline reads the same host every 30 s, and a connection per file was
-most of what a run took.
+live pipeline reads the same host every 15 s, and a connection per file was
+most of what a run took. One that gets no answer is asked once more on a new
+connection (`TestTheSecondAsk`): the proxy's entry nodes go silent now and then.
 """
 
 import json
@@ -59,6 +60,8 @@ def stats(monkeypatch):
             self.timeouts = []
             self.sleeps = []
             self.latency = 0.0  # seconds every answer takes
+            self.silent = 0  # the next requests that get no answer at all
+            self.broken = []  # errors the next requests raise, one each
             self.started = self.now = 1000.0
 
         @property
@@ -68,8 +71,13 @@ def stats(monkeypatch):
         def get(self, url, **kwargs):
             self.urls.append(url)
             self.timeouts.append(kwargs["timeout"])
-            if self.latency > kwargs["timeout"]:
-                self.now += kwargs["timeout"]
+            # curl_cffi adds a (connect, read) pair up into the request's whole time.
+            allowed = sum(kwargs["timeout"]) if isinstance(kwargs["timeout"], tuple) else kwargs["timeout"]
+            if self.broken:
+                raise self.broken.pop(0)
+            if self.silent or self.latency > allowed:
+                self.silent = max(0, self.silent - 1)
+                self.now += allowed
                 raise patches.requests.exceptions.Timeout("curl: (28) Operation timed out")
             self.now += self.latency
             # The last answer repeats, so "always 500" is one entry.
@@ -239,7 +247,7 @@ class TestKeptConnections:
         assert stats.sessions == [] and len(stats.urls) == 1
 
     def test_a_request_that_fails_does_not_put_its_session_back(self, stats):
-        """Whatever state the connection was left in, the retry starts on a new one."""
+        """Whatever state the connection was left in, the next request starts on a new one."""
         stats.answers = [(200, "{}")]
         stats.latency = 31.0
         with pytest.raises(patches.requests.exceptions.Timeout):
@@ -247,8 +255,9 @@ class TestKeptConnections:
         stats.latency = 0.0
         _live()
 
-        broken, fresh = stats.sessions
-        assert broken.closed and broken.gets == 1
+        first, second, fresh = stats.sessions
+        assert first.closed and first.gets == 1
+        assert second.closed and second.gets == 1
         assert fresh.gets == 1 and not fresh.closed
 
     def test_requests_at_the_same_time_each_have_their_own_session(self, stats):
@@ -381,10 +390,153 @@ class TestTheBudget:
             _send()
         assert len(stats.urls) == 1 and stats.sleeps == []
 
-    def test_the_cdn_request_keeps_its_own_timeout(self, stats):
-        stats.answers = [(200, "{}")]
+    def test_the_cdn_request_has_no_part_in_it(self, stats):
+        """A bad answer from cdn.nba.com is the caller's to read: one request, no pause."""
+        stats.answers = [(500, "")]
         NBALiveHTTP().send_api_request(endpoint="scoreboard/todaysScoreboard_00.json", parameters={}, timeout=10)
-        assert stats.timeouts == [10]
+        assert len(stats.urls) == 1 and stats.sleeps == []
+
+
+class TestTheSecondAsk:
+    """
+    A cdn.nba.com request that gets no answer is asked once more, on a new connection.
+
+    On the night of 2026-11-11 a kept tunnel through a proxy node that had gone
+    silent held its request for the whole 30 s, five times: five failed runs,
+    each a minute without new stats.
+    """
+
+    FIRST = (patches.CDN_CONNECT_TIMEOUT, patches.CDN_ANSWER_TIMEOUT)
+    FIRST_SECONDS = patches.CDN_CONNECT_TIMEOUT + patches.CDN_ANSWER_TIMEOUT
+
+    def test_the_first_ask_gets_seconds_not_the_callers_thirty(self, stats):
+        """And the connection its own few: libcurl gives a first address that is silent half of them."""
+        stats.answers = [(200, "{}")]
+        _live()
+        assert stats.timeouts == [self.FIRST]
+
+    def test_a_kept_connection_that_went_silent_is_asked_again_on_a_new_one(self, stats):
+        stats.answers = [(200, '{"game": {"gameId": "0022500001"}}')]
+        _live()
+        stats.silent = 1
+        data = _live()
+
+        assert data.get_dict() == {"game": {"gameId": "0022500001"}}
+        silent, fresh = stats.sessions
+        assert silent.closed and silent.gets == 2
+        assert fresh.gets == 1 and not fresh.closed
+        assert stats.elapsed == self.FIRST_SECONDS
+
+    def test_the_second_ask_gets_what_is_left_of_the_callers_timeout(self, stats):
+        """So the call takes no longer than it did as one request."""
+        stats.answers = [(200, "{}")]
+        stats.silent = 1
+        _live()
+        assert stats.timeouts == [self.FIRST, (patches.CDN_CONNECT_TIMEOUT, 30 - self.FIRST_SECONDS - patches.CDN_CONNECT_TIMEOUT)]
+
+        stats.timeouts.clear()
+        stats.silent = 1
+        _live(timeout=10)
+        assert [sum(pair) for pair in stats.timeouts] == [self.FIRST_SECONDS, 10 - self.FIRST_SECONDS]
+
+    def test_the_second_ask_leaves_the_shelf_alone(self, stats):
+        """The next kept session may go through the same silent node."""
+        stats.answers = [(200, "{}")]
+        below, top = patches._new_session(), patches._new_session()
+        patches._kept[None] = [below, top]
+        stats.silent = 1
+        _live()
+
+        fresh = stats.sessions[-1]
+        assert top.closed and top.gets == 1
+        assert below.gets == 0 and not below.closed
+        assert fresh.gets == 1 and patches._kept[None] == [below, fresh]
+
+    def test_two_asks_with_no_answer_fail_the_call_within_its_timeout(self, stats):
+        stats.answers = [(200, "{}")]
+        stats.latency = 31.0
+        with pytest.raises(patches.requests.exceptions.Timeout):
+            _live()
+        assert len(stats.urls) == 2 and stats.elapsed == 30
+        assert all(session.closed for session in stats.sessions)
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            patches.requests.exceptions.ConnectionError("curl: (7) Failed to connect"),
+            patches.requests.exceptions.ProxyError("curl: (56) CONNECT tunnel failed, response 417"),
+            patches.requests.exceptions.HTTPError("curl: (16) "),
+            patches.requests.exceptions.IncompleteRead("curl: (18) transfer closed with outstanding read data remaining"),
+        ],
+    )
+    def test_a_connection_that_failed_is_asked_again_too(self, stats, error):
+        """Every failure of the week before 2026-11-11 was one of these or a timeout."""
+        stats.answers = [(200, "{}")]
+        stats.broken = [error]
+        _live()
+        assert len(stats.urls) == 2
+
+    def test_an_answer_is_never_asked_again(self, stats):
+        """403 before the box score exists, an empty 200 between quarters: the extractor reads those itself."""
+        for answer in [(403, "<html>denied</html>"), (200, ""), (500, "")]:
+            stats.urls.clear()
+            stats.answers = [answer]
+            _live()
+            assert len(stats.urls) == 1
+
+    def test_an_error_that_is_not_the_wires_is_raised_at_once(self, stats):
+        stats.answers = [(200, "{}")]
+        stats.broken = [patches.requests.exceptions.InvalidURL("curl: (3) URL using bad/illegal format")]
+        with pytest.raises(patches.requests.exceptions.InvalidURL):
+            _live()
+        assert len(stats.urls) == 1
+
+    def test_no_second_ask_with_under_a_second_left(self, stats):
+        stats.answers = [(200, "{}")]
+        stats.silent = 1
+        with pytest.raises(patches.requests.exceptions.Timeout):
+            _live(timeout=self.FIRST_SECONDS + 0.5)
+        assert len(stats.urls) == 1
+
+    def test_a_shorter_timeout_from_the_caller_is_the_first_asks_whole_time(self, stats):
+        stats.answers = [(200, "{}")]
+        _live(timeout=2)
+        assert stats.timeouts == [(2, 0)]
+
+    def test_the_second_ask_is_logged_with_what_the_first_cost(self, stats):
+        stats.answers = [(200, "{}")]
+        stats.silent = 1
+        with capture_logs() as logs:
+            _live()
+            _live()
+        (entry,) = logs
+        assert entry["event"] == "cdn_reask" and entry["log_level"] == "warning"
+        assert entry["endpoint"] == "boxscore/boxscore_0022500001.json"
+        assert (entry["waited"], entry["error_type"]) == (self.FIRST_SECONDS, "Timeout")
+
+    def test_it_is_made_without_kept_connections_too(self, stats, monkeypatch):
+        """A new connection can meet a silent node as well; that was the 15 s run before connections were kept."""
+        from core.settings import settings
+
+        monkeypatch.setattr(settings, "nba_cdn_keep_connections", False)
+        stats.answers = [(200, "{}")]
+        stats.silent = 1
+        _live()
+        assert stats.sessions == [] and len(stats.urls) == 2
+
+    def test_stats_nba_com_is_asked_as_before(self, stats):
+        stats.answers = [(200, OK_BODY)]
+        _send()
+        assert stats.timeouts == [30]
+
+    def test_the_extractor_gets_its_box_score(self, stats, closed_circuit):
+        """Under the real method: the run that failed on 2026-11-11 reads its game, a few seconds late."""
+        stats.answers = [(200, '{"game": {"gameId": "0022600217"}}')]
+        stats.silent = 1
+        game = NBAApiExtractor().get_live_box_score("0022600217")
+        assert game == {"gameId": "0022600217"}
+        assert len(stats.urls) == 2 and stats.sleeps == []
+        assert closed_circuit.failure_count == 0
 
 
 class TestThroughTheExtractor:

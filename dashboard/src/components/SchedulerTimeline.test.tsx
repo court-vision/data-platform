@@ -83,7 +83,7 @@ describe("a group's popover", () => {
   const BODY = '{"status": "skipped", "message": "No games scheduled"}'
 
   test("opens onto its newest run as a lone dot would: duration, HTTP status and response body", () => {
-    // At 6h every 30-second poll shares a column, so no live-stats run is a dot of its own.
+    // At 6h every 15-second poll shares a column, so no live-stats run is a dot of its own.
     const polls = [0, 1, 2].map((m) =>
       run({ id: `m${m}`, triggered_at: `2026-09-24T17:0${m}:00`, duration_seconds: 0.2 + m / 10, response_snippet: m === 2 ? BODY : "older" }),
     )

@@ -62,7 +62,7 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "espn_injury_status": ESPNInjuryStatusPipeline,
     "breakout_detection": BreakoutDetectionPipeline,
     "lineup_alerts": LineupAlertsPipeline,
-    # LIVE — run every ~60s during active game windows
+    # LIVE — run every 15 s during active game windows
     "live_game_stats": LiveGameStatsPipeline,
     # SCHEDULED — hardcoded Railway cron; each has its own service trigger
     "player_profiles": PlayerProfilesPipeline,

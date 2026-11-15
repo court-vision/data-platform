@@ -1,7 +1,7 @@
 """
 Live Game Score Snapshots Table
 
-Periodic snapshots of NBA game scores, captured every 30 seconds during
+Periodic snapshots of NBA game scores, captured every 15 seconds during
 active game windows by the LiveGameStatsPipeline. Used to build score-over-time
 charts showing how leads changed throughout a game, and read by the backend as
 each game's current score, clock and status.
@@ -86,9 +86,10 @@ class LiveGameScoreSnapshot(BaseModel):
     """
     Score snapshot for an NBA game at a specific point in time.
 
-    One row per game per 30-second pipeline poll. Records accumulate throughout
-    a game night (about 300 in play per game, plus the pre-tip polls, which are
-    deleted when the next game day starts; the rest are kept).
+    One row per game per 15-second pipeline poll (30-second until 2026-11-11).
+    Records accumulate throughout a game night: about 600 in play per game (300
+    on the nights before that), plus the pre-tip polls, which are deleted when
+    the next game day starts; the rest are kept.
 
     Attributes:
         id: Auto-incrementing primary key

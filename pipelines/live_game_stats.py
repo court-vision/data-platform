@@ -4,7 +4,7 @@ Live Game Stats Pipeline
 Reads the NBA's live scoreboard and the live box score of each game still in
 play, and writes the players' current lines to nba.live_player_stats and one
 score snapshot a game to nba.live_game_score_snapshots. cron-runner triggers it
-every 30 seconds through the game window.
+every 15 seconds through the game window (every 30 until 2026-11-11).
 
 A game's clock, period, status and score are its box score's, read in the same
 run. They used to be the scoreboard's, and that one file moves about once in
@@ -67,7 +67,8 @@ from pipelines.transformers.minutes import seconds_played
 # (EXPLAIN ANALYZE, TIMING OFF) on the same data, returning the same rows. Its
 # cost grows with the night's snapshots, linearly now, so a 15-game slate stays
 # far under the threshold; tests/integration/test_live_stats_settled.py holds
-# it there.
+# it there. (Polled every 15 s, as since 2026-11-11, a night has twice the
+# snapshots: that test's five-game night costs 1,673, and 847 polled every 30.)
 #
 # `seen` is every game the scoreboard has listed for the date on a run (each
 # run records a snapshot of each game it does not skip), so "every game of the

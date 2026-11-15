@@ -395,12 +395,16 @@ def _build_runs(name: str, limit: int) -> PipelineRunsData:
 
 # The scheduler timeline: the status payload carries the last 6 hours; a longer
 # look comes from /scheduler. Up to a day that is every run, capped. Past a day
-# the runs are counted instead: cron-runner reports about 2,000 a day (live-stats
-# fires every 30 seconds, 16 hours a day, all year), so a week is some 14,000
-# rows and megabytes of JSON, while the timeline draws one mark per column.
+# the runs are counted instead: cron-runner reports about 6,500 a day (live-stats
+# fires every 15 seconds, 16 hours a day, all year: 3,840 of them; then
+# scheduled-pickups every minute, availability every two and news every five),
+# so a week is some 45,000 rows and megabytes of JSON, while the timeline draws
+# one mark per column.
 SCHEDULER_DEFAULT_HOURS = 6
 SCHEDULER_MAX_HOURS = 7 * 24
-SCHEDULER_MAX_RUNS = 5000
+# Over a day's runs, so the 24-hour look is whole: at 5,000 it was cut once
+# live-stats went from every 30 seconds to every 15.
+SCHEDULER_MAX_RUNS = 8000
 SCHEDULER_ROWS_MAX_HOURS = 24
 # Both mirror the timeline: SLOTS in dashboard/src/lib/timeline.ts, and LISTED
 # in SchedulerTimeline.tsx (the failed or retried runs one mark's popover lists).
@@ -614,7 +618,7 @@ def _build_cron_runs(
     2026-09-06 move to deploy-on-merge.)
 
     `limit` caps the rows; `snippets=False` leaves each run's response body
-    out, which is most of a row's weight over a day of 30-second polls.
+    out, which is most of a row's weight over a day of 15-second polls.
 
     A failed query is an empty list here, so one broken section does not cost
     the status payload its others. `_query_cron_runs` is the same read that
@@ -704,7 +708,7 @@ def _build_scheduler_counts(hours: int, now: Optional[datetime] = None) -> Sched
     """
     The scheduler window past a day: every run counted per job and column, and
     as rows only the runs a mark can open. A week at cron-runner's cadence is
-    a few hundred counts and rows, not fourteen thousand.
+    a few hundred counts and rows, not forty-five thousand.
 
     A column is the window cut in SCHEDULER_COLUMNS, measured from the epoch
     rather than from the window's start, so a column holds the same runs from
