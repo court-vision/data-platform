@@ -278,7 +278,8 @@ class NotificationService:
 
         if outcome == "executed":
             subject = f"Court Vision picked up {add} for {team_name}"
-            made = f"Added {add}" + (f", dropped {drop}" if drop and reason not in ("drop_missing", "drop_locked") else "")
+            made = f"Added {add}" + (f", dropped {drop}" if drop and reason not in ("drop_missing", "drop_locked",
+                                                                                 "drop_protected") else "")
             made += " on ESPN."
             if result.get("verified") is False:
                 made += UNVERIFIED_SUFFIX
@@ -292,6 +293,9 @@ class NotificationService:
                 lines.append(f"{drop} was no longer on your roster, so this was an add only.")
             elif reason == "drop_locked" and drop:
                 lines.append(f"{drop} was locked for the day, so this was an add only.")
+            elif reason == "drop_protected" and drop:
+                # The roster lock (backend services/roster_protection.py): protected after scheduling
+                lines.append(f"{drop} is protected, so this was an add only.")
         elif outcome == "skipped":
             subject = f"Pickup skipped: {add} for {team_name}"
             why = {
@@ -299,6 +303,9 @@ class NotificationService:
                 "already_on_roster": f"{add} is already on your roster.",
                 "drop_missing": f"{drop} is no longer on your roster and there was no open seat.",
                 "drop_locked": f"{drop} was locked for the day and there was no open seat.",
+                # A lane's switch is skipped whatever the seats (its add alone would leave the spot to no one)
+                "drop_protected": (f"{drop} is protected." if result.get("lane")
+                                   else f"{drop} is protected and there was no open seat."),
                 "roster_full": "your roster is full.",
                 "acquisition_limit": "you had used every add your league allows for it.",
             }.get(reason, (reason or "nothing to do") + ".")
@@ -333,18 +340,20 @@ class NotificationService:
                 "skipped": f"Stream lane skipped {add} for {team_name}",
                 "expired": f"Stream lane missed {add} for {team_name}",
             }.get(outcome, f"Stream lane pickup failed: {add} for {team_name}")
-            lines.extend(NotificationService._lane_pickup_lines(lane, outcome, add, drop))
+            lines.extend(NotificationService._lane_pickup_lines(lane, outcome, add, drop, reason=reason))
 
         lines.append("")
         lines.append(SIGNATURE)
         return subject, "\n".join(lines)
 
     @staticmethod
-    def _lane_pickup_lines(lane: dict, outcome, add: str, drop) -> list[str]:
+    def _lane_pickup_lines(lane: dict, outcome, add: str, drop, *, reason: str = "") -> list[str]:
         """What a stream lane's pickup adds: that the lane made it (and ends with it, on the matchup's
         last day), and how it compares with the projection shown before it (which can change as the
-        market does)."""
+        market does). A switch skipped because the spot's player is protected ends the lane."""
         ends = "for the matchup's last day: the lane ends with the matchup." if lane.get("last_day") else None
+        if outcome != "executed" and reason == "drop_protected":
+            return ["", "This was your stream lane's pickup. You protected the spot's player, so the lane has ended."]
         if outcome != "executed":
             return ["", f"This was your stream lane's pickup {ends}" if ends
                     else "This was your stream lane's pickup. The lane carries on and re-plans before the next day."]
