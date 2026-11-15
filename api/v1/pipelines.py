@@ -43,6 +43,7 @@ from pipelines import (
 )
 from pipelines.availability import Due as AvailabilityDue, due_now as availability_due_now
 from pipelines.config import PipelineCategory
+from pipelines.daily_rankings import stored_on as daily_rankings_stored_on, today_et as daily_rankings_today
 from pipelines.game_logs import GAME_HISTORY_FIRST_YEAR, SEASON_TYPE_PARAMS
 from pipelines.gates import (
     GateDecision,
@@ -64,6 +65,7 @@ from schemas.pipeline import (
 )
 from schemas.common import ApiStatus
 from services.alert_service import AlertEvent, get_alert_service
+from services.schedule_service import get_season_phase
 
 # The gate routes here (pre-game, post-game, live-stats) are `async def`, so
 # they run on the private process's one event loop, which they share with
@@ -2201,3 +2203,48 @@ async def trigger_cv_projection(
     """
     result = await run_pipeline("cv_projection", date_override=date, options={"force": True} if force else None)
     return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+@router.post("/daily-rankings", response_model=PipelineResponse)
+async def trigger_daily_rankings(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(
+        False,
+        description="Rebuild today's boards even when they are stored (the dashboard's Run button).",
+    ),
+) -> PipelineResponse:
+    """
+    Trigger the daily-rankings pipeline: Court Vision's two standard boards
+    (points and 9-cat, from the backend) and ESPN's ranks that morning, into
+    nba.daily_rankings.
+
+    Called hourly through the morning by the 'daily-rankings' cron job. Gates
+    on the calendar and on the day (no run row): outside the regular season
+    there is nothing to store, and once today's boards and ESPN's ranks are
+    both in, the later ticks have nothing to do. A tick before last night's box
+    scores have landed fails as waiting and the next one tries again.
+    `force` skips both gates and replaces today's rows.
+    """
+    if not force:
+        reason = await _daily_rankings_idle()
+        if reason:
+            return PipelineResponse(status=ApiStatus.SKIPPED, message=reason)
+    result = await run_pipeline("daily_rankings", options={"force": True} if force else None)
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+def _daily_rankings_idle_reason(today: date) -> Optional[str]:
+    try:
+        phase = get_season_phase(today)
+    except (FileNotFoundError, ValueError):
+        phase = "regular"   # no calendar on this box: the backend's answer decides
+    if phase != "regular":
+        return "Outside the regular season: no rankings to store"
+    if daily_rankings_stored_on(today).complete:
+        return "Today's rankings are already stored"
+    return None
+
+
+async def _daily_rankings_idle() -> Optional[str]:
+    """Why a daily-rankings tick has nothing to do, or None when it should run."""
+    return await run_in_db_thread(_daily_rankings_idle_reason, daily_rankings_today())

@@ -55,6 +55,7 @@ MIRRORED = [
     "db/models/move_outcomes.py",       # backend writes, dp names it (move_ledger's target, freshness)
     "db/models/nba/availability.py",   # dp writes (availability pipeline), backend reads
     "db/models/nba/breakout_candidates.py",
+    "db/models/nba/daily_rankings.py",  # dp writes (daily_rankings pipeline), backend reads
     "db/models/nba/draft_market.py",
     "db/models/nba/news.py",           # dp writes (news pipeline), backend reads
     "db/models/nba/player_advanced_stats.py",

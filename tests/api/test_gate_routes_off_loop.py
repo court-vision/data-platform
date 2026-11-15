@@ -1,7 +1,7 @@
 """
 The cron gate routes keep their blocking work off the event loop.
 
-pre-game, post-game, live-stats and availability are `async def`, so they run
+pre-game, post-game, live-stats, availability and daily-rankings are `async def`, so they run
 on the private process's one event loop, next to /health, the scheduled-pickups
 tick and cron-run ingestion. Until 2026-10 live-stats called the NBA scoreboard (a sync
 retry that sleeps 2-30 s between attempts) and Peewee inline, and the post-game
@@ -327,3 +327,26 @@ def test_availability_reads_the_slate_off_the_loop(client, blocking, monkeypatch
     assert body["status"] == "success"
     assert runs == [{"sources": ["espn_injuries", "espn_fantasy"], "boxscore_games": []}]
     _assert_off_the_loop(blocking, {"Slate.load"})
+
+
+@pytest.mark.api
+def test_daily_rankings_reads_the_day_off_the_loop(client, blocking, monkeypatch):
+    """The hourly tick asks whether today's boards are stored, on a worker thread."""
+    from pipelines.daily_rankings import Stored
+
+    blocking.fake(pipelines_api, "daily_rankings_stored_on", Stored(cv=0, espn=0))
+    runs: list[str] = []
+
+    async def fake_run_pipeline(name, date_override=None, options=None, nba_date=None):
+        runs.append(name)
+        return PipelineResult(status=ApiStatus.SUCCESS, message=name, started_at="2026-11-16T11:00:00")
+
+    monkeypatch.setattr(pipelines_api, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(pipelines_api, "get_season_phase", lambda today: "regular")
+
+    # 06:00 ET on a morning with nothing stored.
+    with freeze_time("2026-11-16T11:00:00Z"):
+        body = _post(client, "daily-rankings")
+
+    assert body["status"] == "success" and runs == ["daily_rankings"]
+    _assert_off_the_loop(blocking, {"api.v1.pipelines.daily_rankings_stored_on"})

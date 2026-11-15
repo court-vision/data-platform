@@ -593,6 +593,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/daily-rankings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Daily Rankings
+         * @description Trigger the daily-rankings pipeline: Court Vision's two standard boards
+         *     (points and 9-cat, from the backend) and ESPN's ranks that morning, into
+         *     nba.daily_rankings.
+         *
+         *     Called hourly through the morning by the 'daily-rankings' cron job. Gates
+         *     on the calendar and on the day (no run row): outside the regular season
+         *     there is nothing to store, and once today's boards and ESPN's ranks are
+         *     both in, the later ticks have nothing to do. A tick before last night's box
+         *     scores have landed fails as waiting and the next one tries again.
+         *     `force` skips both gates and replaces today's rows.
+         */
+        post: operations["trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/deploy": {
         parameters: {
             query?: never;
@@ -3883,6 +3912,38 @@ export interface operations {
             query?: {
                 /** @description Override game date (YYYY-MM-DD). Omit for automatic date. */
                 date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post: {
+        parameters: {
+            query?: {
+                /** @description Rebuild today's boards even when they are stored (the dashboard's Run button). */
+                force?: boolean;
             };
             header?: never;
             path?: never;

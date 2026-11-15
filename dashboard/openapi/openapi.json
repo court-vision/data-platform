@@ -5778,6 +5778,57 @@
         ]
       }
     },
+    "/v1/internal/pipelines/daily-rankings": {
+      "post": {
+        "description": "Trigger the daily-rankings pipeline: Court Vision's two standard boards\n(points and 9-cat, from the backend) and ESPN's ranks that morning, into\nnba.daily_rankings.\n\nCalled hourly through the morning by the 'daily-rankings' cron job. Gates\non the calendar and on the day (no run row): outside the regular season\nthere is nothing to store, and once today's boards and ESPN's ranks are\nboth in, the later ticks have nothing to do. A tick before last night's box\nscores have landed fails as waiting and the next one tries again.\n`force` skips both gates and replaces today's rows.",
+        "operationId": "trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post",
+        "parameters": [
+          {
+            "description": "Rebuild today's boards even when they are stored (the dashboard's Run button).",
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Rebuild today's boards even when they are stored (the dashboard's Run button).",
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Daily Rankings",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/deploy": {
       "post": {
         "description": "Trigger nightly production deploys via GitHub repository_dispatch.\n\nSends a `nightly-deploy` event to both the backend and data-platform GitHub repos,\nwhich fires their deploy workflows (railway up + smoke tests). Called by cron-runner\ndaily at 2AM CST and available for manual dashboard triggers.\n\nWhen source=manual the endpoint self-records to cron_job_runs so the result\nappears in the scheduler timeline and deployments section immediately. Cron-runner\ntriggered runs are recorded by the cron-runner reporter instead.\n\nAny dispatch failing answers **502** `{status: \"error\", data: outcomes}` (so the\ncron-runner records a failure and its streak alert can fire) and posts a\n`deploy_dispatch_failed` alert to the ops webhook.\n\nRequires:\n    GITHUB_DEPLOY_TOKEN  \u2014 GitHub PAT with repo + workflow scopes\n    BACKEND_GITHUB_REPO  \u2014 e.g. \"username/backend\"\n    DATA_PLATFORM_GITHUB_REPO \u2014 e.g. \"username/data-platform\"",
