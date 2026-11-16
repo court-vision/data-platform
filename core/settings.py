@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     #   production: http://backend.railway.internal:8080  (service `api`, private domain `backend`)
     #   staging:    http://api-staging.railway.internal:8080
     backend_internal_url: Optional[str] = None
+    # The live rankings' analyst (pipelines/analyst.py): at most this many reads a
+    # morning, the strongest reasons first. Each is one model call on the backend,
+    # which holds the switch (ANALYST_ENABLED, with AI_ENABLED) and the month's budget;
+    # 0 here asks for none and still builds the shadow projection and boards.
+    analyst_max_reads: int = 30
     # Read timeout per evaluate call: > backend roster read + 30 s writer call + re-read.
     backend_timeout_seconds: float = 45.0
     # The scheduled-pickups tick (POST /v1/internal/jobs/pickups/execute): up to

@@ -335,6 +335,8 @@ def test_daily_rankings_reads_the_day_off_the_loop(client, blocking, monkeypatch
     from pipelines.daily_rankings import Stored
 
     blocking.fake(pipelines_api, "daily_rankings_stored_on", Stored(cv=0, espn=0))
+    # Whether the analyst is due is three reads of the database
+    blocking.fake(pipelines_api, "analyst_due_reason", "the analyst has run this morning")
     runs: list[str] = []
 
     async def fake_run_pipeline(name, date_override=None, options=None, nba_date=None):
@@ -349,4 +351,5 @@ def test_daily_rankings_reads_the_day_off_the_loop(client, blocking, monkeypatch
         body = _post(client, "daily-rankings")
 
     assert body["status"] == "success" and runs == ["live_projection", "daily_rankings"]
-    _assert_off_the_loop(blocking, {"api.v1.pipelines.daily_rankings_stored_on"})
+    _assert_off_the_loop(blocking, {"api.v1.pipelines.daily_rankings_stored_on",
+                                    "api.v1.pipelines.analyst_due_reason"})

@@ -580,6 +580,131 @@
         "title": "AllPipelinesResponse",
         "type": "object"
       },
+      "AnalystDigest": {
+        "description": "A morning of the analyst in shadow.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The morning shown; None before its first run",
+            "title": "As Of"
+          },
+          "cost_usd": {
+            "default": 0.0,
+            "description": "What the morning's reads cost",
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Reads by outcome",
+            "title": "Counts",
+            "type": "object"
+          },
+          "days": {
+            "description": "The mornings with reads, newest first",
+            "items": {
+              "format": "date",
+              "type": "string"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "in_shadow": {
+            "default": true,
+            "description": "Its notes reach only the second projection and boards",
+            "title": "In Shadow",
+            "type": "boolean"
+          },
+          "moved": {
+            "description": "The widest moves between the two points boards that morning",
+            "items": {
+              "$ref": "#/components/schemas/DigestMove"
+            },
+            "title": "Moved",
+            "type": "array"
+          },
+          "notes_live": {
+            "default": 0,
+            "description": "Notes of the analyst's standing today",
+            "title": "Notes Live",
+            "type": "integer"
+          },
+          "reads": {
+            "items": {
+              "$ref": "#/components/schemas/DigestRead"
+            },
+            "title": "Reads",
+            "type": "array"
+          },
+          "season": {
+            "title": "Season",
+            "type": "string"
+          },
+          "shadow_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The morning of the newest shadow boards",
+            "title": "Shadow As Of"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/DigestSpend"
+          }
+        },
+        "required": [
+          "season",
+          "as_of",
+          "days",
+          "in_shadow",
+          "reads",
+          "counts",
+          "cost_usd",
+          "notes_live",
+          "shadow_as_of",
+          "moved",
+          "spend"
+        ],
+        "title": "AnalystDigest",
+        "type": "object"
+      },
+      "AnalystDigestResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AnalystDigest"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "AnalystDigestResponse",
+        "type": "object"
+      },
       "ApiStatus": {
         "description": "Standard API response statuses",
         "enum": [
@@ -1530,6 +1655,337 @@
           "data"
         ],
         "title": "DataQualityRunResponse",
+        "type": "object"
+      },
+      "DigestMove": {
+        "description": "A player whose place on the points board the analyst's notes moved, his own note or a teammate's.",
+        "properties": {
+          "live": {
+            "$ref": "#/components/schemas/DigestSide"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "shadow": {
+            "$ref": "#/components/schemas/DigestSide"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          }
+        },
+        "required": [
+          "player_id",
+          "name",
+          "team",
+          "live",
+          "shadow"
+        ],
+        "title": "DigestMove",
+        "type": "object"
+      },
+      "DigestRead": {
+        "description": "One read: why he was picked, what it came to, and what it would have moved.",
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "cost_usd": {
+            "default": 0.0,
+            "title": "Cost Usd",
+            "type": "number"
+          },
+          "disagrees": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What it says against the note written by hand, which is the one applied",
+            "title": "Disagrees"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "live": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DigestSide"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The projection and boards everybody sees"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentEntry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The note it left, as stored"
+          },
+          "note_live": {
+            "default": false,
+            "description": "Whether that note is still the analyst's live one",
+            "title": "Note Live",
+            "type": "boolean"
+          },
+          "outcome": {
+            "description": "note | unchanged | none | retired | refused | declined | failed",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "owner_note": {
+            "default": false,
+            "description": "Whether a note written by hand stands for him",
+            "title": "Owner Note",
+            "type": "boolean"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "read_at": {
+            "format": "date-time",
+            "title": "Read At",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/DigestReason"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "shadow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DigestSide"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same with the analyst's notes applied"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          }
+        },
+        "required": [
+          "id",
+          "player_id",
+          "name",
+          "team",
+          "as_of",
+          "read_at",
+          "reasons",
+          "outcome",
+          "summary",
+          "disagrees",
+          "note",
+          "note_live",
+          "owner_note",
+          "live",
+          "shadow",
+          "cost_usd"
+        ],
+        "title": "DigestRead",
+        "type": "object"
+      },
+      "DigestReason": {
+        "properties": {
+          "rule": {
+            "description": "note_due | status_changed | new_item | teammate_change | minutes_gap | rank_gap",
+            "title": "Rule",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rule",
+          "text"
+        ],
+        "title": "DigestReason",
+        "type": "object"
+      },
+      "DigestSide": {
+        "description": "One player on one of the two projections, and where its boards rank him.",
+        "properties": {
+          "categories_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On the standard nine-category board",
+            "title": "Categories Rank"
+          },
+          "games": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Games he is expected to play from here",
+            "title": "Games"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A game, when he plays",
+            "title": "Minutes"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Points a game, when he plays",
+            "title": "Points"
+          },
+          "points_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On the standard points board",
+            "title": "Points Rank"
+          }
+        },
+        "required": [
+          "games",
+          "minutes",
+          "points",
+          "points_rank",
+          "categories_rank"
+        ],
+        "title": "DigestSide",
+        "type": "object"
+      },
+      "DigestSpend": {
+        "description": "The analyst's month, from the backend's ledger. None of it when the backend cannot be asked.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "month_cap_usd": {
+            "default": 0.0,
+            "title": "Month Cap Usd",
+            "type": "number"
+          },
+          "month_spent_usd": {
+            "default": 0.0,
+            "title": "Month Spent Usd",
+            "type": "number"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          }
+        },
+        "required": [
+          "available",
+          "enabled",
+          "month_spent_usd",
+          "month_cap_usd",
+          "model",
+          "prompt_version"
+        ],
+        "title": "DigestSpend",
         "type": "object"
       },
       "EvidenceItem": {
@@ -5733,6 +6189,64 @@
         ]
       }
     },
+    "/v1/dashboard/projections/analyst": {
+      "get": {
+        "description": "The analyst's morning: every read with why the screen picked the player,\nwhat the read came to, the note it left with the stored items it rests on,\nand what it says against a note written by hand. Beside each, the player\non the live projection and boards and on the second ones, which have the\nanalyst's notes applied and which nothing else reads. `moved` is the\nwidest moves between the two points boards that morning, and `spend` the\nmonth's bill for reads from the backend's ledger.\n\nIn shadow this is the only place the analyst's work shows. To act on a\nread, save a note of your own from it: a note written by hand is the one\napplied wherever a player has both.",
+        "operationId": "get_analyst_digest_v1_dashboard_projections_analyst_get",
+        "parameters": [
+          {
+            "description": "The morning to show. Omit for the newest with reads.",
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The morning to show. Omit for the newest with reads.",
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalystDigestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Analyst Digest",
+        "tags": [
+          "projections"
+        ]
+      }
+    },
     "/v1/dashboard/projections/note/preview": {
       "post": {
         "description": "One player's live projection this morning as it stands, and as it would be\nunder the season note in the body (or with none at all): the line in a\ngame he plays, the games he is expected to play from here, and the\nstretches of the calendar the two are averaged over. Nothing is written.\n\nIt prices the line, not a rank: the board's rank is worked out by the\nbackend on its next read, under its own league.",
@@ -6497,6 +7011,57 @@
           }
         ],
         "summary": "Trigger All Pipelines Sync",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
+    "/v1/internal/pipelines/analyst": {
+      "post": {
+        "description": "Trigger the analyst's morning run, in shadow (the Live rankings plan, step 4).\n\nA fixed screen picks the players whose stored news might say something a\nbox score cannot; each gets one read from the backend's analyst, whose\nproposal is checked here (it must cite a stored item and stay inside its\nbounds) before it becomes a note in nba.projection_adjustments' `analyst`\nscope. Every read is logged in nba.analyst_reads. Then the morning's\nprojection is built again with those notes applied (`cv_live_shadow`) and\nthe backend's two boards on it are stored under the source `cv_shadow`.\nNothing a user sees reads any of it.\n\nIt has no cron job of its own: the daily-rankings trigger starts it once\nthe day's projection and boards are stored, and again on each later tick\nuntil a run has succeeded. This route is the same run on demand, and a run\non demand is never a second bill: a player whose facts are the ones his\nlast completed read saw is not read again. The run takes minutes, so the\nroute answers at once unless `wait` is set; the reads show in the\nprojections editor's digest as they finish.",
+        "operationId": "trigger_analyst_v1_internal_pipelines_analyst_post",
+        "parameters": [
+          {
+            "description": "Answer with the run's result instead of starting it in the background (it takes minutes).",
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Answer with the run's result instead of starting it in the background (it takes minutes).",
+              "title": "Wait",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Analyst",
         "tags": [
           "pipelines"
         ]

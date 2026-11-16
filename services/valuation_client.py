@@ -11,7 +11,7 @@ platform owns the projection and keeps no second copy of the engine. The editor
 sends the whole pool — a rank is a place among the players sent — and gets back
 each player's rank in standard points and standard 9-cat.
 
-    POST {BACKEND_INTERNAL_URL}/v1/internal/jobs/rankings/daily      (no body)
+    POST {BACKEND_INTERNAL_URL}/v1/internal/jobs/rankings/daily      (no body; ?shadow=true for the analyst's)
 
 `daily_boards` asks for the two standard boards as the Draft lab shows them
 right now: every valued player's rank, value and games on each, with the day
@@ -244,8 +244,13 @@ class ValuationClient:
         return valuation
 
 
-    def daily_boards(self, correlation_id: Optional[str] = None) -> DailyBoards:
-        """Today's two standard boards, as the Draft lab shows them right now."""
+    def daily_boards(self, correlation_id: Optional[str] = None, shadow: bool = False) -> DailyBoards:
+        """Today's two standard boards, as the Draft lab shows them right now.
+
+        `shadow` asks for the same boards built on the projection that has the
+        analyst's notes applied (`cv_live_shadow`): nobody is shown those, and
+        `pipelines.analyst` stores them beside the day's own.
+        """
         if not self.enabled:
             return DailyBoards.unavailable("backend_not_configured")
 
@@ -259,6 +264,7 @@ class ValuationClient:
         try:
             response = requests.post(
                 f"{self._base_url}{DAILY_RANKINGS_PATH}",
+                params={"shadow": "true"} if shadow else None,
                 headers=headers,
                 timeout=(CONNECT_TIMEOUT_SECONDS, DAILY_READ_TIMEOUT_SECONDS),
             )
@@ -281,6 +287,7 @@ class ValuationClient:
         log = self._log.info if boards.available else self._log.warning
         log(
             "backend_daily_boards",
+            shadow=shadow,
             available=boards.available,
             reason=boards.reason,
             players=len(boards.players),
