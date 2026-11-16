@@ -36,6 +36,7 @@ from services.live_projection_model import (
     outlooks,
     play_chances,
     play_lean,
+    prior_totals,
     project,
     rates_of,
     role_of,
@@ -254,6 +255,17 @@ class TestGames:
         assert play_lean(replace(state, prior=None), coeffs) == 1.0
         # Bounded both ways
         assert play_lean(replace(state, prior=_prior(games=0.0), minutes=[]), _coeffs(lean_prior_share=5.0)) == 0.25
+
+    def test_a_projection_with_no_games_leans_neither_way_on_them(self):
+        """ESPN's projection can carry no games: unknown, not zero, so only
+        this season's attendance leans him."""
+        coeffs = _coeffs(lean_prior_share=0.5, lean_attendance=0.2)
+        state = PlayerState(player_id=1, team="AAA", minutes=[30.0] * 10, team_played=10, prior=_prior(games=None))
+        # 0.8 + 0.5 x 0 + 0.2 x (1.0 - 0.85), against the bucket's 0.8
+        assert play_lean(state, coeffs) == pytest.approx(0.83 / 0.8)
+        assert play_lean(replace(state, prior=_prior(games=0.0)), coeffs) < play_lean(state, coeffs)
+        # Its shooting is counted over a full season, not over one game
+        assert prior_totals(_prior(games=None))["fga"] == pytest.approx(prior_totals(_prior(games=82.0))["fga"])
 
 
 class TestRole:

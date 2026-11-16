@@ -32,6 +32,7 @@ import {
   summaryTiles,
   teammatesOf,
   visibleRows,
+  withOutForSeason,
   type AdjustmentEntry,
   type AdjustmentForm,
   type NoteForm,
@@ -442,6 +443,27 @@ describe("the season note", () => {
     // the range and the reason do not move the price
     expect(noteKey(parseNote({ ...filled, review_date: "2026-11-20" }))).not.toBe(noteKey(parsed))
     expect(noteKey(parseNote({ ...filled, return_latest: "2026-12-20", note: "other", confidence: "likely" }))).toBe(noteKey(parsed))
+  })
+
+  test("a note that cites news waits for his news before it can be saved", () => {
+    const filled = form({ return_date: "2026-12-08", note: "knee" })
+    const parsed = parseNote(filled)
+    // Until it loads, what is cited cannot be checked, and the save would send none of it
+    expect(noteSaveBlocker({ ...filled, evidence: [8] }, parsed, noteKey(parsed), true)).toBe(
+      "Wait for his news to load: the note cites it",
+    )
+    expect(noteSaveBlocker({ ...filled, evidence: [8] }, parsed, noteKey(parsed), false)).toBeNull()
+    // Citing nothing, there is nothing to lose
+    expect(noteSaveBlocker(filled, parsed, noteKey(parsed), true)).toBeNull()
+  })
+
+  test("writing the season off clears the return dates it cannot have", () => {
+    const back = form({ return_date: "2026-12-08", return_earliest: "2026-12-01", return_latest: "2026-12-20", note: "knee" })
+    const gone = withOutForSeason(back, true)
+    expect(gone).toMatchObject({ out_for_season: true, return_date: "", return_earliest: "", return_latest: "", note: "knee" })
+    // So the form a note with a return date opens on can become a season written off and be saved
+    expect(parseNote(gone)).toEqual({ change: { out_for_season: true }, review_date: null, errors: {} })
+    expect(withOutForSeason(gone, false)).toMatchObject({ out_for_season: false, return_date: "" })
   })
 
   test("his minutes can wait on anyone else on his team", () => {

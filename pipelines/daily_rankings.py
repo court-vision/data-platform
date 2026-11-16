@@ -312,15 +312,23 @@ class DailyRankingsPipeline(BasePipeline):
                                 season_stats_unsettled(season_stats))
             if reason and not force:
                 raise DataNotReady(reason)
-            with db.atomic():
-                written = sum(
-                    DailyRanking.replace_day(day, boards.season, SOURCE_CV, board, cv_rows(boards, board), ctx.run_id)
-                    for board in BOARDS
-                )
-            ctx.increment_records(written)
-            ctx.log.info("daily_rankings_cv_stored", as_of=str(day), players=len(boards.players), rows=written,
-                         model=boards.model, season_as_of=str(boards.season_as_of) if boards.season_as_of else None,
-                         live_as_of=str(boards.live_as_of) if boards.live_as_of else None)
+            if not boards.players:
+                # An in-season board always ranks someone: an empty one would
+                # replace a stored day with nothing, so the day is kept, the
+                # run fails and the next tick asks again.
+                ctx.increment_failed(1, "backend:empty_board")
+                failures.append("the backend's in-season boards ranked no players")
+            else:
+                with db.atomic():
+                    written = sum(
+                        DailyRanking.replace_day(day, boards.season, SOURCE_CV, board, cv_rows(boards, board), ctx.run_id)
+                        for board in BOARDS
+                    )
+                ctx.increment_records(written)
+                ctx.log.info("daily_rankings_cv_stored", as_of=str(day), players=len(boards.players), rows=written,
+                             model=boards.model,
+                             season_as_of=str(boards.season_as_of) if boards.season_as_of else None,
+                             live_as_of=str(boards.live_as_of) if boards.live_as_of else None)
 
         if held.espn and not force:
             ctx.log.info("daily_rankings_espn_kept", as_of=str(day), rows=held.espn)

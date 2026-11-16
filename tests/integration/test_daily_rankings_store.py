@@ -207,6 +207,23 @@ def test_a_stored_day_is_left_alone_and_a_forced_run_rebuilds_it():
     assert _ranks(SOURCE_ESPN, BOARD_CATEGORIES) == {}
 
 
+def test_an_empty_board_fails_the_run_and_a_forced_one_keeps_the_stored_day():
+    _run()
+    stored = {r.id for r in DailyRanking.select().where(DailyRanking.source == SOURCE_CV)}
+
+    forced = _run(_boards(order=()), force=True)
+
+    assert forced.status == ApiStatus.ERROR and "ranked no players" in (forced.error or "")
+    assert {r.id for r in DailyRanking.select().where(DailyRanking.source == SOURCE_CV)} == stored
+
+
+def test_an_empty_board_on_a_fresh_day_stores_espns_ranks_and_fails_for_the_next_tick():
+    result = _run(_boards(order=()))
+
+    assert result.status == ApiStatus.ERROR and "ranked no players" in (result.error or "")
+    assert stored_on(TODAY).cv == 0 and stored_on(TODAY).espn > 0
+
+
 def test_a_forced_run_does_not_wait():
     assert _run(_boards(season_as_of=date(2026, 11, 14)), force=True).status == ApiStatus.SUCCESS
     assert stored_on(TODAY).complete

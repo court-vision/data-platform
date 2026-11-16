@@ -16,6 +16,7 @@ import {
   parseNote,
   standingLabel,
   statDiffers,
+  withOutForSeason,
   type AdjustmentKind,
   type EvidenceItem,
   type NoteForm,
@@ -66,7 +67,7 @@ export function NoteEditor({ row, kinds, season }: { row: ProjectionRow; kinds: 
   const key = noteKey(parsed)
   const valid = Object.keys(parsed.errors).length === 0 && noteStatesSomething(parsed.change)
   const fresh = previewed?.key === key ? previewed.data : null
-  const blocker = noteSaveBlocker(form, parsed, previewed?.key ?? null)
+  const blocker = noteSaveBlocker(form, parsed, previewed?.key ?? null, news.isPending)
   const busy = save.isPending || retire.isPending
   const standing = standingLabel(row.note?.standing)
 
@@ -153,7 +154,7 @@ export function NoteEditor({ row, kinds, season }: { row: ProjectionRow; kinds: 
         </Field>
       </div>
       <label className={p.check}>
-        <input type="checkbox" checked={form.out_for_season} onChange={(event) => set("out_for_season", event.target.checked)} />
+        <input type="checkbox" checked={form.out_for_season} onChange={(event) => setForm((current) => withOutForSeason(current, event.target.checked))} />
         Out for the season
       </label>
 

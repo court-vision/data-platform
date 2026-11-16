@@ -109,6 +109,14 @@ def usable(lines: dict[int, list[BoxLine]]) -> list[int]:
     return out
 
 
+def _share(samples: dict) -> None:
+    """A worker's start: the samples, handed over whole. A forked worker would
+    inherit them, but a spawned one (macOS and Windows; forkserver, Python
+    3.14's default on Linux) starts with an empty `_BY_SEASON`."""
+    _BY_SEASON.clear()
+    _BY_SEASON.update(samples)
+
+
 def _fold(season: int) -> dict:
     return fitting.hold_out(_BY_SEASON, season)
 
@@ -145,7 +153,7 @@ def main() -> int:
 
     backtest = None
     if not args.no_backtest:
-        with Pool(max(1, args.jobs)) as pool:        # forked: the workers read _BY_SEASON as it stands
+        with Pool(max(1, args.jobs), initializer=_share, initargs=(_BY_SEASON,)) as pool:
             folds = pool.map(_fold, seasons)
         backtest = {
             "method": "each season scored by a fit on the others; the blend is the preseason projection and "
