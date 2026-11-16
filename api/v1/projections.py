@@ -245,14 +245,29 @@ async def preview_note(req: NotePreviewRequest) -> NotePreviewResponse:
     return NotePreviewResponse(status="success", message="Preview computed; nothing was saved", data=preview)
 
 
+# A note's rebuild that meets another projection run waits for it, this often and this long
+REBUILD_ATTEMPTS = 4
+REBUILD_RETRY_SECONDS = 5.0
+
+
 async def _rebuild_live(player_id: int) -> NoteSaved:
     """Rebuild the day's live projection after a write, so the board reads the
     note at once. A rebuild that did not happen (before the day turns, before
     last night's box scores are in with no snapshot stored yet, out of season,
     or a failure) does not undo the write: the morning's run reads the note
     anyway. Not `force`: a forced run skips the wait for last night's box
-    scores, and the snapshot it stored would be the one the morning keeps."""
-    result = await run_pipeline("live_projection", options={"rebuild": True})
+    scores, and the snapshot it stored would be the one the morning keeps.
+
+    A rebuild that finds another projection run going (the morning's, or
+    another save) is skipped, and that run may have read the notes before this
+    write and stored a snapshot the morning would then keep. It is tried again
+    once that run is done, a few times."""
+    for attempt in range(REBUILD_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(REBUILD_RETRY_SECONDS)
+        result = await run_pipeline("live_projection", options={"rebuild": True})
+        if result.status not in (ApiStatus.SKIPPED, ApiStatus.SKIPPED.value):
+            break
     ok = result.status in (ApiStatus.SUCCESS, ApiStatus.SUCCESS.value)
     rebuilt = ok and bool(result.records_processed)
     if not rebuilt:

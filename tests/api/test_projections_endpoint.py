@@ -430,6 +430,30 @@ def test_a_rebuild_that_stored_nothing_keeps_the_note_and_says_so(season, monkey
     assert res.status_code == 200 and res.json()["data"]["rebuilt"] is False
 
 
+def test_a_rebuild_that_meets_another_projection_run_is_tried_again_once_it_is_done(season, monkeypatch):
+    # The other run may have read the notes before this save: its snapshot would be the morning's
+    answers = ["skipped", "success"]
+    runs = []
+
+    async def contended(name, **kwargs):
+        runs.append((name, kwargs))
+        status = answers.pop(0) if answers else "skipped"
+        return PipelineResult(status=status, message=status, started_at="2026-11-16T12:00:00",
+                              records_processed=7 if status == "success" else 0)
+
+    monkeypatch.setattr(projections, "run_pipeline", contended)
+    monkeypatch.setattr(projections, "REBUILD_RETRY_SECONDS", 0)
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
+    assert res.status_code == 200 and res.json()["data"]["rebuilt"] is True
+    assert runs == [("live_projection", {"options": {"rebuild": True}})] * 2
+
+    # Still held after every try: the note is kept, and the answer says it was not rebuilt
+    runs.clear()
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
+    assert res.status_code == 200 and res.json()["data"]["rebuilt"] is False
+    assert len(runs) == projections.REBUILD_ATTEMPTS
+
+
 @pytest.mark.parametrize("pid, extra, status, says", [
     (999, {}, 404, "No player 999"),
     (2, {"depends_on_player_id": 2}, 422, "cannot depend on the player it is about"),
