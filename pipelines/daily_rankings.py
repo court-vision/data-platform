@@ -133,27 +133,31 @@ def last_game_day(before: date, season: str) -> Optional[date]:
     )
 
 
-def season_stats_unsettled() -> Optional[str]:
-    """Why the season lines may be half-written, or None when they are whole.
+def batch_unsettled(pipeline: str, label: str) -> Optional[str]:
+    """Why what `pipeline` writes may be half-written, or None when it is whole.
 
-    The season-stats batch writes one player at a time with no transaction
-    around the night, so the newest date appears on the first player it writes.
-    The lines are whole when no run of it is going and the last one to finish
-    succeeded (a retry after a run that stopped midway writes the players that
-    run did not reach).
+    The post-game batches write one row at a time with no transaction around
+    the night, so the newest date appears with the first row. What they write
+    is whole when no run is going and the last one to finish succeeded (a retry
+    after a run that stopped midway writes the rows that run did not reach).
     """
-    if PipelineRun.is_running(SEASON_STATS_PIPELINE):
-        return "the season-stats batch is still writing"
+    if PipelineRun.is_running(pipeline):
+        return f"the {label} batch is still writing"
     last = (
         PipelineRun.select(PipelineRun.status)
-        .where((PipelineRun.pipeline_name == SEASON_STATS_PIPELINE) & (PipelineRun.status != "running"))
+        .where((PipelineRun.pipeline_name == pipeline) & (PipelineRun.status != "running"))
         .order_by(PipelineRun.started_at.desc())
         .limit(1)
         .scalar()
     )
     if last == "failed":
-        return "the last season-stats batch failed, so the season lines may be half-written"
+        return f"the last {label} batch failed, so what it writes may be half-written"
     return None
+
+
+def season_stats_unsettled() -> Optional[str]:
+    """Why the season lines the boards read may be half-written, or None."""
+    return batch_unsettled(SEASON_STATS_PIPELINE, "season-stats")
 
 
 def waiting_on(

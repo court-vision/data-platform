@@ -348,5 +348,5 @@ def test_daily_rankings_reads_the_day_off_the_loop(client, blocking, monkeypatch
     with freeze_time("2026-11-16T11:00:00Z"):
         body = _post(client, "daily-rankings")
 
-    assert body["status"] == "success" and runs == ["daily_rankings"]
+    assert body["status"] == "success" and runs == ["live_projection", "daily_rankings"]
     _assert_off_the_loop(blocking, {"api.v1.pipelines.daily_rankings_stored_on"})

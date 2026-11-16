@@ -38,6 +38,7 @@ from pipelines.availability import AvailabilityPipeline
 from pipelines.dime_checkins import DimeCheckinsPipeline
 from pipelines.news_feed import NewsFeedPipeline
 from pipelines.daily_rankings import DailyRankingsPipeline
+from pipelines.live_projection import LiveProjectionPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -85,6 +86,9 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "dime_checkins": DimeCheckinsPipeline,
     # Player news from ESPN, Rotowire and RealGM (every 5 minutes; no gate).
     "news_feed": NewsFeedPipeline,
+    # Every player's line for each game left, repriced each morning of the season:
+    # the first link of the daily-rankings trigger, so the day's boards are built on it.
+    "live_projection": LiveProjectionPipeline,
     # Court Vision's two standard boards and ESPN's ranks, stored each morning of the
     # season (hourly through the morning; its route gates on the day being stored).
     "daily_rankings": DailyRankingsPipeline,
@@ -214,6 +218,7 @@ __all__ = [
     "PreseasonMarketPipeline",
     "SeasonHistoryPipeline",
     "CVProjectionPipeline",
+    "LiveProjectionPipeline",
     "DailyRankingsPipeline",
     # Registry
     "PIPELINE_REGISTRY",

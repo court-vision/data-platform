@@ -155,7 +155,7 @@ def test_the_overview_rows_tell_the_run_button_to_force_only_the_gated_ticks() -
             model._meta.schema = schema
 
     assert [row.name for row in rows if row.force_on_run] == [
-        "scheduled_pickups", "availability", "dime_checkins", "daily_rankings",
+        "scheduled_pickups", "availability", "dime_checkins", "live_projection", "daily_rankings",
     ]
 
 

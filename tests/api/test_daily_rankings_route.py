@@ -1,8 +1,9 @@
 """POST /pipelines/daily-rankings gates on the season and on the day being stored, and
-runs the pipeline only when there is a board to store."""
+runs the morning's chain (the live projection, then the boards built on it) only
+when there is a board to store."""
 
 import os
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -27,16 +28,30 @@ def _auth() -> dict:
     return {"Authorization": f"Bearer {os.environ.get('PIPELINE_API_TOKEN', 'test-token')}"}
 
 
+RECORDS = {"live_projection": 520, "daily_rankings": 1860}
+CHAIN = [("live_projection", None), ("daily_rankings", None)]
+
+
 @pytest.fixture
-def run_calls(monkeypatch):
+def results():
+    """What each pipeline of the chain answers; a test swaps one for a failure."""
+    return {
+        name: PipelineResult(status=ApiStatus.SUCCESS, message=f"{name} completed successfully",
+                             started_at="2026-11-16T05:00:00", records_processed=records)
+        for name, records in RECORDS.items()
+    }
+
+
+@pytest.fixture
+def run_calls(monkeypatch, results):
     calls = []
 
     async def fake_run_pipeline(name, date_override=None, options=None, nba_date=None):
         calls.append((name, options))
-        return PipelineResult(status=ApiStatus.SUCCESS, message="daily_rankings completed successfully",
-                              started_at="2026-11-16T05:00:00", records_processed=1860)
+        return results[name]
 
     monkeypatch.setattr(pipelines_api, "run_pipeline", fake_run_pipeline)
+    monkeypatch.setattr(pipelines_api, "daily_rankings_now", lambda: datetime(2026, 11, 16, 6, 0))
     return calls
 
 
@@ -75,8 +90,9 @@ def test_needs_the_pipeline_token(run_calls, gate):
 def test_a_morning_with_nothing_stored_runs_the_pipeline(run_calls, gate):
     res = _client().post(PATH, headers=_auth())
     assert res.status_code == 200 and res.json()["status"] == "success"
+    # The projection first, so the boards are built on it; the answer is the boards'
     assert res.json()["data"]["records_processed"] == 1860
-    assert run_calls == [("daily_rankings", None)]
+    assert run_calls == CHAIN
     assert gate["asked"] == [TODAY]
 
 
@@ -93,7 +109,38 @@ def test_a_stored_day_is_skipped_without_a_run(run_calls, gate):
 def test_a_day_missing_espns_ranks_runs_again(run_calls, gate):
     gate["stored"] = Stored(cv=1040, espn=0)
     assert _client().post(PATH, headers=_auth()).json()["status"] == "success"
-    assert run_calls == [("daily_rankings", None)]
+    assert run_calls == CHAIN
+
+
+def _waiting(results):
+    results["live_projection"] = PipelineResult(
+        status=ApiStatus.ERROR, message="2 of the games of 2026-11-15 have no box score yet",
+        started_at="2026-11-16T05:00:00", error="DataNotReady")
+
+
+@pytest.mark.api
+def test_early_in_the_morning_the_boards_wait_for_the_projection(run_calls, gate, results):
+    _waiting(results)
+    res = _client().post(PATH, headers=_auth())
+    assert res.status_code == 200 and res.json()["status"] == "error"
+    assert "no box score yet" in res.json()["message"]
+    assert run_calls == [("live_projection", None)]
+
+
+@pytest.mark.api
+def test_late_in_the_morning_the_boards_are_stored_on_what_there_is(run_calls, gate, results, monkeypatch):
+    _waiting(results)
+    monkeypatch.setattr(pipelines_api, "daily_rankings_now", lambda: datetime(2026, 11, 16, 10, 0))
+    res = _client().post(PATH, headers=_auth())
+    assert res.json()["status"] == "success" and res.json()["data"]["records_processed"] == 1860
+    assert run_calls == CHAIN
+
+
+@pytest.mark.api
+def test_a_forced_run_builds_the_boards_whatever_the_projection_did(run_calls, gate, results):
+    _waiting(results)
+    assert _client().post(f"{PATH}?force=true", headers=_auth()).json()["status"] == "success"
+    assert run_calls == [("live_projection", {"force": True}), ("daily_rankings", {"force": True})]
 
 
 @pytest.mark.api
@@ -110,7 +157,7 @@ def test_outside_the_regular_season_is_skipped_without_a_query(run_calls, gate, 
 def test_no_calendar_leaves_the_season_to_the_backend(run_calls, gate):
     gate["phase"] = FileNotFoundError("no calendar")
     assert _client().post(PATH, headers=_auth()).json()["status"] == "success"
-    assert run_calls == [("daily_rankings", None)]
+    assert run_calls == CHAIN
 
 
 @pytest.mark.api
@@ -118,5 +165,17 @@ def test_force_skips_both_gates_and_tells_the_pipeline(run_calls, gate):
     gate["phase"] = "offseason"
     gate["stored"] = Stored(cv=1040, espn=820)
     res = _client().post(f"{PATH}?force=true", headers=_auth())
-    assert res.status_code == 200 and run_calls == [("daily_rankings", {"force": True})]
+    assert res.status_code == 200
+    assert run_calls == [("live_projection", {"force": True}), ("daily_rankings", {"force": True})]
+    assert gate["asked"] == []
+
+
+@pytest.mark.api
+def test_the_projection_has_its_own_route_for_a_run_on_demand(run_calls, gate):
+    path = "/v1/internal/pipelines/live-projection"
+    assert _client().post(path).status_code in (401, 403)
+    res = _client().post(path, headers=_auth())
+    assert res.status_code == 200 and res.json()["data"]["records_processed"] == 520
+    assert _client().post(f"{path}?force=true", headers=_auth()).status_code == 200
+    assert run_calls == [("live_projection", None), ("live_projection", {"force": True})]
     assert gate["asked"] == []

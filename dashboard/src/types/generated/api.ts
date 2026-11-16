@@ -604,8 +604,10 @@ export interface paths {
         put?: never;
         /**
          * Trigger Daily Rankings
-         * @description Trigger the daily-rankings pipeline: Court Vision's two standard boards
-         *     (points and 9-cat, from the backend) and ESPN's ranks that morning, into
+         * @description Trigger the morning's rankings: the live-projection pipeline (every
+         *     player's line for each game left), then the daily-rankings pipeline: Court
+         *     Vision's two standard boards (points and 9-cat, from the backend, which
+         *     reads that projection) and ESPN's ranks that morning, into
          *     nba.daily_rankings.
          *
          *     Called hourly through the morning by the 'daily-rankings' cron job. Gates
@@ -613,12 +615,19 @@ export interface paths {
          *     there is nothing to store, and once today's boards and ESPN's ranks are
          *     both in, the later ticks have nothing to do. A tick before last night's box
          *     scores have landed, or while the batch that writes them is not done, fails
-         *     as waiting and the next one tries again. `force` skips both gates and that
-         *     wait, and replaces today's rows.
+         *     as waiting and the next one tries again.
          *
+         *     The boards wait for the projection through the early morning: a tick whose
+         *     projection was not built (it is waiting, or it failed) stores no boards,
+         *     and answers with the projection's result. From 10 AM ET they are stored on
+         *     what there is: the backend reads the newest projection it has and, with
+         *     none in the last days, the blend it used before, and the board's `model`
+         *     says which.
+         *
+         *     `force` skips both gates and those waits, and replaces today's rows.
          *     Between midnight and 3 AM ET the backend's day is still yesterday, and a
-         *     run then, forced or not, stores nothing: yesterday morning's boards are
-         *     never replaced by ones that have seen last night's games.
+         *     run then, forced or not, stores nothing: yesterday morning's projection
+         *     and boards are never replaced by ones that have seen last night's games.
          */
         post: operations["trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post"];
         delete?: never;
@@ -879,6 +888,34 @@ export interface paths {
          *     and any difference is logged as `lineup_snapshot_drift`.
          */
         post: operations["trigger_lineup_snapshots_v1_internal_pipelines_lineup_snapshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/internal/pipelines/live-projection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Live Projection
+         * @description Trigger the live-projection pipeline: every player's line for each game his
+         *     team has left, as of this morning, into nba.player_projections under source
+         *     `cv_live`.
+         *
+         *     It has no cron job of its own: the daily-rankings trigger runs it first
+         *     every morning of the season, so the day's boards are built on it. This
+         *     route is the same run on demand. The day's projection is kept once stored
+         *     and the run waits for last night's box scores; `force` skips both and
+         *     replaces today's rows.
+         */
+        post: operations["trigger_live_projection_v1_internal_pipelines_live_projection_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3947,7 +3984,7 @@ export interface operations {
     trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post: {
         parameters: {
             query?: {
-                /** @description Rebuild today's boards even when they are stored (the dashboard's Run button). */
+                /** @description Rebuild today's projection and boards even when they are stored (the dashboard's Run button). */
                 force?: boolean;
             };
             header?: never;
@@ -4266,6 +4303,38 @@ export interface operations {
             query?: {
                 /** @description Capture exactly this NBA date's ESPN day for every league, replacing what is stored (YYYY-MM-DD). Omit for the nightly catch-up. */
                 date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_live_projection_v1_internal_pipelines_live_projection_post: {
+        parameters: {
+            query?: {
+                /** @description Rebuild today's projection even when it is stored (the dashboard's Run button). */
+                force?: boolean;
             };
             header?: never;
             path?: never;
