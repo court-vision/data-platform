@@ -9,9 +9,12 @@ the regular season this stores, in nba.daily_rankings:
 
 - **Court Vision's two standard boards** (`source='cv'`, boards `points` and
   `categories`), exactly as the Draft lab shows them to a room with no league.
-  The backend owns the valuation and the in-season blend, so they are one call
+  The backend owns the valuation, so they are one call
   (`ValuationClient.daily_boards`, POST /v1/internal/jobs/rankings/daily) and
-  this platform keeps no second copy of either.
+  this platform keeps no second copy of it. Since step 2 the boards are built
+  on the morning's live projection, which this platform writes just before
+  (`pipelines/live_projection.py`, the first link of the same trigger); each
+  row's `model` says so, or names the blend the backend falls back to.
 - **ESPN's two ranks that morning** (`source='espn'`): draftRanksByRankType
   STANDARD on the points board, ROTO on the categories one, from the same
   public-league read the preseason market snapshot uses. ESPN keeps updating
@@ -278,7 +281,8 @@ class DailyRankingsPipeline(BasePipeline):
                 )
             ctx.increment_records(written)
             ctx.log.info("daily_rankings_cv_stored", as_of=str(day), players=len(boards.players), rows=written,
-                         model=boards.model, season_as_of=str(boards.season_as_of) if boards.season_as_of else None)
+                         model=boards.model, season_as_of=str(boards.season_as_of) if boards.season_as_of else None,
+                         live_as_of=str(boards.live_as_of) if boards.live_as_of else None)
 
         if held.espn and not force:
             ctx.log.info("daily_rankings_espn_kept", as_of=str(day), rows=held.espn)

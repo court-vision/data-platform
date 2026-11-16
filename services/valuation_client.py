@@ -139,6 +139,9 @@ class DailyBoards:
     in_season: bool = False
     model: Optional[str] = None
     season_as_of: Optional[date] = None     # the newest box score the lines read
+    # The morning of the live projection the boards were built on (the first
+    # link of the same trigger writes it); None when they are the blend's
+    live_as_of: Optional[date] = None
     players: tuple[DailyRank, ...] = ()
 
     @classmethod
@@ -167,6 +170,7 @@ class DailyBoards:
                 in_season=bool(data["in_season"]),
                 model=str(data["model"]),
                 season_as_of=date.fromisoformat(data["season_as_of"]) if data.get("season_as_of") else None,
+                live_as_of=date.fromisoformat(data["live_as_of"]) if data.get("live_as_of") else None,
                 players=players,
             )
         except (KeyError, TypeError, ValueError):

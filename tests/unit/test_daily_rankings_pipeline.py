@@ -75,6 +75,24 @@ def test_a_200_envelope_becomes_the_days_boards():
 
 
 @responses.activate
+def test_boards_built_on_the_live_projection_say_which_morning():
+    live = _envelope(model="three-part-1", live_as_of="2026-11-16",
+                     players=[_player(1, 1, 2, line_source="live")])
+    responses.add(responses.POST, URL, json=live, status=200)
+
+    boards = ValuationClient(BASE, TOKEN).daily_boards()
+
+    assert (boards.model, boards.live_as_of) == ("three-part-1", date(2026, 11, 16))
+    assert boards.players[0].line_source == "live"
+
+
+@responses.activate
+def test_boards_on_the_blend_carry_no_live_date():
+    responses.add(responses.POST, URL, json=_envelope(), status=200)
+    assert ValuationClient(BASE, TOKEN).daily_boards().live_as_of is None
+
+
+@responses.activate
 def test_out_of_season_boards_parse_with_no_box_score_date():
     out = _envelope(in_season=False, season_as_of=None, model="projection-1",
                     players=[_player(1, 1, 1, season_gp=None)])
