@@ -5780,7 +5780,7 @@
     },
     "/v1/internal/pipelines/daily-rankings": {
       "post": {
-        "description": "Trigger the daily-rankings pipeline: Court Vision's two standard boards\n(points and 9-cat, from the backend) and ESPN's ranks that morning, into\nnba.daily_rankings.\n\nCalled hourly through the morning by the 'daily-rankings' cron job. Gates\non the calendar and on the day (no run row): outside the regular season\nthere is nothing to store, and once today's boards and ESPN's ranks are\nboth in, the later ticks have nothing to do. A tick before last night's box\nscores have landed fails as waiting and the next one tries again.\n`force` skips both gates and replaces today's rows.",
+        "description": "Trigger the daily-rankings pipeline: Court Vision's two standard boards\n(points and 9-cat, from the backend) and ESPN's ranks that morning, into\nnba.daily_rankings.\n\nCalled hourly through the morning by the 'daily-rankings' cron job. Gates\non the calendar and on the day (no run row): outside the regular season\nthere is nothing to store, and once today's boards and ESPN's ranks are\nboth in, the later ticks have nothing to do. A tick before last night's box\nscores have landed, or while the batch that writes them is not done, fails\nas waiting and the next one tries again. `force` skips both gates and that\nwait, and replaces today's rows.\n\nBetween midnight and 3 AM ET the backend's day is still yesterday, and a\nrun then, forced or not, stores nothing: yesterday morning's boards are\nnever replaced by ones that have seen last night's games.",
         "operationId": "trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post",
         "parameters": [
           {

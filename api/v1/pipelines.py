@@ -2222,8 +2222,13 @@ async def trigger_daily_rankings(
     on the calendar and on the day (no run row): outside the regular season
     there is nothing to store, and once today's boards and ESPN's ranks are
     both in, the later ticks have nothing to do. A tick before last night's box
-    scores have landed fails as waiting and the next one tries again.
-    `force` skips both gates and replaces today's rows.
+    scores have landed, or while the batch that writes them is not done, fails
+    as waiting and the next one tries again. `force` skips both gates and that
+    wait, and replaces today's rows.
+
+    Between midnight and 3 AM ET the backend's day is still yesterday, and a
+    run then, forced or not, stores nothing: yesterday morning's boards are
+    never replaced by ones that have seen last night's games.
     """
     if not force:
         reason = await _daily_rankings_idle()

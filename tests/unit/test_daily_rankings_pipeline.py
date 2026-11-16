@@ -145,6 +145,18 @@ def test_no_game_day_behind_or_a_late_morning_never_waits():
     assert waiting_on(_boards(date(2026, 11, 14)), date(2026, 11, 15), LATE) is None
 
 
+def test_lines_that_carry_last_night_still_wait_for_the_batch_writing_them():
+    last_night = date(2026, 11, 15)
+    writing = "the season-stats batch is still writing"
+    # The date alone would let the boards go; a batch that is not done holds them
+    assert waiting_on(_boards(last_night), last_night, EARLY, writing) == writing
+    # ... but lines that stop short say so first, and a late morning waits for neither
+    assert "2026-11-14" in waiting_on(_boards(date(2026, 11, 14)), last_night, EARLY, writing)
+    assert waiting_on(_boards(last_night), last_night, LATE, writing) is None
+    # No game day behind us: nothing was written last night to be half-done
+    assert waiting_on(_boards(None), None, EARLY, writing) is None
+
+
 def test_the_gate_reads_the_eastern_calendar_date():
     import pytz
     assert today_et(pytz.utc.localize(datetime(2026, 11, 16, 10, 0))) == date(2026, 11, 16)   # 5 AM ET

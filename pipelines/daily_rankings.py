@@ -23,11 +23,19 @@ kept: a later tick that finds the day's Court Vision boards stored writes only
 what is still missing (ESPN's, after a failed read), and only a forced run
 (`?force=true`, the dashboard's Run button) rebuilds the day.
 
+Nothing is stored for a day that is over. The backend's day turns at 3 AM ET,
+so from midnight until then its `as_of` is still yesterday: a run in those
+hours, forced or not, would file boards that have seen last night's games
+under the morning before them. It stores nothing and says so.
+
 It waits for last night. The boards read each player's season line, so until
 the post-game batch has written the night's box scores into
 nba.player_season_stats the run raises `DataNotReady` and the next hourly tick
-tries again. From `WAIT_UNTIL_HOUR_ET` on it stops waiting and stores what
-there is, so a night whose box scores never land still has a board.
+tries again. The newest date on a season line is not enough: that batch writes
+player by player, so one that is still running, or stopped midway, has moved
+the date for some players and not for others, and the run waits for it too
+(`season_stats_unsettled`). From `WAIT_UNTIL_HOUR_ET` on it stops waiting and
+stores what there is, so a night whose box scores never land still has a board.
 
 Everything of one source is written in one transaction: a reader resolving "the
 latest board" never finds half of one.
@@ -59,6 +67,7 @@ from db.models.nba.daily_rankings import (
 )
 from db.models.nba.games import Game
 from db.models.nba.players import Player
+from db.models.pipeline_run import PipelineRun
 from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
@@ -70,6 +79,9 @@ EASTERN = pytz.timezone("US/Eastern")
 
 # From this hour (ET) the run no longer waits for last night's box scores.
 WAIT_UNTIL_HOUR_ET = 10
+
+# The batch that writes the season lines the boards read
+SEASON_STATS_PIPELINE = "player_season_stats"
 
 # ESPN's rank and auction value for each board, as `parse_draft_market_players` names them
 ESPN_FIELDS = {BOARD_POINTS: ("overall_rank", "auction_value"), BOARD_CATEGORIES: ("roto_rank", "roto_auction_value")}
@@ -121,18 +133,48 @@ def last_game_day(before: date, season: str) -> Optional[date]:
     )
 
 
-def waiting_on(boards: DailyBoards, last_night: Optional[date], now_et: datetime) -> Optional[str]:
+def season_stats_unsettled() -> Optional[str]:
+    """Why the season lines may be half-written, or None when they are whole.
+
+    The season-stats batch writes one player at a time with no transaction
+    around the night, so the newest date appears on the first player it writes.
+    The lines are whole when no run of it is going and the last one to finish
+    succeeded (a retry after a run that stopped midway writes the players that
+    run did not reach).
+    """
+    if PipelineRun.is_running(SEASON_STATS_PIPELINE):
+        return "the season-stats batch is still writing"
+    last = (
+        PipelineRun.select(PipelineRun.status)
+        .where((PipelineRun.pipeline_name == SEASON_STATS_PIPELINE) & (PipelineRun.status != "running"))
+        .order_by(PipelineRun.started_at.desc())
+        .limit(1)
+        .scalar()
+    )
+    if last == "failed":
+        return "the last season-stats batch failed, so the season lines may be half-written"
+    return None
+
+
+def waiting_on(
+    boards: DailyBoards,
+    last_night: Optional[date],
+    now_et: datetime,
+    unsettled: Optional[str] = None,
+) -> Optional[str]:
     """Why the boards should not be stored yet, or None when they can be.
 
-    They can once the season lines carry the last game day's box scores, or
-    once the morning has gone on long enough that waiting costs the day's board.
+    They can once the season lines carry the last game day's box scores and
+    the batch that writes them is done (`unsettled`, from
+    `season_stats_unsettled`, is why it is not), or once the morning has gone
+    on long enough that waiting costs the day's board.
     """
-    if last_night is None or (boards.season_as_of is not None and boards.season_as_of >= last_night):
+    if last_night is None or now_et.hour >= WAIT_UNTIL_HOUR_ET:
         return None
-    if now_et.hour >= WAIT_UNTIL_HOUR_ET:
-        return None
-    through = boards.season_as_of.isoformat() if boards.season_as_of else "no game yet"
-    return f"season lines run through {through}; the box scores of {last_night.isoformat()} have not landed"
+    if boards.season_as_of is None or boards.season_as_of < last_night:
+        through = boards.season_as_of.isoformat() if boards.season_as_of else "no game yet"
+        return f"season lines run through {through}; the box scores of {last_night.isoformat()} have not landed"
+    return unsettled
 
 
 def cv_rows(boards: DailyBoards, board: str) -> list[dict]:
@@ -209,13 +251,20 @@ class DailyRankingsPipeline(BasePipeline):
             return
 
         day = boards.as_of
+        today = today_et()
+        if day != today:
+            # Midnight to 3 AM ET: the backend is still on yesterday, whose games are in
+            ctx.increment_skipped(1, "day_over")
+            ctx.log.warning("daily_rankings_day_over", as_of=str(day), today=str(today), forced=force)
+            return
+
         held = stored_on(day)
         failures: list[str] = []
 
         if held.cv and not force:
             ctx.log.info("daily_rankings_cv_kept", as_of=str(day), rows=held.cv)
         else:
-            reason = waiting_on(boards, last_game_day(day, boards.season), now_eastern())
+            reason = waiting_on(boards, last_game_day(day, boards.season), now_eastern(), season_stats_unsettled())
             if reason and not force:
                 raise DataNotReady(reason)
             with db.atomic():

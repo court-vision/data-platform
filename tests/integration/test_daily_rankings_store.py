@@ -8,7 +8,7 @@ The morning is Nov 16, 2026; the last regular-season game day before it is the 1
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -23,8 +23,9 @@ from db.models.nba.daily_rankings import (
 )
 from db.models.nba.games import Game
 from db.models.nba.players import Player
+from db.models.pipeline_run import PipelineRun
 from pipelines import daily_rankings
-from pipelines.daily_rankings import DailyRankingsPipeline, stored_on
+from pipelines.daily_rankings import SEASON_STATS_PIPELINE, DailyRankingsPipeline, stored_on
 from pipelines.extractors.espn import parse_draft_market_players
 from schemas.common import ApiStatus
 from services.valuation_client import BoardPlace, DailyBoards, DailyRank
@@ -56,8 +57,16 @@ def morning(rankings_table, clean_integration_tables, monkeypatch):
     yield
 
 
-def _clock(monkeypatch, hour: int) -> None:
-    monkeypatch.setattr(daily_rankings, "now_eastern", lambda: datetime(2026, 11, 16, hour, 0))
+def _clock(monkeypatch, hour: int, day: date = TODAY) -> None:
+    monkeypatch.setattr(daily_rankings, "now_eastern", lambda: datetime(day.year, day.month, day.day, hour, 0))
+    monkeypatch.setattr(daily_rankings, "today_et", lambda now=None: day)
+
+
+def _season_stats_run(status: str, minutes_ago: int) -> PipelineRun:
+    """A run of the batch that writes the season lines, started `minutes_ago`."""
+    started = datetime.utcnow() - timedelta(minutes=minutes_ago)
+    return PipelineRun.create(pipeline_name=SEASON_STATS_PIPELINE, started_at=started, status=status,
+                              completed_at=None if status == "running" else started + timedelta(minutes=1))
 
 
 def _boards(*, order=(JOKIC, SGA, ROOKIE), season_as_of=LAST_NIGHT, in_season=True, as_of=TODAY) -> DailyBoards:
@@ -196,13 +205,63 @@ def test_a_forced_run_does_not_wait():
     assert stored_on(TODAY).complete
 
 
-def test_each_day_is_its_own_board():
+def test_each_day_is_its_own_board(monkeypatch):
+    _clock(monkeypatch, 6, LAST_NIGHT)
     _run(_boards(as_of=LAST_NIGHT, season_as_of=date(2026, 11, 14)), force=True)
+    _clock(monkeypatch, 6)
     _run(_boards(order=(SGA, JOKIC, ROOKIE)))
 
     assert _ranks(SOURCE_CV, BOARD_POINTS, LAST_NIGHT) == {JOKIC: 1, SGA: 2, ROOKIE: 3}
     assert _ranks(SOURCE_CV, BOARD_POINTS) == {SGA: 1, JOKIC: 2, ROOKIE: 3}
     assert DailyRanking.latest_date(SOURCE_CV, before=TODAY) == LAST_NIGHT
+
+
+@pytest.mark.parametrize("force", [False, True], ids=["tick", "forced"])
+def test_a_run_before_the_backends_day_turns_leaves_yesterday_as_it_was(monkeypatch, force):
+    # Yesterday morning's boards
+    _clock(monkeypatch, 6, LAST_NIGHT)
+    _run(_boards(as_of=LAST_NIGHT, season_as_of=date(2026, 11, 14)))
+    yesterday = {r.id for r in DailyRanking.select()}
+
+    # 1 AM ET on the 16th: the backend is still on the 15th, and its boards have seen that night's games
+    _clock(monkeypatch, 1)
+    result = _run(_boards(as_of=LAST_NIGHT, order=(ROOKIE, SGA, JOKIC)), espn=[_espn(3112335, "Nikola Jokic", 5)],
+                  force=force)
+
+    assert result.status == ApiStatus.SUCCESS
+    assert (result.records_processed, result.records_skipped) == (0, 1)
+    assert {r.id for r in DailyRanking.select()} == yesterday
+    assert _ranks(SOURCE_CV, BOARD_POINTS, LAST_NIGHT) == {JOKIC: 1, SGA: 2, ROOKIE: 3}
+    assert stored_on(TODAY).cv == 0
+
+
+@pytest.mark.parametrize("status,minutes_ago", [("running", 2), ("failed", 20)],
+                         ids=["still_writing", "stopped_midway"])
+def test_the_boards_wait_for_a_season_stats_batch_that_is_not_done(monkeypatch, status, minutes_ago):
+    # The newest date is on the season lines, but the batch that writes them player by player is not through
+    _season_stats_run("success", minutes_ago=60 * 24)
+    _season_stats_run(status, minutes_ago=minutes_ago)
+
+    waiting = _run()
+
+    assert waiting.status == ApiStatus.ERROR and "season-stats batch" in (waiting.error or "")
+    assert DailyRanking.select().count() == 0
+
+    # Its retry got through: the next tick stores the morning
+    _season_stats_run("success", minutes_ago=1)
+    PipelineRun.update(status="failed", completed_at=datetime.utcnow()).where(
+        (PipelineRun.pipeline_name == SEASON_STATS_PIPELINE) & (PipelineRun.status == "running")).execute()
+
+    assert _run().status == ApiStatus.SUCCESS and stored_on(TODAY).complete
+
+
+def test_a_batch_that_never_gets_through_stops_holding_the_boards_late_in_the_morning(monkeypatch):
+    _season_stats_run("failed", minutes_ago=20)
+    assert _run().status == ApiStatus.ERROR
+
+    _clock(monkeypatch, daily_rankings.WAIT_UNTIL_HOUR_ET)
+
+    assert _run().status == ApiStatus.SUCCESS and stored_on(TODAY).complete
 
 
 def test_out_of_season_stores_nothing():
