@@ -232,3 +232,19 @@ def test_the_backtest_scores_each_season_with_coefficients_that_never_saw_it(sea
         # The one true thing in this league: the live line finds the rebounds faster than the blend's ten games
         assert entry["per_stat_mae"]["reb"]["live"] < entry["per_stat_mae"]["reb"]["blend"]
         assert entry["fpts_pg_mae"]["live"] < entry["fpts_pg_mae"]["prior"]
+
+
+def test_each_backtest_worker_starts_with_every_season(monkeypatch):
+    """The fitting script's pool initializer. A spawned worker gets a copy of the
+    samples; a forked one is handed the very dictionary it already has, which
+    must not be emptied on the way in."""
+    from scripts import fit_live_projection as script
+
+    samples = {2019: ["a"], 2021: ["b"]}
+    monkeypatch.setattr(script, "_BY_SEASON", samples)
+
+    script._share(script._BY_SEASON)        # fork: the same object
+    assert script._BY_SEASON == {2019: ["a"], 2021: ["b"]}
+
+    script._share(dict(samples))            # spawn and forkserver: a copy
+    assert script._BY_SEASON == {2019: ["a"], 2021: ["b"]}

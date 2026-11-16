@@ -112,9 +112,10 @@ def usable(lines: dict[int, list[BoxLine]]) -> list[int]:
 def _share(samples: dict) -> None:
     """A worker's start: the samples, handed over whole. A forked worker would
     inherit them, but a spawned one (macOS and Windows; forkserver, Python
-    3.14's default on Linux) starts with an empty `_BY_SEASON`."""
-    _BY_SEASON.clear()
-    _BY_SEASON.update(samples)
+    3.14's default on Linux) starts with an empty `_BY_SEASON`. Rebound, not
+    filled in place: under fork `samples` is that same dictionary."""
+    global _BY_SEASON
+    _BY_SEASON = samples
 
 
 def _fold(season: int) -> dict:
