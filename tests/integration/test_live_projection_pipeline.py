@@ -228,6 +228,38 @@ def test_it_waits_for_a_box_score_batch_that_is_not_done_and_a_forced_run_does_n
     assert _run(force=True).status == ApiStatus.SUCCESS and stored_on(SEASON, TODAY) == 7
 
 
+def test_a_box_score_batch_left_marked_running_holds_the_projection_until_a_later_one_gets_through():
+    long_ago = datetime.utcnow() - timedelta(hours=5)
+    PipelineRun.create(pipeline_name=BOX_SCORES_PIPELINE, started_at=long_ago, status="running")
+
+    waiting = _run()
+    assert waiting.status == ApiStatus.ERROR and "never finished" in (waiting.error or "")
+    assert stored_on(SEASON, TODAY) == 0
+
+    now = datetime.utcnow()
+    PipelineRun.create(pipeline_name=BOX_SCORES_PIPELINE, started_at=now, completed_at=now, status="success")
+    assert _run().status == ApiStatus.SUCCESS and stored_on(SEASON, TODAY) == 7
+
+
+def test_box_scores_read_while_their_batch_was_writing_are_not_projected_from(monkeypatch):
+    read = live_projection.load_inputs
+
+    def read_while_the_batch_runs(season, day):
+        inputs = read(season, day)
+        now = datetime.utcnow()
+        PipelineRun.create(pipeline_name=BOX_SCORES_PIPELINE, started_at=now, completed_at=now, status="success")
+        return inputs
+
+    monkeypatch.setattr(live_projection, "load_inputs", read_while_the_batch_runs)
+    waiting = _run()
+    assert waiting.status == ApiStatus.ERROR and "was writing while" in (waiting.error or "")
+    assert stored_on(SEASON, TODAY) == 0
+
+    # The next tick reads with nothing writing under it
+    monkeypatch.setattr(live_projection, "load_inputs", read)
+    assert _run().status == ApiStatus.SUCCESS and stored_on(SEASON, TODAY) == 7
+
+
 @pytest.mark.parametrize("force", [False, True], ids=["tick", "forced"])
 def test_nothing_is_stored_before_the_day_turns(monkeypatch, force):
     _clock(monkeypatch, 1)

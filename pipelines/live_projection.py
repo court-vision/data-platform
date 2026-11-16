@@ -19,9 +19,9 @@ It runs as the first link of the daily-rankings trigger, so the boards stored
 that morning are built on it. One projection a day: a later tick keeps the
 morning's, and only a forced run (`?force=true`, the dashboard's Run button)
 rebuilds it. Like the boards it waits for last night: until every game of the
-last game day has box scores, and the batch that writes them is done, it
-raises `DataNotReady`, and from `WAIT_UNTIL_HOUR_ET` it projects from what
-there is. And like the boards it stores nothing between midnight and
+last game day has box scores, and the batch that writes them is done and
+wrote nothing while they were being read, it raises `DataNotReady`, and from
+`WAIT_UNTIL_HOUR_ET` it projects from what there is. And like the boards it stores nothing between midnight and
 `DAY_TURNS_HOUR_ET`: the night's games are still coming in, and a projection
 built then would be the one the morning keeps.
 
@@ -40,7 +40,14 @@ from db.models.nba import Game, PlayerProjection
 from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
-from pipelines.daily_rankings import WAIT_UNTIL_HOUR_ET, batch_unsettled, last_game_day, now_eastern, today_et
+from pipelines.daily_rankings import (
+    WAIT_UNTIL_HOUR_ET,
+    batch_mark,
+    batch_unsettled,
+    last_game_day,
+    now_eastern,
+    today_et,
+)
 from pipelines.readiness import REGULAR_SEASON_PREFIX
 from services.live_projection_inputs import LiveInputs, load_coefficients, load_inputs
 from services.live_projection_model import Coefficients, LiveProjection, build_morning, project
@@ -149,6 +156,8 @@ class LiveProjectionPipeline(BasePipeline):
             ctx.log.info("live_projection_kept", as_of=str(day), rows=held)
             return
 
+        # Before the read, so a box-score batch that writes under it shows afterwards
+        box_scores = batch_mark(BOX_SCORES_PIPELINE)
         inputs = load_inputs(season, day)
         if not inputs.lines or not any(inputs.ahead.values()):
             ctx.log.info("live_projection_out_of_season", as_of=str(day), lines=len(inputs.lines))
@@ -159,7 +168,7 @@ class LiveProjectionPipeline(BasePipeline):
         last_night = last_game_day(day, season)
         reason = waiting_on(
             games_missing(inputs, last_night), last_night, now_et,
-            batch_unsettled(BOX_SCORES_PIPELINE, "box-score"),
+            batch_unsettled(BOX_SCORES_PIPELINE, "box-score", box_scores),
         )
         if reason and not force:
             raise DataNotReady(reason)

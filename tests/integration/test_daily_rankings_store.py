@@ -98,10 +98,17 @@ ESPN_PAYLOAD = [
 ]
 
 
-def _run(boards=None, espn=ESPN_PAYLOAD, *, force=False):
-    """One run; `espn` is a payload, None (the league is not on this season) or an exception."""
+def _run(boards=None, espn=ESPN_PAYLOAD, *, force=False, during=None):
+    """One run; `espn` is a payload, None (the league is not on this season) or an exception.
+    `during` is called while the backend is being asked for the boards."""
     pipeline = DailyRankingsPipeline()
-    pipeline.valuation_client.daily_boards = lambda correlation_id=None: boards if boards is not None else _boards()
+
+    def daily_boards(correlation_id=None):
+        if during is not None:
+            during()
+        return boards if boards is not None else _boards()
+
+    pipeline.valuation_client.daily_boards = daily_boards
 
     def market():
         if isinstance(espn, Exception):
@@ -252,6 +259,43 @@ def test_the_boards_wait_for_a_season_stats_batch_that_is_not_done(monkeypatch, 
     PipelineRun.update(status="failed", completed_at=datetime.utcnow()).where(
         (PipelineRun.pipeline_name == SEASON_STATS_PIPELINE) & (PipelineRun.status == "running")).execute()
 
+    assert _run().status == ApiStatus.SUCCESS and stored_on(TODAY).complete
+
+
+def test_a_batch_left_marked_running_holds_the_boards_until_a_later_one_gets_through():
+    # Five hours on, nothing counts it as running any more, and the run before it succeeded
+    _season_stats_run("success", minutes_ago=60 * 24)
+    _season_stats_run("running", minutes_ago=300)
+
+    waiting = _run()
+
+    assert waiting.status == ApiStatus.ERROR and "never finished" in (waiting.error or "")
+    assert DailyRanking.select().count() == 0
+
+    # The row is still there, marked running; the run after it is what settles the night
+    _season_stats_run("success", minutes_ago=1)
+
+    assert _run().status == ApiStatus.SUCCESS and stored_on(TODAY).complete
+
+
+@pytest.mark.parametrize("was", ["success", "running"], ids=["ran_whole_under_the_read", "finished_under_the_read"])
+def test_boards_read_while_the_season_stats_batch_was_writing_are_not_stored(was):
+    earlier = _season_stats_run(was, minutes_ago=3 if was == "running" else 60 * 24)
+
+    def batch_writes():
+        if was == "running":
+            # Going when the read began, done before the run looks again
+            PipelineRun.update(status="success", completed_at=datetime.utcnow()).where(
+                PipelineRun.id == earlier.id).execute()
+        else:
+            _season_stats_run("success", minutes_ago=0)
+
+    waiting = _run(during=batch_writes)
+
+    assert waiting.status == ApiStatus.ERROR and "was writing while" in (waiting.error or "")
+    assert DailyRanking.select().count() == 0
+
+    # The next tick reads with nothing writing under it
     assert _run().status == ApiStatus.SUCCESS and stored_on(TODAY).complete
 
 

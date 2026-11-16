@@ -37,8 +37,11 @@ nba.player_season_stats the run raises `DataNotReady` and the next hourly tick
 tries again. The newest date on a season line is not enough: that batch writes
 player by player, so one that is still running, or stopped midway, has moved
 the date for some players and not for others, and the run waits for it too
-(`season_stats_unsettled`). From `WAIT_UNTIL_HOUR_ET` on it stops waiting and
-stores what there is, so a night whose box scores never land still has a board.
+(`season_stats_unsettled`). So does a run whose boards were read while the
+batch was writing: the batch's newest run is noted before the read
+(`batch_mark`) and has to be the same one, finished, after it. From
+`WAIT_UNTIL_HOUR_ET` on it stops waiting and stores what there is, so a night
+whose box scores never land still has a board.
 
 Everything of one source is written in one transaction: a reader resolving "the
 latest board" never finds half of one.
@@ -136,31 +139,63 @@ def last_game_day(before: date, season: str) -> Optional[date]:
     )
 
 
-def batch_unsettled(pipeline: str, label: str) -> Optional[str]:
+@dataclass(frozen=True)
+class BatchMark:
+    """A batch's newest run, whatever its status: which one, and how it stands.
+
+    Taken before reading what the batch writes, and compared after
+    (`batch_unsettled`), it tells a read the batch wrote under from a clean one.
+    """
+
+    run_id: Optional[str]                   # None: the batch has never run
+    status: Optional[str]                   # running, success or failed
+
+
+def batch_mark(pipeline: str) -> BatchMark:
+    """The newest run of `pipeline` as the run records have it."""
+    run = (
+        PipelineRun.select(PipelineRun.id, PipelineRun.status)
+        .where(PipelineRun.pipeline_name == pipeline)
+        .order_by(PipelineRun.started_at.desc())
+        .limit(1)
+        .first()
+    )
+    return BatchMark(str(run.id), run.status) if run is not None else BatchMark(None, None)
+
+
+def batch_unsettled(pipeline: str, label: str, before: Optional[BatchMark] = None) -> Optional[str]:
     """Why what `pipeline` writes may be half-written, or None when it is whole.
 
     The post-game batches write one row at a time with no transaction around
     the night, so the newest date appears with the first row. What they write
-    is whole when no run is going and the last one to finish succeeded (a retry
-    after a run that stopped midway writes the rows that run did not reach).
+    is whole when no run is going and the newest one succeeded (a retry after a
+    run that stopped midway writes the rows that run did not reach).
+
+    A newest run still marked running is not whole however old it is:
+    `PipelineRun.is_running` stops counting one after two hours, but a run that
+    hung, or whose end was never recorded, left the night as unfinished as one
+    that failed, until a later run gets through.
+
+    `before` is the mark taken before the caller read what the batch writes.
+    A newest run that is not that one, or no longer stands as it did, started
+    or finished during the read, which may then hold rows of both nights.
     """
     if PipelineRun.is_running(pipeline):
         return f"the {label} batch is still writing"
-    last = (
-        PipelineRun.select(PipelineRun.status)
-        .where((PipelineRun.pipeline_name == pipeline) & (PipelineRun.status != "running"))
-        .order_by(PipelineRun.started_at.desc())
-        .limit(1)
-        .scalar()
-    )
-    if last == "failed":
+    newest = batch_mark(pipeline)
+    if newest.status == "running":
+        return f"the last {label} batch never finished, so what it writes may be half-written"
+    if newest.status == "failed":
         return f"the last {label} batch failed, so what it writes may be half-written"
+    if before is not None and newest != before:
+        return f"the {label} batch was writing while this run read what it writes"
     return None
 
 
-def season_stats_unsettled() -> Optional[str]:
-    """Why the season lines the boards read may be half-written, or None."""
-    return batch_unsettled(SEASON_STATS_PIPELINE, "season-stats")
+def season_stats_unsettled(before: Optional[BatchMark] = None) -> Optional[str]:
+    """Why the season lines the boards read may be half-written, or None.
+    `before`: the batch's mark from before the boards were read."""
+    return batch_unsettled(SEASON_STATS_PIPELINE, "season-stats", before)
 
 
 def waiting_on(
@@ -248,6 +283,8 @@ class DailyRankingsPipeline(BasePipeline):
     def execute(self, ctx: PipelineContext) -> None:
         force = bool((ctx.options or {}).get("force"))
 
+        # Before the read, so a season-stats batch that writes under it shows afterwards
+        season_stats = batch_mark(SEASON_STATS_PIPELINE)
         boards = self.valuation_client.daily_boards(correlation_id=get_correlation_id())
         if not boards.available or boards.as_of is None:
             reason = boards.reason or "backend_unavailable"
@@ -271,7 +308,8 @@ class DailyRankingsPipeline(BasePipeline):
         if held.cv and not force:
             ctx.log.info("daily_rankings_cv_kept", as_of=str(day), rows=held.cv)
         else:
-            reason = waiting_on(boards, last_game_day(day, boards.season), now_eastern(), season_stats_unsettled())
+            reason = waiting_on(boards, last_game_day(day, boards.season), now_eastern(),
+                                season_stats_unsettled(season_stats))
             if reason and not force:
                 raise DataNotReady(reason)
             with db.atomic():
