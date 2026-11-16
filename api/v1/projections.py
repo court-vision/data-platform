@@ -275,6 +275,18 @@ async def _rebuild_live(player_id: int) -> NoteSaved:
     return NoteSaved(player_id=player_id, rebuilt=rebuilt, pipeline=result)
 
 
+def _rebuild_message(done: str, saved: NoteSaved, later: str) -> str:
+    """What a save or a retire says about the day's projection. A rebuild that
+    never got past another run is said plainly: that run may have stored a
+    morning without this change, and the day's ticks keep a stored morning."""
+    if saved.rebuilt:
+        return f"Note {done} and the live projection rebuilt"
+    if saved.pipeline is not None and saved.pipeline.status in (ApiStatus.SKIPPED, ApiStatus.SKIPPED.value):
+        return (f"Note {done}, but another projection run was going the whole time: "
+                "today's projection may not have it yet, so save it again in a minute")
+    return f"Note {done}; the live projection {later} on its next run"
+
+
 @router.put("/{player_id}/note", response_model=NoteSavedResponse)
 async def save_note(body: NoteSave, player_id: int = _PLAYER_ID) -> NoteSavedResponse:
     """
@@ -319,8 +331,7 @@ async def save_note(body: NoteSave, player_id: int = _PLAYER_ID) -> NoteSavedRes
     saved.note = next((entry for entry in history if entry.id == record.id), None)
     return NoteSavedResponse(
         status="success",
-        message="Note saved and the live projection rebuilt" if saved.rebuilt
-        else "Note saved; the live projection reads it on its next run",
+        message=_rebuild_message("saved", saved, "reads it"),
         data=saved,
     )
 
@@ -340,8 +351,7 @@ async def retire_note(player_id: int = _PLAYER_ID) -> NoteSavedResponse:
     saved = await _rebuild_live(player_id)
     return NoteSavedResponse(
         status="success",
-        message="Note retired and the live projection rebuilt" if saved.rebuilt
-        else "Note retired; the live projection drops it on its next run",
+        message=_rebuild_message("retired", saved, "drops it"),
         data=saved,
     )
 

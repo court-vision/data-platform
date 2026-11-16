@@ -447,11 +447,16 @@ def test_a_rebuild_that_meets_another_projection_run_is_tried_again_once_it_is_d
     assert res.status_code == 200 and res.json()["data"]["rebuilt"] is True
     assert runs == [("live_projection", {"options": {"rebuild": True}})] * 2
 
-    # Still held after every try: the note is kept, and the answer says it was not rebuilt
+    # Still held after every try: the note is kept, and the answer says to save it again,
+    # since the run holding the lock may store a morning without it
     runs.clear()
     res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
     assert res.status_code == 200 and res.json()["data"]["rebuilt"] is False
     assert len(runs) == projections.REBUILD_ATTEMPTS
+    assert res.json()["message"] == (
+        "Note saved, but another projection run was going the whole time: "
+        "today's projection may not have it yet, so save it again in a minute"
+    )
 
 
 @pytest.mark.parametrize("pid, extra, status, says", [
