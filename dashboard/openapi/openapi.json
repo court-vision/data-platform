@@ -79,16 +79,57 @@
         "type": "object"
       },
       "AdjustmentEntry": {
-        "description": "One version of one player's adjustment (nba.projection_adjustments).",
+        "description": "One version of one player's adjustment or season note (nba.projection_adjustments).",
         "properties": {
           "author": {
             "title": "Author",
             "type": "string"
           },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "depends_on_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Depends On Name"
+          },
+          "depends_on_player_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "... or until this teammate plays again",
+            "title": "Depends On Player Id"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            },
+            "title": "Evidence",
+            "type": "array"
           },
           "games": {
             "anyOf": [
@@ -150,6 +191,49 @@
             ],
             "title": "Return Date"
           },
+          "return_earliest": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Earliest"
+          },
+          "return_latest": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Latest"
+          },
+          "review_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Past this day the note is no longer applied",
+            "title": "Review Date"
+          },
+          "scope": {
+            "default": "preseason",
+            "description": "preseason: an input to cv-projection. season: a dated note",
+            "title": "Scope",
+            "type": "string"
+          },
           "source_url": {
             "anyOf": [
               {
@@ -161,10 +245,34 @@
             ],
             "title": "Source Url"
           },
+          "standing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteStanding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For the live season note: how it stands today"
+          },
           "state": {
             "default": "live",
             "title": "State",
             "type": "string"
+          },
+          "until_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The minutes and usage hold through this day",
+            "title": "Until Date"
           },
           "usage": {
             "anyOf": [
@@ -180,6 +288,7 @@
         },
         "required": [
           "id",
+          "scope",
           "kind",
           "minutes",
           "games",
@@ -190,7 +299,16 @@
           "source_url",
           "author",
           "created_at",
-          "state"
+          "state",
+          "return_earliest",
+          "return_latest",
+          "until_date",
+          "depends_on_player_id",
+          "depends_on_name",
+          "evidence",
+          "confidence",
+          "review_date",
+          "standing"
         ],
         "title": "AdjustmentEntry",
         "type": "object"
@@ -1414,6 +1532,97 @@
         "title": "DataQualityRunResponse",
         "type": "object"
       },
+      "EvidenceItem": {
+        "description": "A stored item a note rests on, kept as it read when the note was written.",
+        "properties": {
+          "headline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headline"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "injury, availability, lineup, transaction, performance, rumor",
+            "title": "Kind"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "espn_injuries, rotowire_rss, ...",
+            "title": "Source"
+          },
+          "type": {
+            "default": "news",
+            "description": "news: an nba.news_items row",
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "source",
+          "kind",
+          "headline",
+          "url",
+          "published_at"
+        ],
+        "title": "EvidenceItem",
+        "type": "object"
+      },
       "FreshnessData": {
         "properties": {
           "fetched_at": {
@@ -1840,6 +2049,28 @@
         "title": "LatencyStats",
         "type": "object"
       },
+      "LiveSide": {
+        "description": "One player's live projection: the stored line, and the stretches it averages.",
+        "properties": {
+          "line": {
+            "$ref": "#/components/schemas/ProjectionLine",
+            "description": "A game he plays, and the games he is expected to play from here"
+          },
+          "stretches": {
+            "items": {
+              "$ref": "#/components/schemas/LiveStretch"
+            },
+            "title": "Stretches",
+            "type": "array"
+          }
+        },
+        "required": [
+          "line",
+          "stretches"
+        ],
+        "title": "LiveSide",
+        "type": "object"
+      },
       "LiveStatsData": {
         "description": "Data payload for the live stats trigger endpoint.",
         "properties": {
@@ -1910,6 +2141,546 @@
           "data"
         ],
         "title": "LiveStatsResponse",
+        "type": "object"
+      },
+      "LiveStretch": {
+        "description": "A run of his team's remaining games he is expected to play alike.",
+        "properties": {
+          "chance": {
+            "description": "That he plays each",
+            "title": "Chance",
+            "type": "number"
+          },
+          "first": {
+            "format": "date",
+            "title": "First",
+            "type": "string"
+          },
+          "games": {
+            "description": "His team's games in the stretch",
+            "title": "Games",
+            "type": "integer"
+          },
+          "last": {
+            "format": "date",
+            "title": "Last",
+            "type": "string"
+          },
+          "minutes": {
+            "title": "Minutes",
+            "type": "number"
+          },
+          "usage": {
+            "description": "His share of the offense against his usual one",
+            "title": "Usage",
+            "type": "number"
+          }
+        },
+        "required": [
+          "first",
+          "last",
+          "games",
+          "chance",
+          "minutes",
+          "usage"
+        ],
+        "title": "LiveStretch",
+        "type": "object"
+      },
+      "NoteChange": {
+        "additionalProperties": false,
+        "description": "What a season note states. Minutes and usage are targets, in force while\nthe role part holds; a return date says he is out until then.",
+        "properties": {
+          "depends_on_player_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "... or until this teammate plays again, whichever comes first",
+            "title": "Depends On Player Id"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "maximum": 48.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minutes a game while the note holds",
+            "title": "Minutes"
+          },
+          "out_for_season": {
+            "default": false,
+            "description": "The season is written off",
+            "title": "Out For Season",
+            "type": "boolean"
+          },
+          "return_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The likely first game back: out until then",
+            "title": "Return Date"
+          },
+          "return_earliest": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The early end of the range around it",
+            "title": "Return Earliest"
+          },
+          "return_latest": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The late end",
+            "title": "Return Latest"
+          },
+          "until_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The minutes and usage hold through this day",
+            "title": "Until Date"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "His share of the offense against his usual one while it holds",
+            "title": "Usage"
+          }
+        },
+        "title": "NoteChange",
+        "type": "object"
+      },
+      "NotePreview": {
+        "description": "One player's live projection this morning with his note as it is, and as the note tried would leave it.",
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/LiveSide"
+          },
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "before": {
+            "$ref": "#/components/schemas/LiveSide"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "standing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteStanding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the note tried would stand today; None when previewing having none"
+          }
+        },
+        "required": [
+          "player_id",
+          "as_of",
+          "before",
+          "after",
+          "standing"
+        ],
+        "title": "NotePreview",
+        "type": "object"
+      },
+      "NotePreviewRequest": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoteChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The note to try. Omit (or null) to preview having none."
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "review_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As on a save: the default when omitted",
+            "title": "Review Date"
+          }
+        },
+        "required": [
+          "player_id"
+        ],
+        "title": "NotePreviewRequest",
+        "type": "object"
+      },
+      "NotePreviewResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotePreview"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "NotePreviewResponse",
+        "type": "object"
+      },
+      "NoteSave": {
+        "additionalProperties": false,
+        "description": "A new version of a player's season note. Saving supersedes his live one.",
+        "properties": {
+          "author": {
+            "default": "dashboard",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Author",
+            "type": "string"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "confirmed",
+                  "likely",
+                  "possible"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "depends_on_player_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "... or until this teammate plays again, whichever comes first",
+            "title": "Depends On Player Id"
+          },
+          "evidence_news_ids": {
+            "description": "The stored news items it rests on (nba.news_items ids)",
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 20,
+            "title": "Evidence News Ids",
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "year2",
+              "trade",
+              "role",
+              "injury_return",
+              "injury_current",
+              "age",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "minutes": {
+            "anyOf": [
+              {
+                "maximum": 48.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minutes a game while the note holds",
+            "title": "Minutes"
+          },
+          "note": {
+            "description": "Why: the fact being recorded",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          },
+          "out_for_season": {
+            "default": false,
+            "description": "The season is written off",
+            "title": "Out For Season",
+            "type": "boolean"
+          },
+          "return_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The likely first game back: out until then",
+            "title": "Return Date"
+          },
+          "return_earliest": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The early end of the range around it",
+            "title": "Return Earliest"
+          },
+          "return_latest": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The late end",
+            "title": "Return Latest"
+          },
+          "review_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Read again by this day; past it the note is not applied. Default: two weeks on",
+            "title": "Review Date"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The report it came from",
+            "title": "Source Url"
+          },
+          "until_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The minutes and usage hold through this day",
+            "title": "Until Date"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 2.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "His share of the offense against his usual one while it holds",
+            "title": "Usage"
+          }
+        },
+        "required": [
+          "kind",
+          "note"
+        ],
+        "title": "NoteSave",
+        "type": "object"
+      },
+      "NoteSaved": {
+        "description": "What a save or a retire of a season note did: the table write, and the rebuild that followed.",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentEntry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The new live note; None after a retire"
+          },
+          "pipeline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          },
+          "rebuilt": {
+            "description": "Whether the day's live projection was rebuilt with it",
+            "title": "Rebuilt",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "player_id",
+          "note",
+          "rebuilt",
+          "pipeline"
+        ],
+        "title": "NoteSaved",
+        "type": "object"
+      },
+      "NoteSavedResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NoteSaved"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "NoteSavedResponse",
+        "type": "object"
+      },
+      "NoteStanding": {
+        "description": "How a live season note stands today (services.live_notes.standing).",
+        "properties": {
+          "games": {
+            "description": "Its return date, or written-off season, still applies",
+            "title": "Games",
+            "type": "boolean"
+          },
+          "reasons": {
+            "description": "Why a part, or all of it, no longer does",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "role": {
+            "description": "Its minutes and usage still apply",
+            "title": "Role",
+            "type": "boolean"
+          },
+          "state": {
+            "description": "in_force | review_due | ended",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "games",
+          "role",
+          "reasons"
+        ],
+        "title": "NoteStanding",
         "type": "object"
       },
       "PipelineHealthEntry": {
@@ -2658,6 +3429,50 @@
         "title": "PipelineRunsResponse",
         "type": "object"
       },
+      "PlayerNews": {
+        "properties": {
+          "items": {
+            "description": "His recent stored news, newest first: what a note can cite",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "player_id": {
+            "title": "Player Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "player_id",
+          "items"
+        ],
+        "title": "PlayerNews",
+        "type": "object"
+      },
+      "PlayerNewsResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PlayerNews"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "PlayerNewsResponse",
+        "type": "object"
+      },
       "PreviewRequest": {
         "properties": {
           "adjustment": {
@@ -2925,9 +3740,31 @@
             "$ref": "#/components/schemas/ProjectionLine",
             "description": "With the live adjustment applied: what is published"
           },
+          "live": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectionLine"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The live projection as stored this morning: his line in a game he plays, and the games he is expected to play from here. None before the season's first snapshot"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentEntry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "His live season note, with how it stands today"
           },
           "player_id": {
             "title": "Player Id",
@@ -2993,7 +3830,9 @@
           "final",
           "ranks",
           "espn_ranks",
-          "adjustment"
+          "adjustment",
+          "live",
+          "note"
         ],
         "title": "ProjectionRow",
         "type": "object"
@@ -3003,6 +3842,14 @@
           "coefficients_version": {
             "title": "Coefficients Version",
             "type": "string"
+          },
+          "confidences": {
+            "description": "The confidence levels a season note accepts",
+            "items": {
+              "type": "string"
+            },
+            "title": "Confidences",
+            "type": "array"
           },
           "espn_as_of": {
             "anyOf": [
@@ -3045,6 +3892,19 @@
               }
             ]
           },
+          "live_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The live projection's latest snapshot; None before the season's first",
+            "title": "Live As Of"
+          },
           "players": {
             "items": {
               "$ref": "#/components/schemas/ProjectionRow"
@@ -3082,6 +3942,12 @@
             "description": "Why not, when it did not",
             "title": "Ranks Reason"
           },
+          "review_days": {
+            "default": 14,
+            "description": "How long a season note runs before it must be read again, by default",
+            "title": "Review Days",
+            "type": "integer"
+          },
           "season": {
             "title": "Season",
             "type": "string"
@@ -3104,6 +3970,9 @@
           "ranks_reason",
           "league",
           "kinds",
+          "live_as_of",
+          "confidences",
+          "review_days",
           "players",
           "fetched_at"
         ],
@@ -4864,6 +5733,53 @@
         ]
       }
     },
+    "/v1/dashboard/projections/note/preview": {
+      "post": {
+        "description": "One player's live projection this morning as it stands, and as it would be\nunder the season note in the body (or with none at all): the line in a\ngame he plays, the games he is expected to play from here, and the\nstretches of the calendar the two are averaged over. Nothing is written.\n\nIt prices the line, not a rank: the board's rank is worked out by the\nbackend on its next read, under its own league.",
+        "operationId": "preview_note_v1_dashboard_projections_note_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotePreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Note",
+        "tags": [
+          "projections"
+        ]
+      }
+    },
     "/v1/dashboard/projections/preview": {
       "post": {
         "description": "One player's final line and standard ranks as they stand, and as they\nwould be under the adjustment in the body (or with none at all). Nothing is\nwritten. The whole pool is re-valued, because a rank is a place among\neverybody.",
@@ -5067,6 +5983,167 @@
           }
         ],
         "summary": "Get Adjustment History",
+        "tags": [
+          "projections"
+        ]
+      }
+    },
+    "/v1/dashboard/projections/{player_id}/news": {
+      "get": {
+        "description": "The player's stored news of the last three weeks, newest first: the\nitems a season note can cite as its evidence.",
+        "operationId": "get_player_news_v1_dashboard_projections__player_id__news_get",
+        "parameters": [
+          {
+            "description": "NBA player id (nba.players.id)",
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "description": "NBA player id (nba.players.id)",
+              "minimum": 1,
+              "title": "Player Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlayerNewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Player News",
+        "tags": [
+          "projections"
+        ]
+      }
+    },
+    "/v1/dashboard/projections/{player_id}/note": {
+      "delete": {
+        "description": "Withdraw the player's live season note without a replacement (the row is\nkept, marked retired), then rebuild the day's live projection.",
+        "operationId": "retire_note_v1_dashboard_projections__player_id__note_delete",
+        "parameters": [
+          {
+            "description": "NBA player id (nba.players.id)",
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "description": "NBA player id (nba.players.id)",
+              "minimum": 1,
+              "title": "Player Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteSavedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire Note",
+        "tags": [
+          "projections"
+        ]
+      },
+      "put": {
+        "description": "Make the body the player's live season note. His previous note is kept and\nmarked superseded; his preseason adjustment is not touched. Then rebuild\nthe day's live projection.\n\nThe note is read again on its review date (two weeks on when the body does\nnot say): past that day it is no longer applied.",
+        "operationId": "save_note_v1_dashboard_projections__player_id__note_put",
+        "parameters": [
+          {
+            "description": "NBA player id (nba.players.id)",
+            "in": "path",
+            "name": "player_id",
+            "required": true,
+            "schema": {
+              "description": "NBA player id (nba.players.id)",
+              "minimum": 1,
+              "title": "Player Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteSavedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Note",
         "tags": [
           "projections"
         ]

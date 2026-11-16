@@ -31,6 +31,10 @@ the rest of the season in three parts that are updated separately:
   this season's he has played. A known return date replaces the curve, and a
   player ruled out of his team's next game misses it for certain.
 
+A season note (`services.live_notes`) is the one input that is not measured:
+its return date goes into the games part as a known absence, and its minutes
+and share of the offense replace the role part's for as long as the note holds.
+
 The output is a line per remaining game (`LiveProjection.games_ahead`), so any
 window can be priced: the rest of the season is the sum of every game left, a
 week is the sum of that week's. `timeline` is the same thing run-length
@@ -46,6 +50,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Iterable, Mapping, Optional, Sequence
+
+from services.live_notes import RoleNote, holds
 
 # The stats a line carries, per game (nba.player_projections' columns, minus min)
 LINE_KEYS: tuple[str, ...] = (
@@ -196,6 +202,7 @@ class Availability:
     out_next: bool = False                      # ruled out of his team's next game
     return_date: Optional[date] = None          # expected back on this day
     out_for_season: bool = False
+    out_now: bool = False                       # out as of this morning, whatever the box scores say (a note)
 
 
 @dataclass(frozen=True)
@@ -438,12 +445,17 @@ def play_chances(
     out of the next game misses it for certain, and from the one after is a
     player who has missed one more. A known return date replaces the curve for
     a player who is out: nothing before it, the share he plays once back from
-    it. One that has passed while he is still out is no longer believed.
+    it. One that has passed while he is still out is no longer believed. A
+    note can say he is out when the box scores cannot yet (hurt last night):
+    he is then a player who has missed a game.
     """
     if known is not None and known.out_for_season:
         return [0.0] * len(days)
     b = PRE_DEBUT if pre else bucket(streak)
     out_now = pre or streak > 0
+    if known is not None and known.out_now and not out_now:
+        out_now = True
+        b = bucket(1)
     shift = 0
     if known is not None and known.out_next and days:
         shift = 1
@@ -809,13 +821,30 @@ def usage_factor(state: PlayerState, missing_usage: Optional[float], coeffs: Coe
     return 1.0 + coeffs.usage_slope * (missing_usage - seen)
 
 
+def noted(game: GameAhead, note: RoleNote, hold: float) -> GameAhead:
+    """A remaining game with a note's role part applied as far as it holds in
+    it (`hold`, from `live_notes.holds`): the note's minutes and share of the
+    offense are targets, so where it holds fully they replace the model's."""
+    minutes, usage = game.minutes, game.usage
+    if note.minutes is not None:
+        minutes = hold * float(note.minutes) + (1.0 - hold) * minutes
+    if note.usage is not None:
+        usage = hold * float(note.usage) + (1.0 - hold) * usage
+    return GameAhead(day=game.day, chance=game.chance, minutes=minutes, usage=usage)
+
+
 def project_player(
     state: PlayerState,
     outlook: Outlook,
     days: Sequence[date],
     coeffs: Coefficients,
     generic: Optional[Mapping[str, float]] = None,
+    note: Optional[RoleNote] = None,
+    teammate_chances: Optional[Sequence[float]] = None,
 ) -> LiveProjection:
+    """One player's projection. `note` is the role part of his season note in
+    force, and `teammate_chances` the chance the teammate it depends on plays
+    each of `days` (None when it depends on no one)."""
     role = role_of(state, coeffs)
     rates = rates_of(state, coeffs, generic)
     ahead = [
@@ -826,6 +855,10 @@ def project_player(
         )
         for day, chance, missing, missing_usage in zip(days, outlook.chances, outlook.missing, outlook.missing_usage)
     ]
+    held: list[float] = []
+    if note is not None:
+        held = holds(note, [g.day for g in ahead], teammate_chances)
+        ahead = [noted(game, note, hold) for game, hold in zip(ahead, held)]
     out = LiveProjection(player_id=state.player_id, team=state.team, games=outlook.games, minutes=0.0,
                          per_game={}, rates=rates, games_ahead=ahead)
     weights = outlook.chances if outlook.games > 0 else [1.0] * len(ahead)
@@ -853,6 +886,14 @@ def project_player(
         "not_yet_played": state.pre,
         "team_games_left": len(days),
     }
+    if note is not None:
+        last = max((g.day for g, hold in zip(ahead, held) if hold >= 0.5), default=None)
+        out.parts["note"] = {
+            "id": note.note_id, "kind": note.kind, "minutes": note.minutes, "usage": note.usage,
+            "until": note.until_date.isoformat() if note.until_date else None, "depends_on": note.depends_on,
+            # his team's games it covers, and the last day it is more likely than not still holding
+            "games": round(sum(held), 1), "through": last.isoformat() if last else None,
+        }
     return out
 
 
@@ -875,14 +916,26 @@ def project(
     morning: Morning,
     coeffs: Coefficients,
     known: Optional[Mapping[int, Availability]] = None,
+    notes: Optional[Mapping[int, RoleNote]] = None,
 ) -> dict[int, LiveProjection]:
-    """Every player's live projection for the morning."""
+    """Every player's live projection for the morning.
+
+    `known` is what is known about absences (the availability feed, and the
+    games part of the season's notes); `notes` the role part of each player's
+    season note in force (`services.live_notes`). A note that depends on a
+    teammate reads that teammate's own chances, so it ends when he is expected
+    back. One that names a player on another team depends on nothing.
+    """
     looks = outlooks(morning, coeffs, known)
     generic = generic_prior(morning)
+    notes = notes or {}
     out: dict[int, LiveProjection] = {}
     for pid, state in morning.players.items():
         days = morning.ahead.get(state.team, []) if state.team else []
-        out[pid] = project_player(state, looks[pid], days, coeffs, generic)
+        note = notes.get(pid)
+        teammate = morning.players.get(note.depends_on) if (note is not None and note.depends_on is not None) else None
+        waits_on = looks[teammate.player_id].chances if (teammate is not None and teammate.team == state.team) else None
+        out[pid] = project_player(state, looks[pid], days, coeffs, generic, note=note, teammate_chances=waits_on)
         info = (known or {}).get(pid)
         if info is not None:
             out[pid].parts["known"] = {

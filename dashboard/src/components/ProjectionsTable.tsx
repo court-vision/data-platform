@@ -2,16 +2,20 @@ import { ChevronRight } from "lucide-react"
 import { Fragment } from "react"
 
 import { Chip, Tag } from "@/components/blocks"
-import { ProjectionDetail } from "@/components/ProjectionDetail"
+import { ProjectionDetail, type Editing } from "@/components/ProjectionDetail"
 import {
   describeChange,
+  describeNote,
   espnRankOf,
   formatStat,
   gapIsWide,
   kindLabel,
   rankGap,
   rankOf,
+  standingLabel,
   STAT_COLUMNS,
+  teammatesOf,
+  type AdjustmentEntry,
   type Format,
   type ProjectionRow,
 } from "@/lib/projections"
@@ -23,23 +27,25 @@ const COLUMNS = 5 + STAT_COLUMNS.length
 
 /**
  * Every projected player's published line, with Court Vision's rank beside
- * ESPN's. A row opens onto the lines it was built from and the adjustment on
- * top of them; one row is open at a time.
+ * ESPN's. A row opens onto the lines it was built from, the adjustment on
+ * top of them and his season note; one row is open at a time.
  */
 export function ProjectionsTable({
   rows,
+  players,
   format,
   openId,
   onToggle,
-  kinds,
-  espnWeight,
+  editing,
 }: {
+  /** The rows shown, filtered and ordered. */
   rows: ProjectionRow[]
+  /** Everybody, whatever the filter: a note can wait on a teammate the view has filtered out. */
+  players: ProjectionRow[]
   format: Format
   openId: number | null
   onToggle: (playerId: number) => void
-  kinds: string[]
-  espnWeight: number
+  editing: Omit<Editing, "season"> & { season: Omit<Editing["season"], "teammates"> }
 }) {
   return (
     <div className={s.bleed}>
@@ -50,7 +56,7 @@ export function ProjectionsTable({
             <th scope="col" className={s.num} title="ESPN's published draft rank for the same format">ESPN</th>
             <th scope="col" className={s.num} title="ESPN's rank minus Court Vision's: positive means Court Vision is higher on him">Gap</th>
             <th scope="col">Player</th>
-            <th scope="col">Adjustment</th>
+            <th scope="col" title="His season note, read by the live projection, and his preseason adjustment">Note and adjustment</th>
             {STAT_COLUMNS.map((column) => (
               <th key={column.key} scope="col" title={column.title} className={s.num}>
                 {column.label}
@@ -69,10 +75,9 @@ export function ProjectionsTable({
                     <td colSpan={COLUMNS}>
                       <ProjectionDetail
                         // A save replaces the live row: start the form again from what was saved.
-                        key={row.adjustment?.id ?? "none"}
+                        key={`${row.adjustment?.id ?? "none"}:${row.note?.id ?? "none"}`}
                         row={row}
-                        kinds={kinds}
-                        espnWeight={espnWeight}
+                        editing={{ ...editing, season: { ...editing.season, teammates: teammatesOf(row, players) } }}
                       />
                     </td>
                   </tr>
@@ -115,10 +120,15 @@ function ProjectionRowView({
         </button>
       </th>
       <td>
-        {row.adjustment ? (
-          <span title={row.adjustment.note} className={p.adjustment}>
-            <Chip tone="warn">{kindLabel(row.adjustment.kind)}</Chip>
-            <span className={`${s.mono} ${s.muted}`}>{describeChange(row.adjustment)}</span>
+        {row.adjustment || row.note ? (
+          <span className={p.judgments}>
+            {row.note && <NoteSummary note={row.note} />}
+            {row.adjustment && (
+              <span title={row.adjustment.note} className={p.adjustment}>
+                <Chip tone="warn">{kindLabel(row.adjustment.kind)}</Chip>
+                <span className={`${s.mono} ${s.muted}`}>{describeChange(row.adjustment)}</span>
+              </span>
+            )}
           </span>
         ) : (
           <span className={s.muted}>—</span>
@@ -130,5 +140,18 @@ function ProjectionRowView({
         </td>
       ))}
     </tr>
+  )
+}
+
+/** His live season note in a line: whether it is still applied, and what it states. */
+function NoteSummary({ note }: { note: AdjustmentEntry }) {
+  const standing = standingLabel(note.standing)
+  return (
+    <span title={note.note} className={p.adjustment}>
+      <Chip tone={standing?.tone ?? "up"} title={standing?.detail || undefined}>
+        {standing && standing.label !== "in force" ? `Note: ${standing.label}` : "Note"}
+      </Chip>
+      <span className={`${s.mono} ${s.muted}`}>{describeNote(note)}</span>
+    </span>
   )
 }

@@ -9,6 +9,12 @@ export type AdjustmentChange = Schemas["AdjustmentChange"]
 export type AdjustmentSave = Schemas["AdjustmentSave"]
 export type ProjectionPreview = Schemas["ProjectionPreview"]
 export type AdjustmentKind = AdjustmentSave["kind"]
+export type NoteChange = Schemas["NoteChange"]
+export type NoteSave = Schemas["NoteSave"]
+export type NotePreview = Schemas["NotePreview"]
+export type NoteStanding = Schemas["NoteStanding"]
+export type EvidenceItem = Schemas["EvidenceItem"]
+export type LiveStretch = Schemas["LiveStretch"]
 
 /** Which of the two standard boards the rank columns read. */
 export type Format = "points" | "categories"
@@ -48,16 +54,25 @@ export function gapIsWide(row: ProjectionRow, format: Format): boolean {
 
 // ---- filtering and sorting -----------------------------------------------------------------
 
-export type Filter = "all" | "adjusted" | "rookies" | "gap"
+export type Filter = "all" | "adjusted" | "notes" | "review" | "rookies" | "gap"
 export const FILTERS: readonly { key: Filter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "adjusted", label: "Adjusted" },
+  { key: "notes", label: "Season notes" },
+  { key: "review", label: "To read again" },
   { key: "gap", label: `±${WIDE_GAP} vs ESPN` },
   { key: "rookies", label: "No NBA history" },
 ]
 
+/** A live season note that is no longer applied: past its review date, or ended. */
+export function noteNeedsReading(row: ProjectionRow): boolean {
+  return row.note?.standing != null && row.note.standing.state !== "in_force"
+}
+
 export function matchesFilter(row: ProjectionRow, filter: Filter, format: Format): boolean {
   if (filter === "adjusted") return row.adjustment != null
+  if (filter === "notes") return row.note != null
+  if (filter === "review") return noteNeedsReading(row)
   if (filter === "rookies") return row.statistical == null
   if (filter === "gap") return gapIsWide(row, format)
   return true
@@ -289,6 +304,214 @@ export function saveBlocker(form: AdjustmentForm, parsed: ParsedChange, previewe
   return null
 }
 
+// ---- the season note -----------------------------------------------------------------------
+
+/** Which of an opened row's two forms is showing. */
+export type EditMode = "note" | "adjustment"
+export const EDIT_MODES: readonly { key: EditMode; label: string }[] = [
+  { key: "note", label: "Season note" },
+  { key: "adjustment", label: "Preseason adjustment" },
+]
+
+/** In season the note is the form that matters; before the first live projection, the adjustment. */
+export function defaultEditMode(data: Pick<ProjectionsData, "live_as_of">): EditMode {
+  return data.live_as_of ? "note" : "adjustment"
+}
+
+/** The live projection's line: the games are the ones left, so they are shown to a decimal. */
+export const LIVE_COLUMNS: readonly StatColumn[] = STAT_COLUMNS.map((column) =>
+  column.key === "games" ? { ...column, label: "GP left", title: "Games he is expected to play from here", digits: 1 } : column,
+)
+
+type NoteFacts = Pick<
+  AdjustmentEntry,
+  "minutes" | "games" | "return_date" | "return_earliest" | "return_latest" | "usage" | "until_date" | "depends_on_player_id" | "depends_on_name"
+>
+
+/** "back Dec 8 (Dec 1 to Dec 20) · 30 min · usage ×1.1 · through Dec 20 · until Jokić plays": what a note states. */
+export function describeNote(note: NoteFacts): string {
+  const parts: string[] = []
+  if (note.games === 0) parts.push("out for the season")
+  if (note.return_date) {
+    const range =
+      note.return_earliest || note.return_latest
+        ? ` (${note.return_earliest ? formatDay(note.return_earliest) : "…"} to ${note.return_latest ? formatDay(note.return_latest) : "…"})`
+        : ""
+    parts.push(`back ${formatDay(note.return_date)}${range}`)
+  }
+  if (note.minutes != null) parts.push(`${note.minutes} min`)
+  if (note.usage != null) parts.push(`usage ×${note.usage}`)
+  if (note.until_date) parts.push(`through ${formatDay(note.until_date)}`)
+  if (note.depends_on_player_id != null) parts.push(`until ${note.depends_on_name ?? `player ${note.depends_on_player_id}`} plays`)
+  return parts.join(" · ") || "nothing"
+}
+
+/** A version of either scope, as what it sets. */
+export function describeEntry(entry: AdjustmentEntry): string {
+  return entry.scope === "season" ? describeNote(entry) : describeChange(entry)
+}
+
+export type StandingTone = "up" | "warn" | "quiet"
+
+/** A reason as the API words it, with its dates as the page writes dates: "he played on Nov 20". */
+export function readableReason(reason: string): string {
+  return reason.replace(/\d{4}-\d{2}-\d{2}/g, (day) => formatDay(day))
+}
+
+/** How a live note stands, for its chip: in force, in force in part, due to be read again, or ended. */
+export function standingLabel(standing: NoteStanding | null | undefined): { label: string; tone: StandingTone; detail: string } | null {
+  if (!standing) return null
+  const detail = standing.reasons.map(readableReason).join("; ")
+  if (standing.state === "review_due") return { label: "read again", tone: "warn", detail: detail || "its review date has passed" }
+  if (standing.state === "ended") return { label: "ended", tone: "quiet", detail: detail || "nothing of it applies any more" }
+  // A part of it has ended and the other is still applied
+  if (standing.reasons.length > 0) return { label: "in force in part", tone: "up", detail }
+  return { label: "in force", tone: "up", detail: "" }
+}
+
+/** "Nov 16 – Nov 22 · 4 games · out" or "… · plays 84% · 28 min · usage ×0.99". */
+export function describeStretch(stretch: LiveStretch): string {
+  const days = stretch.first === stretch.last ? formatDay(stretch.first) : `${formatDay(stretch.first)} – ${formatDay(stretch.last)}`
+  const games = stretch.games === 1 ? "1 game" : `${stretch.games} games`
+  if (stretch.chance <= 0) return `${days} · ${games} · out`
+  return `${days} · ${games} · plays ${Math.round(stretch.chance * 100)}% · ${stretch.minutes.toFixed(1)} min · usage ×${stretch.usage.toFixed(2)}`
+}
+
+/** The players a note's minutes can wait on: everyone else on his team, by name. */
+export function teammatesOf(row: ProjectionRow, rows: ProjectionRow[]): ProjectionRow[] {
+  if (!row.team) return []
+  return rows
+    .filter((other) => other.team === row.team && other.player_id !== row.player_id)
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** The note form's own state: everything as the inputs hold it. */
+export interface NoteForm {
+  kind: string
+  out_for_season: boolean
+  return_date: string
+  return_earliest: string
+  return_latest: string
+  minutes: string
+  usage: string
+  until_date: string
+  /** The teammate's player id, or "" for nobody. */
+  depends_on: string
+  confidence: string
+  /** Blank: the API's default, two weeks from today. */
+  review_date: string
+  note: string
+  source_url: string
+  /** The ids of the stored news items it cites. */
+  evidence: number[]
+}
+
+/**
+ * The form for a player's live note. The review date starts blank: a note
+ * saved again is read again two weeks from that save, not from the first one.
+ */
+export function noteFormFrom(note: AdjustmentEntry | null | undefined): NoteForm {
+  return {
+    kind: note?.kind ?? "injury_current",
+    out_for_season: note?.games === 0,
+    return_date: note?.return_date ?? "",
+    return_earliest: note?.return_earliest ?? "",
+    return_latest: note?.return_latest ?? "",
+    minutes: note?.minutes != null ? String(note.minutes) : "",
+    usage: note?.usage != null ? String(note.usage) : "",
+    until_date: note?.until_date ?? "",
+    depends_on: note?.depends_on_player_id != null ? String(note.depends_on_player_id) : "",
+    confidence: note?.confidence ?? "",
+    review_date: "",
+    note: note?.note ?? "",
+    source_url: note?.source_url ?? "",
+    evidence: (note?.evidence ?? []).flatMap((item) => (item.type === "news" && item.id != null ? [item.id] : [])),
+  }
+}
+
+export interface ParsedNote {
+  /** What the form states; fields left blank are absent. */
+  change: NoteChange
+  /** The review date as typed, or null for the default. */
+  review_date: string | null
+  /** Field name → what is wrong with it. Empty when the note can be previewed. */
+  errors: Record<string, string>
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
+
+/** The form as the API's note, with the same rules the API enforces, said next to the field. */
+export function parseNote(form: NoteForm): ParsedNote {
+  const errors: Record<string, string> = {}
+  const change: NoteChange = {}
+
+  const day = (field: "return_date" | "return_earliest" | "return_latest" | "until_date" | "review_date"): string | null => {
+    const text = form[field].trim()
+    if (!text) return null
+    if (!ISO_DAY.test(text)) {
+      errors[field] = "a date"
+      return null
+    }
+    return text
+  }
+
+  const back = day("return_date")
+  const earliest = day("return_earliest")
+  const latest = day("return_latest")
+  if (form.out_for_season) {
+    change.out_for_season = true
+    if (back || earliest || latest) errors.return_date = "a season written off has no return date"
+  } else {
+    if (back) change.return_date = back
+    if ((earliest || latest) && !back) errors.return_date = "the range is around a date: give the likely one"
+    if (earliest && back && earliest > back) errors.return_earliest = "after the likely date"
+    else if (earliest && back) change.return_earliest = earliest
+    if (latest && back && latest < back) errors.return_latest = "before the likely date"
+    else if (latest && back) change.return_latest = latest
+  }
+
+  const minutes = parseNumber(form.minutes)
+  if (minutes === "invalid" || (minutes != null && (minutes < 0 || minutes > 48))) errors.minutes = "0 to 48"
+  else if (minutes != null) change.minutes = minutes
+
+  const usage = parseNumber(form.usage)
+  if (usage === "invalid" || (usage != null && (usage <= 0 || usage > 2))) errors.usage = "above 0, at most 2"
+  else if (usage != null) change.usage = usage
+
+  const role = change.minutes != null || change.usage != null
+  const until = day("until_date")
+  if (until && !role) errors.until_date = "it ends the minutes or usage: set one"
+  else if (until) change.until_date = until
+
+  const teammate = form.depends_on.trim()
+  if (teammate && !role) errors.depends_on = "he ends the minutes or usage: set one"
+  else if (teammate) change.depends_on_player_id = Number(teammate)
+
+  return { change, review_date: day("review_date"), errors }
+}
+
+export function noteStatesSomething(change: NoteChange): boolean {
+  return change.return_date != null || change.out_for_season === true || change.minutes != null || change.usage != null
+}
+
+/** A stable key for a note, so a preview can be matched to the form it was computed for. */
+export function noteKey(parsed: Pick<ParsedNote, "change" | "review_date">): string {
+  const c = parsed.change
+  return JSON.stringify([
+    c.return_date ?? null, c.out_for_season ?? false, c.minutes ?? null, c.usage ?? null,
+    c.until_date ?? null, c.depends_on_player_id ?? null, parsed.review_date,
+  ])
+}
+
+/** What stands between the note form and Save, or null when it can be saved. */
+export function noteSaveBlocker(form: NoteForm, parsed: ParsedNote, previewedKey: string | null): string | null {
+  if (Object.keys(parsed.errors).length > 0) return "Fix the highlighted fields"
+  if (!noteStatesSomething(parsed.change)) return "Set a return date, a season written off, minutes or usage"
+  if (!form.note.trim()) return "Say why: a note is required"
+  if (previewedKey !== noteKey(parsed)) return "Preview this note first"
+  return null
+}
+
 // ---- the page's summary ---------------------------------------------------------------------
 
 export type TileTone = "plain" | "good" | "warn" | "quiet"
@@ -297,17 +520,42 @@ export interface SummaryTile {
   label: string
   value: number
   tone: TileTone
+  note?: string
 }
 
+/**
+ * Four tiles. Before the season the third is the disagreements with ESPN,
+ * which is what a preseason read is checked against; once there is a live
+ * projection it is the season's notes, and how many of them nobody has read
+ * again (those are not applied, so the count is the day's reading list).
+ */
 export function summaryTiles(data: ProjectionsData, format: Format): SummaryTile[] {
   const adjusted = data.players.filter((row) => row.adjustment != null).length
-  const wide = data.players.filter((row) => gapIsWide(row, format)).length
+  const third = (): SummaryTile => {
+    if (!data.live_as_of) {
+      const wide = data.players.filter((row) => gapIsWide(row, format)).length
+      return { label: `±${WIDE_GAP} vs ESPN`, value: wide, tone: wide > 0 ? "plain" : "quiet" }
+    }
+    const noted = data.players.filter((row) => row.note != null).length
+    const due = data.players.filter(noteNeedsReading).length
+    return {
+      label: "Season notes",
+      value: noted,
+      tone: due > 0 ? "warn" : noted > 0 ? "good" : "quiet",
+      ...(due > 0 ? { note: `${due} to read again` } : {}),
+    }
+  }
   return [
     { label: "Players", value: data.players.length, tone: "plain" },
     { label: "Adjusted", value: adjusted, tone: adjusted > 0 ? "good" : "quiet" },
-    { label: `±${WIDE_GAP} vs ESPN`, value: wide, tone: wide > 0 ? "plain" : "quiet" },
+    third(),
     { label: "Unpublished", value: data.unpublished, tone: data.unpublished > 0 ? "warn" : "quiet" },
   ]
+}
+
+/** "live projection of Nov 16" or that the season's first has not been built. */
+export function describeLive(data: Pick<ProjectionsData, "live_as_of">): string {
+  return data.live_as_of ? `live projection of ${formatDay(data.live_as_of)}` : "no live projection yet: season notes wait for the first one"
 }
 
 /** "published Oct 1 · the board reads what this page shows" or how far behind it is. */

@@ -39,21 +39,12 @@ BASE = "/v1/dashboard/projections"
 SEASON = settings.nba_season
 LAST_SEASON = season_label(season_start(SEASON) - 1)
 STAR, VET, RETIRED = 201, 202, 203
-MODELS = [PlayerProfile, PlayerHistory, PlayerProjection, ProjectionAdjustment, DraftMarket]
+MODELS = [PlayerProfile, PlayerHistory, PlayerProjection, DraftMarket]
 
 
 @pytest.fixture(scope="module", autouse=True)
-def editor_tables(integration_db):
+def editor_tables(integration_db, adjustments_table):
     db.create_tables(MODELS, safe=True)
-    db.execute_sql("""
-        DO $$ BEGIN
-            ALTER TABLE nba.projection_adjustments
-                ALTER CONSTRAINT projection_adjustments_superseded_by_fkey DEFERRABLE INITIALLY DEFERRED;
-        EXCEPTION WHEN undefined_object THEN NULL; END $$;
-        CREATE UNIQUE INDEX IF NOT EXISTS projection_adjustments_active_uidx
-            ON nba.projection_adjustments (player_id, season)
-            WHERE superseded_by IS NULL AND retired_at IS NULL;
-    """)
     yield
 
 

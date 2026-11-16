@@ -3,10 +3,15 @@
 writes nothing, and the two writes — each followed by a republish. The
 database read, the backend call and the pipeline run are stubbed; the editor's
 own arithmetic is not.
+
+The season's notes have the same four routes of their own (the Live rankings
+plan, step 3): a note tried on the live projection, a save and a retire that
+rebuild the live projection and leave the preseason one alone, and the news a
+note can cite.
 """
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +21,11 @@ from fastapi.testclient import TestClient
 from api.v1 import projections
 from db.models.nba import ProjectionAdjustment
 from schemas.pipeline import PipelineResult
+from schemas.projections import EvidenceItem
+from services import live_projection_inputs as live_inputs
 from services import projection_editor as editor
+from services import projection_notes as notes
+from services.live_projection_model import BoxLine, Prior
 from services.projection_inputs import ProjectionInputs
 from services.projection_model import LINE_KEYS, Coefficients, EspnLine, HistoryRow
 from services.valuation_client import StandardRank, Valuation
@@ -92,6 +101,8 @@ def client(monkeypatch):
 @pytest.mark.parametrize("method, path", [
     ("get", BASE), ("post", f"{BASE}/preview"), ("put", f"{BASE}/2/adjustment"),
     ("delete", f"{BASE}/2/adjustment"), ("get", f"{BASE}/2/adjustments"),
+    ("post", f"{BASE}/note/preview"), ("put", f"{BASE}/2/note"), ("delete", f"{BASE}/2/note"),
+    ("get", f"{BASE}/2/news"),
 ])
 def test_every_route_needs_the_token(client, method, path):
     assert getattr(client.http, method)(path).status_code in (401, 403)
@@ -259,3 +270,225 @@ def test_history_lists_every_version_newest_first(client, monkeypatch):
     data = res.json()["data"]
     assert (data["player_id"], data["season"]) == (2, os.environ["NBA_SEASON"])
     assert [(v["id"], v["state"]) for v in data["versions"]] == [(77, "live"), (70, "superseded")]
+
+
+# ---- notes in season -----------------------------------------------------------------------
+
+TODAY = date(2026, 11, 16)
+AHEAD = [TODAY + timedelta(days=2 * i) for i in range(8)]
+LIVE_PER_MINUTE = {k: PER_MIN[k] for k in ("pts", "reb", "ast", "stl", "blk", "tov", "fgm", "fga", "fg3m", "fg3a",
+                                           "ftm", "fta")}
+
+
+def _morning() -> live_inputs.LiveInputs:
+    """Nov 16: the star (1) and the vet (2) have played all eight of DEN's games, with eight to go."""
+    lines = [
+        BoxLine(player_id=pid, team="DEN", game_id=f"g{g}", game_date=TODAY - timedelta(days=16 - 2 * g),
+                minutes=mpg, stats={k: v * mpg for k, v in LIVE_PER_MINUTE.items()})
+        for g in range(8) for pid, mpg in ((1, 34.0), (2, 24.0))
+    ]
+    priors = {pid: Prior(minutes=mpg, games=70.0, per_game={k: v * mpg for k, v in LIVE_PER_MINUTE.items()})
+              for pid, mpg in ((1, 34.0), (2, 24.0))}
+    return live_inputs.LiveInputs(
+        season="2026-27", as_of=TODAY, lines=lines, ahead={"DEN": AHEAD}, priors=priors, prior_source="cv",
+        prior_as_of=date(2026, 10, 20), teams={1: "DEN", 2: "DEN"}, ages={},
+    )
+
+
+@pytest.fixture
+def season(client, monkeypatch):
+    """The note routes on the morning above, with nothing stored and every write watched."""
+    client.loaded, client.recorded = [], []
+
+    def load_inputs(season, day):
+        client.loaded.append((season, day))
+        return _morning()
+
+    def record(cls, player_id, season, **fields):
+        client.recorded.append((player_id, season, fields))
+        return _record(id=91, player=player_id, scope="season", kind=fields["kind"], minutes=fields["minutes"],
+                       return_date=fields["return_date"], review_date=fields["review_date"],
+                       evidence=fields["evidence"], author=fields["author"])
+
+    monkeypatch.setattr(live_inputs, "load_inputs", load_inputs)
+    monkeypatch.setattr(notes, "today_et", lambda now=None: TODAY)
+    monkeypatch.setattr(projections, "_eastern_now", lambda: datetime(2026, 11, 16, 9, 0))
+    monkeypatch.setattr(ProjectionAdjustment, "record", classmethod(record))
+    monkeypatch.setattr(editor, "player_exists", lambda pid: pid in (1, 2))
+    monkeypatch.setattr(notes, "evidence_for", lambda ids: ([{"type": "news", "id": i, "headline": "out"} for i in ids], []))
+    monkeypatch.setattr(editor, "adjustment_history",
+                        lambda pid, season: [editor.adjustment_entry(_record(id=91, scope="season", minutes=20.0))])
+    return client
+
+
+def test_a_note_tried_on_runs_the_live_model_twice_and_writes_nothing(season):
+    res = season.http.post(f"{BASE}/note/preview", headers=_AUTH,
+                           json={"player_id": 1, "note": {"return_date": AHEAD[4].isoformat(), "minutes": 28,
+                                                          "until_date": AHEAD[5].isoformat()}})
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["message"] == "Preview computed; nothing was saved"
+    data = body["data"]
+    assert (data["player_id"], data["as_of"]) == (1, TODAY.isoformat())
+    # Out for the four games before the date, then two at 28 minutes, then his own
+    first, limit, own = data["after"]["stretches"]
+    assert (first["first"], first["last"], first["games"], first["chance"]) == (
+        AHEAD[0].isoformat(), AHEAD[3].isoformat(), 4, 0.0)
+    assert (limit["first"], limit["last"], limit["minutes"]) == (AHEAD[4].isoformat(), AHEAD[5].isoformat(), 28.0)
+    assert (own["first"], own["last"], own["minutes"]) == (AHEAD[6].isoformat(), AHEAD[7].isoformat(), 34.0)
+    assert [(s["first"], s["games"], s["minutes"]) for s in data["before"]["stretches"]] == [
+        (AHEAD[0].isoformat(), 8, 34.0)]
+    assert data["after"]["line"]["games"] < data["before"]["line"]["games"] - 3
+    assert data["standing"] == {"state": "in_force", "games": True, "role": True, "reasons": []}
+    # The morning is read once, for the season and the Eastern day; it is a price, not a rank
+    assert season.loaded == [(os.environ["NBA_SEASON"], TODAY)]
+    assert season.recorded == [] and season.runs == [] and season.valued == []
+
+
+def test_a_note_tried_on_someone_the_live_model_does_not_project_is_a_404(season):
+    res = season.http.post(f"{BASE}/note/preview", headers=_AUTH, json={"player_id": 999, "note": {"minutes": 30}})
+    assert res.status_code == 404 and "not in the live projection" in res.json()["detail"]
+
+
+@pytest.mark.parametrize("note", [
+    {},                                                                  # states nothing
+    {"until_date": "2026-12-01"},                                        # an end with nothing to end
+    {"depends_on_player_id": 1},
+    {"out_for_season": True, "return_date": "2026-12-08"},               # gone and coming back
+    {"return_earliest": "2026-12-01"},                                   # a range around nothing
+    {"return_date": "2026-12-08", "return_earliest": "2026-12-09"},
+    {"return_date": "2026-12-08", "return_latest": "2026-12-07"},
+    {"minutes": 60}, {"usage": 0}, {"usage": 2.5}, {"return_date": "soon"},
+    {"minutes": 30, "rates": {"blk": 1.1}},                              # a note sets no per-stat multiplier
+    {"minutes": 30, "games": 60},                                        # nor a games target
+])
+def test_a_note_that_does_not_hold_together_is_refused(season, note):
+    preview = season.http.post(f"{BASE}/note/preview", headers=_AUTH, json={"player_id": 2, "note": note})
+    save = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "note": "why"} | note)
+    assert (preview.status_code, save.status_code) == (422, 422)
+    assert season.recorded == [] and season.runs == []
+
+
+def test_saving_a_note_writes_one_season_row_and_rebuilds_the_live_projection(season):
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={
+        "kind": "injury_return", "return_date": "2026-11-20", "return_earliest": "2026-11-18",
+        "return_latest": "2026-11-24", "minutes": 20, "usage": 0.9, "until_date": "2026-12-04",
+        "depends_on_player_id": 1, "confidence": "likely", "evidence_news_ids": [5, 5, 8],
+        "note": "  back on a limit  ", "source_url": " ", "author": "jp",
+    })
+
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["message"] == "Note saved and the live projection rebuilt"
+    assert body["data"]["rebuilt"] is True and body["data"]["pipeline"]["records_processed"] == 2
+    assert (body["data"]["note"]["id"], body["data"]["note"]["scope"]) == (91, "season")
+    ((player_id, season_label, fields),) = season.recorded
+    assert (player_id, season_label) == (2, os.environ["NBA_SEASON"])
+    assert fields == {
+        "scope": "season", "kind": "injury_return", "minutes": 20.0, "usage": 0.9, "games": None,
+        "return_date": date(2026, 11, 20), "return_earliest": date(2026, 11, 18), "return_latest": date(2026, 11, 24),
+        "until_date": date(2026, 12, 4), "depends_on_player": 1,
+        "evidence": [{"type": "news", "id": 5, "headline": "out"}, {"type": "news", "id": 5, "headline": "out"},
+                     {"type": "news", "id": 8, "headline": "out"}],
+        "confidence": "likely", "review_date": TODAY + timedelta(days=14),
+        "note": "back on a limit", "source_url": None, "author": "jp",
+    }
+    # The live projection, and never the preseason one: a note cannot rewrite the prior
+    assert season.runs == [("live_projection", {"options": {"force": True}})]
+
+
+def test_a_season_written_off_is_stored_as_no_games_and_keeps_the_review_date_given(season):
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={
+        "kind": "injury_current", "out_for_season": True, "review_date": "2027-01-15", "note": "Achilles"})
+
+    assert res.status_code == 200, res.text
+    fields = season.recorded[0][2]
+    assert (fields["games"], fields["return_date"], fields["review_date"], fields["evidence"]) == (
+        0, None, date(2027, 1, 15), None)
+    assert fields["author"] == "dashboard"
+
+
+def test_a_rebuild_that_stored_nothing_keeps_the_note_and_says_so(season, monkeypatch):
+    async def nothing_stored(name, **kwargs):
+        return PipelineResult(status="success", message="day over", started_at="2026-11-16T05:00:00",
+                              records_processed=0, records_skipped=1)
+
+    monkeypatch.setattr(projections, "run_pipeline", nothing_stored)
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["message"] == "Note saved; the live projection reads it on its next run"
+    assert body["data"]["rebuilt"] is False and body["data"]["note"]["id"] == 91 and len(season.recorded) == 1
+
+    async def failing(name, **kwargs):
+        return PipelineResult(status="server_error", message="boom", started_at="2026-11-16T05:00:00", error="boom")
+
+    monkeypatch.setattr(projections, "run_pipeline", failing)
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
+    assert res.status_code == 200 and res.json()["data"]["rebuilt"] is False
+
+
+@pytest.mark.parametrize("pid, extra, status, says", [
+    (999, {}, 404, "No player 999"),
+    (2, {"depends_on_player_id": 2}, 422, "cannot depend on the player it is about"),
+    (2, {"depends_on_player_id": 999}, 422, "No player 999 to depend on"),
+    (2, {"review_date": "2026-11-15"}, 422, "review date has already passed"),
+    (0, {}, 422, None),
+], ids=["nobody", "depends on himself", "no such teammate", "review date gone", "not an id"])
+def test_a_note_that_cannot_be_saved_writes_nothing_and_rebuilds_nothing(season, pid, extra, status, says):
+    res = season.http.put(f"{BASE}/{pid}/note", headers=_AUTH,
+                          json={"kind": "role", "minutes": 30, "note": "why"} | extra)
+    assert res.status_code == status and (says is None or says in res.json()["detail"])
+    assert season.recorded == [] and season.runs == []
+
+
+def test_a_note_citing_news_that_is_not_stored_is_refused(season, monkeypatch):
+    monkeypatch.setattr(notes, "evidence_for", lambda ids: ([], [8, 9]))
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH,
+                          json={"kind": "role", "minutes": 30, "note": "why", "evidence_news_ids": [8, 9]})
+    assert res.status_code == 422 and res.json()["detail"] == "No stored news item 8, 9"
+    assert season.recorded == [] and season.runs == []
+    # And no more than twenty at a time
+    many = season.http.put(f"{BASE}/2/note", headers=_AUTH,
+                           json={"kind": "role", "minutes": 30, "note": "why", "evidence_news_ids": list(range(21))})
+    assert many.status_code == 422
+
+
+def test_retiring_a_note_withdraws_the_season_row_only_and_rebuilds(season, monkeypatch):
+    retired = []
+    monkeypatch.setattr(ProjectionAdjustment, "retire",
+                        classmethod(lambda cls, pid, season, scope: retired.append((pid, season, scope)) or 1))
+
+    res = season.http.delete(f"{BASE}/2/note", headers=_AUTH)
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["message"] == "Note retired and the live projection rebuilt"
+    assert body["data"]["note"] is None and body["data"]["rebuilt"] is True
+    assert retired == [(2, os.environ["NBA_SEASON"], "season")]
+    assert season.runs == [("live_projection", {"options": {"force": True}})]
+
+    monkeypatch.setattr(ProjectionAdjustment, "retire", classmethod(lambda cls, pid, season, scope: 0))
+    assert season.http.delete(f"{BASE}/2/note", headers=_AUTH).status_code == 404
+    assert len(season.runs) == 1
+
+
+def test_the_news_route_lists_what_a_note_can_cite(season, monkeypatch):
+    asked = []
+
+    def recent(player_id):
+        asked.append(player_id)
+        return [EvidenceItem(id=8, source="rotowire_rss", kind="injury", headline="Out two weeks",
+                             url="https://example.com/8", published_at=datetime(2026, 11, 15, 22, 5))]
+
+    monkeypatch.setattr(notes, "recent_news", recent)
+    res = season.http.get(f"{BASE}/2/news", headers=_AUTH)
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["message"] == "1 item(s)" and asked == [2]
+    assert body["data"] == {"player_id": 2, "items": [{
+        "type": "news", "id": 8, "source": "rotowire_rss", "kind": "injury", "headline": "Out two weeks",
+        "url": "https://example.com/8", "published_at": "2026-11-15T22:05:00"}]}

@@ -77,6 +77,36 @@ def integration_db():
         db.close()
 
 
+@pytest.fixture(scope="session")
+def adjustments_table(integration_db):
+    """nba.projection_adjustments as the backend's migrations 0027 and 0052 leave it:
+    the model's columns, a self-reference checked at commit, and one live row per
+    player per season per scope. The local database outlives a test run, so a table
+    left by an older checkout is rebuilt when it lacks the model's columns."""
+    from db.models.nba import ProjectionAdjustment
+
+    have = {
+        name for (name,) in db.execute_sql(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'nba' AND table_name = 'projection_adjustments'"
+        ).fetchall()
+    }
+    if have and not {f.column_name for f in ProjectionAdjustment._meta.sorted_fields} <= have:
+        db.execute_sql("DROP TABLE nba.projection_adjustments CASCADE")
+    db.create_tables([ProjectionAdjustment], safe=True)
+    db.execute_sql("""
+        DO $$ BEGIN
+            ALTER TABLE nba.projection_adjustments
+                ALTER CONSTRAINT projection_adjustments_superseded_by_fkey DEFERRABLE INITIALLY DEFERRED;
+        EXCEPTION WHEN undefined_object THEN NULL; END $$;
+        DROP INDEX IF EXISTS nba.projection_adjustments_active_uidx;
+        CREATE UNIQUE INDEX IF NOT EXISTS projection_adjustments_active_scope_uidx
+            ON nba.projection_adjustments (player_id, season, scope)
+            WHERE superseded_by IS NULL AND retired_at IS NULL;
+    """)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def clean_integration_tables(integration_db):
     """Reset mutable integration tables between tests."""

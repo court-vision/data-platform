@@ -3,23 +3,38 @@ import { describe, expect, test } from "bun:test"
 import {
   changeKey,
   changesSomething,
+  defaultEditMode,
   describeChange,
+  describeEntry,
+  describeLive,
+  describeNote,
   describePublished,
   describeRanks,
+  describeStretch,
   formFrom,
   formatStat,
   gapIsWide,
+  LIVE_COLUMNS,
   matchesQuery,
+  noteFormFrom,
+  noteKey,
+  noteNeedsReading,
+  noteSaveBlocker,
+  noteStatesSomething,
   parseChange,
+  parseNote,
   rankGap,
   rankMove,
   saveBlocker,
+  standingLabel,
   STAT_COLUMNS,
   statDiffers,
   summaryTiles,
+  teammatesOf,
   visibleRows,
   type AdjustmentEntry,
   type AdjustmentForm,
+  type NoteForm,
   type ProjectionLine,
   type ProjectionRow,
   type ProjectionsData,
@@ -35,10 +50,23 @@ function line(overrides: Partial<ProjectionLine> = {}): ProjectionLine {
 
 function adjustment(overrides: Partial<AdjustmentEntry> = {}): AdjustmentEntry {
   return {
-    id: 7, kind: "role", minutes: 32, games: null, return_date: null, usage: null, rates: null,
+    id: 7, scope: "preseason", kind: "role", minutes: 32, games: null, return_date: null, usage: null, rates: null,
     note: "starting now", source_url: null, author: "jp", created_at: "2026-10-01T12:00:00", state: "live",
+    return_earliest: null, return_latest: null, until_date: null, depends_on_player_id: null, depends_on_name: null,
+    evidence: [], confidence: null, review_date: null, standing: null,
     ...overrides,
   }
+}
+
+const IN_FORCE = { state: "in_force", games: true, role: false, reasons: [] }
+
+/** A live season note: out until Dec 8, read again by Nov 30. */
+function note(overrides: Partial<AdjustmentEntry> = {}): AdjustmentEntry {
+  return adjustment({
+    id: 31, scope: "season", kind: "injury_current", minutes: null, return_date: "2026-12-08", note: "knee, re-evaluated in two weeks",
+    created_at: "2026-11-16T14:00:00", confidence: "likely", review_date: "2026-11-30", standing: IN_FORCE,
+    ...overrides,
+  })
 }
 
 function row(overrides: Partial<ProjectionRow> = {}): ProjectionRow {
@@ -46,6 +74,7 @@ function row(overrides: Partial<ProjectionRow> = {}): ProjectionRow {
     player_id: 1, name: "Player", team: "DEN", position: "G", age: 27, seasons: [2025], espn_weight: 0.5,
     statistical: line(), espn: line(), blended: line(), final: line(),
     ranks: { points: 10, categories: 12 }, espn_ranks: { points: 14, categories: 9 }, adjustment: null,
+    live: null, note: null,
     ...overrides,
   }
 }
@@ -55,7 +84,8 @@ function data(players: ProjectionRow[], overrides: Partial<ProjectionsData> = {}
     season: "2026-27", coefficients_version: "cv-1", espn_weight: 0.5, espn_as_of: "2026-09-30",
     published_as_of: "2026-10-01", unpublished: 0, ranks_available: true, ranks_reason: null,
     league: { league_size: 12, rounds: 13, playoff_weight: 2, playoff_weeks: [20, 21, 22, 23] },
-    kinds: ["year2", "role"], players, fetched_at: "2026-10-01T15:00:00Z",
+    kinds: ["year2", "role"], live_as_of: null, confidences: ["confirmed", "likely", "possible"], review_days: 14,
+    players, fetched_at: "2026-10-01T15:00:00Z",
     ...overrides,
   }
 }
@@ -227,6 +257,23 @@ describe("the page's summary", () => {
     expect(behind[3]).toEqual({ label: "Unpublished", value: 3, tone: "warn" })
   })
 
+  test("tiles: in season the third is the season's notes, and the ones nobody has read again", () => {
+    const due = note({ standing: { state: "review_due", games: false, role: false, reasons: ["due to be read again since 2026-11-30"] } })
+    const live = { live_as_of: "2026-11-16" }
+    const tiles = summaryTiles(data([row({ note: note() }), row({ player_id: 2, note: due }), row({ player_id: 3 })], live), "points")
+    expect(tiles.map((tile) => tile.label)).toEqual(["Players", "Adjusted", "Season notes", "Unpublished"])
+    expect(tiles[2]).toEqual({ label: "Season notes", value: 2, tone: "warn", note: "1 to read again" })
+    expect(summaryTiles(data([row({ note: note() })], live), "points")[2]).toEqual({ label: "Season notes", value: 1, tone: "good" })
+    expect(summaryTiles(data([row()], live), "points")[2]).toEqual({ label: "Season notes", value: 0, tone: "quiet" })
+  })
+
+  test("says which morning the live projection is from, and which form a row opens on", () => {
+    expect(describeLive({ live_as_of: "2026-11-16" })).toBe("live projection of Nov 16")
+    expect(describeLive({ live_as_of: null })).toBe("no live projection yet: season notes wait for the first one")
+    expect(defaultEditMode({ live_as_of: "2026-11-16" })).toBe("note")
+    expect(defaultEditMode({ live_as_of: null })).toBe("adjustment")
+  })
+
   test("says whether the board is reading this page", () => {
     expect(describePublished({ published_as_of: "2026-10-01", unpublished: 0 })).toBe(
       "published Oct 1 · the board reads what this page shows",
@@ -257,5 +304,152 @@ describe("the page's summary", () => {
     expect(rankMove(19, 22)).toBe("−3")
     expect(rankMove(10, 10)).toBe("")
     expect(rankMove(null, 10)).toBe("")
+  })
+})
+
+describe("the season note", () => {
+  function form(overrides: Partial<NoteForm> = {}): NoteForm {
+    return { ...noteFormFrom(null), ...overrides }
+  }
+
+  test("reads as what it states", () => {
+    expect(describeNote(note({ return_earliest: "2026-12-01", return_latest: "2026-12-20" }))).toBe("back Dec 8 (Dec 1 to Dec 20)")
+    expect(describeNote(note({ return_latest: "2026-12-20" }))).toBe("back Dec 8 (… to Dec 20)")
+    expect(describeNote(note({ return_date: null, games: 0 }))).toBe("out for the season")
+    expect(
+      describeNote(note({ return_date: null, minutes: 30, usage: 1.1, until_date: "2026-12-20", depends_on_player_id: 9, depends_on_name: "Nikola Jokić" })),
+    ).toBe("30 min · usage ×1.1 · through Dec 20 · until Nikola Jokić plays")
+    expect(describeNote(note({ return_date: null, minutes: 30, depends_on_player_id: 9 }))).toBe("30 min · until player 9 plays")
+    // A version of either scope reads in its own terms
+    expect(describeEntry(note())).toBe("back Dec 8")
+    expect(describeEntry(adjustment({ games: 66 }))).toBe("32 min · 66 games")
+  })
+
+  test("its standing is a chip: applied, applied in part, to be read again, or ended", () => {
+    expect(standingLabel(null)).toBeNull()
+    expect(standingLabel(IN_FORCE)).toEqual({ label: "in force", tone: "up", detail: "" })
+    // The API's reasons carry ISO days; the page writes them as it writes every other day
+    expect(standingLabel({ state: "in_force", games: false, role: true, reasons: ["he played on 2026-11-20"] })).toEqual({
+      label: "in force in part", tone: "up", detail: "he played on Nov 20",
+    })
+    expect(standingLabel({ state: "review_due", games: false, role: false, reasons: ["due to be read again since 2026-11-30"] })).toEqual({
+      label: "read again", tone: "warn", detail: "due to be read again since Nov 30",
+    })
+    expect(
+      standingLabel({ state: "ended", games: false, role: false, reasons: ["he played on 2026-11-20", "it ran through 2026-11-22"] })?.detail,
+    ).toBe("he played on Nov 20; it ran through Nov 22")
+    expect(standingLabel({ state: "ended", games: false, role: false, reasons: [] })).toEqual({
+      label: "ended", tone: "quiet", detail: "nothing of it applies any more",
+    })
+    expect(noteNeedsReading(row({ note: note() }))).toBe(false)
+    expect(noteNeedsReading(row({ note: note({ standing: { state: "ended", games: false, role: false, reasons: [] } }) }))).toBe(true)
+    expect(noteNeedsReading(row())).toBe(false)
+  })
+
+  test("the filters find the noted and the ones to read again", () => {
+    const due = note({ standing: { state: "review_due", games: false, role: false, reasons: [] } })
+    const rows = [row({ note: note() }), row({ player_id: 2, name: "Due", note: due }), row({ player_id: 3, name: "Plain" })]
+    const view = { query: "", sort: "name", format: "points" } as const
+    expect(visibleRows(rows, { ...view, filter: "notes" }).map((r) => r.player_id)).toEqual([2, 1])
+    expect(visibleRows(rows, { ...view, filter: "review" }).map((r) => r.player_id)).toEqual([2])
+  })
+
+  test("the live line shows the games left to a decimal", () => {
+    const live = line({ games: 31.44, min: 24.6 })
+    expect(formatStat(LIVE_COLUMNS[0], live)).toBe("31.4")
+    expect(formatStat(STAT_COLUMNS[0], live)).toBe("31")
+    expect(LIVE_COLUMNS[0].label).toBe("GP left")
+    expect(LIVE_COLUMNS.slice(1)).toEqual(STAT_COLUMNS.slice(1))
+  })
+
+  test("a stretch of the games ahead reads as days, games and what he does in them", () => {
+    expect(describeStretch({ first: "2026-11-16", last: "2026-11-22", games: 4, chance: 0, minutes: 28, usage: 0.983 })).toBe(
+      "Nov 16 – Nov 22 · 4 games · out",
+    )
+    expect(describeStretch({ first: "2026-11-24", last: "2026-11-24", games: 1, chance: 0.837, minutes: 28, usage: 0.985 })).toBe(
+      "Nov 24 · 1 game · plays 84% · 28.0 min · usage ×0.98",
+    )
+  })
+
+  test("the form starts from the live note, with the review date left to the default", () => {
+    expect(noteFormFrom(null)).toEqual({
+      kind: "injury_current", out_for_season: false, return_date: "", return_earliest: "", return_latest: "",
+      minutes: "", usage: "", until_date: "", depends_on: "", confidence: "", review_date: "", note: "", source_url: "", evidence: [],
+    })
+    const stored = note({
+      kind: "injury_return", return_earliest: "2026-12-01", return_latest: "2026-12-20", minutes: 24, usage: 0.9,
+      until_date: "2026-12-22", depends_on_player_id: 9, source_url: "https://example.test/report",
+      evidence: [
+        { type: "news", id: 5, source: "rotowire_rss", kind: "injury", headline: "Out two weeks", url: null, published_at: null },
+        { type: "news", id: null, source: null, kind: null, headline: "no id", url: null, published_at: null },
+      ],
+    })
+    expect(noteFormFrom(stored)).toEqual({
+      kind: "injury_return", out_for_season: false, return_date: "2026-12-08", return_earliest: "2026-12-01",
+      return_latest: "2026-12-20", minutes: "24", usage: "0.9", until_date: "2026-12-22", depends_on: "9", confidence: "likely",
+      // Saved again, it is read again two weeks from that save
+      review_date: "", note: "knee, re-evaluated in two weeks", source_url: "https://example.test/report", evidence: [5],
+    })
+    expect(noteFormFrom(note({ return_date: null, games: 0 })).out_for_season).toBe(true)
+  })
+
+  test("parses what was typed into the API's note", () => {
+    const parsed = parseNote(form({
+      return_date: "2026-12-08", return_earliest: "2026-12-01", return_latest: "2026-12-20", minutes: " 24 ", usage: "0.9",
+      until_date: "2026-12-22", depends_on: "9", review_date: "2026-11-25",
+    }))
+    expect(parsed).toEqual({
+      change: {
+        return_date: "2026-12-08", return_earliest: "2026-12-01", return_latest: "2026-12-20", minutes: 24, usage: 0.9,
+        until_date: "2026-12-22", depends_on_player_id: 9,
+      },
+      review_date: "2026-11-25",
+      errors: {},
+    })
+    expect(parseNote(form({ out_for_season: true }))).toEqual({ change: { out_for_season: true }, review_date: null, errors: {} })
+    expect(parseNote(form())).toEqual({ change: {}, review_date: null, errors: {} })
+    expect(noteStatesSomething(parseNote(form()).change)).toBe(false)
+    expect(noteStatesSomething(parseNote(form({ usage: "1.1" })).change)).toBe(true)
+  })
+
+  test("says what is wrong next to the field, as the API would refuse it", () => {
+    expect(parseNote(form({ minutes: "60", usage: "0" })).errors).toEqual({ minutes: "0 to 48", usage: "above 0, at most 2" })
+    expect(parseNote(form({ out_for_season: true, return_date: "2026-12-08" })).errors).toEqual({
+      return_date: "a season written off has no return date",
+    })
+    expect(parseNote(form({ return_earliest: "2026-12-01" })).errors).toEqual({
+      return_date: "the range is around a date: give the likely one",
+    })
+    expect(parseNote(form({ return_date: "2026-12-08", return_earliest: "2026-12-09", return_latest: "2026-12-07" })).errors).toEqual({
+      return_earliest: "after the likely date", return_latest: "before the likely date",
+    })
+    // An end with nothing to end
+    expect(parseNote(form({ return_date: "2026-12-08", until_date: "2026-12-20", depends_on: "9" })).errors).toEqual({
+      until_date: "it ends the minutes or usage: set one", depends_on: "he ends the minutes or usage: set one",
+    })
+    expect(parseNote(form({ minutes: "30", review_date: "soon" })).errors).toEqual({ review_date: "a date" })
+  })
+
+  test("a note is saved only once the note on the form has been previewed", () => {
+    const filled = form({ return_date: "2026-12-08", note: "knee" })
+    const parsed = parseNote(filled)
+    expect(noteSaveBlocker(form({ minutes: "60" }), parseNote(form({ minutes: "60" })), null)).toBe("Fix the highlighted fields")
+    expect(noteSaveBlocker(form(), parseNote(form()), null)).toBe("Set a return date, a season written off, minutes or usage")
+    expect(noteSaveBlocker({ ...filled, note: " " }, parsed, noteKey(parsed))).toBe("Say why: a note is required")
+    expect(noteSaveBlocker(filled, parsed, null)).toBe("Preview this note first")
+    expect(noteSaveBlocker(filled, parsed, noteKey(parsed))).toBeNull()
+    // The review date decides whether it would apply, so changing it asks for another preview;
+    // the range and the reason do not move the price
+    expect(noteKey(parseNote({ ...filled, review_date: "2026-11-20" }))).not.toBe(noteKey(parsed))
+    expect(noteKey(parseNote({ ...filled, return_latest: "2026-12-20", note: "other", confidence: "likely" }))).toBe(noteKey(parsed))
+  })
+
+  test("his minutes can wait on anyone else on his team", () => {
+    const rows = [
+      row({ player_id: 1, name: "Murray", team: "DEN" }), row({ player_id: 2, name: "Jokić", team: "DEN" }),
+      row({ player_id: 3, name: "Brown", team: "BOS" }), row({ player_id: 4, name: "Gordon", team: "DEN" }),
+    ]
+    expect(teammatesOf(rows[0], rows).map((r) => r.name)).toEqual(["Gordon", "Jokić"])
+    expect(teammatesOf(row({ team: null }), rows)).toEqual([])
   })
 })

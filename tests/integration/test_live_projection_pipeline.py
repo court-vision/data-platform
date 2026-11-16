@@ -6,13 +6,18 @@ for last night, and what a later tick or a forced run does to a stored day.
 
 The morning is Nov 9, 2025. DEN and BOS have met four times, two days apart,
 the last on the 7th, and meet six more times from the 9th.
+
+The season's notes (the Live rankings plan, step 3) are read the same morning:
+the last tests here are a note's return date against the feed's, minutes that
+hold until a teammate is back, and the notes that are no longer applied.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
+import pytz
 
 from core.settings import settings
 from db.base import db
@@ -25,8 +30,9 @@ from db.models.pipeline_run import PipelineRun
 from pipelines import live_projection
 from pipelines.live_projection import BOX_SCORES_PIPELINE, SOURCE, LiveProjectionPipeline, stored_on
 from schemas.common import ApiStatus
-from services.live_projection_inputs import load_coefficients, load_inputs
-from services.live_projection_model import LINE_KEYS, expand
+from services.live_notes import ENDED, IN_FORCE, REVIEW_DUE
+from services.live_projection_inputs import DEFAULT_TIP, EASTERN, load_coefficients, load_inputs, tips_of
+from services.live_projection_model import LINE_KEYS, Availability, expand
 from services.projection_model import season_label, season_start
 
 pytestmark = pytest.mark.integration
@@ -43,21 +49,12 @@ LAST_NIGHT = PLAYED[-1]
 STAR, STARTER, BENCH, WAITING, GONE, CELTIC, UNPROJECTED = 201, 202, 203, 204, 205, 301, 302
 PER_MINUTE = {"pts": 0.66, "reb": 0.2, "ast": 0.15, "stl": 0.03, "blk": 0.02, "tov": 0.06,
               "fgm": 0.24, "fga": 0.5, "fg3m": 0.06, "fg3a": 0.16, "ftm": 0.12, "fta": 0.15}
-MODELS = [PlayerProfile, PlayerHistory, PlayerProjection, ProjectionAdjustment]
+MODELS = [PlayerProfile, PlayerHistory, PlayerProjection]
 
 
 @pytest.fixture(scope="module", autouse=True)
-def projection_tables(integration_db):
+def projection_tables(integration_db, adjustments_table):
     db.create_tables(MODELS, safe=True)
-    db.execute_sql("""
-        DO $$ BEGIN
-            ALTER TABLE nba.projection_adjustments
-                ALTER CONSTRAINT projection_adjustments_superseded_by_fkey DEFERRABLE INITIALLY DEFERRED;
-        EXCEPTION WHEN undefined_object THEN NULL; END $$;
-        CREATE UNIQUE INDEX IF NOT EXISTS projection_adjustments_active_uidx
-            ON nba.projection_adjustments (player_id, season)
-            WHERE superseded_by IS NULL AND retired_at IS NULL;
-    """)
     yield
 
 
@@ -296,3 +293,117 @@ def test_a_verdict_that_is_old_or_not_out_says_nothing_about_today():
     assert STAR not in known and STARTER not in known
     # Out as of yesterday, with a return date that has already passed: out of the next game, no date
     assert (known[BENCH].out_next, known[BENCH].return_date) == (True, None)
+
+
+# ---- the season's notes ------------------------------------------------------------------
+
+
+def _note(pid: int, *, written: datetime, **fields) -> ProjectionAdjustment:
+    """A season note saved at `written`, Eastern. The table keeps UTC."""
+    base = dict(scope="season", kind="injury_current", note="read off a report", author="test",
+                review_date=TODAY + timedelta(days=14))
+    record = ProjectionAdjustment.record(pid, SEASON, **(base | fields))
+    saved = EASTERN.localize(written).astimezone(pytz.utc).replace(tzinfo=None)
+    ProjectionAdjustment.update(created_at=saved).where(ProjectionAdjustment.id == record.id).execute()
+    return record
+
+
+THIS_MORNING = datetime.combine(TODAY, time(5, 0))
+
+
+def test_a_notes_return_date_is_believed_over_the_feeds():
+    # The feed has the star back for the third game from here; the note read the report as the fifth
+    note = _note(STAR, written=THIS_MORNING, return_date=AHEAD[4], return_earliest=AHEAD[3],
+                 return_latest=AHEAD[5], confidence="likely")
+
+    inputs = load_inputs(SEASON, TODAY)
+    assert inputs.known_before_notes[STAR].return_date == AHEAD[2]
+    assert inputs.known[STAR] == Availability(out_next=True, return_date=AHEAD[4], out_now=True)
+    assert inputs.standings[STAR].state == IN_FORCE and inputs.role_notes == {}
+
+    assert _run().status == ApiStatus.SUCCESS
+    star = _rows()[STAR]
+    games = expand(star.raw["timeline"], AHEAD)
+    assert [g.chance for g in games[:4]] == [0.0] * 4 and all(0.5 < g.chance < 1.0 for g in games[4:])
+    assert star.raw["parts"]["known"] == {"out_next": True, "out_for_season": False,
+                                          "return_date": AHEAD[4].isoformat(), "note": note.id}
+    # The line he plays when he plays is the one he had: the note took games
+    assert float(star.min) == pytest.approx(34.0, abs=1.5)
+    # The preseason adjustment that writes a season off is another scope, and still read
+    assert _rows()[GONE].projected_gp == 0 and "note" not in _rows()[GONE].raw["parts"]["known"]
+
+
+def test_a_note_can_say_he_is_out_when_no_box_score_or_feed_does():
+    # The starter played last night and nothing has ruled him out: only the note knows
+    _note(STARTER, written=datetime.combine(LAST_NIGHT, time(23, 30)), games=0, kind="injury_current")
+
+    assert _run().status == ApiStatus.SUCCESS
+    starter = _rows()[STARTER]
+    assert (starter.projected_gp, starter.raw["games"]) == (0, 0.0)
+    assert starter.raw["parts"]["known"]["out_for_season"] is True
+    # He keeps the line he would play
+    assert float(starter.min) == pytest.approx(30.0, abs=1.5)
+
+
+def test_minutes_on_a_note_hold_until_the_teammate_it_depends_on_is_back():
+    note = _note(BENCH, written=THIS_MORNING, kind="role", minutes=30, usage=1.15, depends_on_player=STAR)
+
+    inputs = load_inputs(SEASON, TODAY)
+    assert inputs.role_notes[BENCH].minutes == 30.0 and inputs.role_notes[BENCH].depends_on == STAR
+    assert BENCH not in inputs.known                      # a role note says nothing about his own games
+
+    assert _run().status == ApiStatus.SUCCESS
+    bench = _rows()[BENCH]
+    games = expand(bench.raw["timeline"], AHEAD)
+    # The two games the star is sure to miss are the note's, exactly; from his return they slide to the model's
+    assert [(g.minutes, g.usage) for g in games[:2]] == [(30.0, 1.15)] * 2
+    assert games[2].minutes < 30.0 and games[-1].minutes < games[2].minutes
+    stored = bench.raw["parts"]["note"]
+    assert (stored["id"], stored["minutes"], stored["usage"], stored["depends_on"]) == (note.id, 30.0, 1.15, STAR)
+    assert stored["through"] == AHEAD[1].isoformat()
+    assert "known" not in bench.raw["parts"]
+
+
+def test_a_note_past_its_review_date_or_spent_by_a_game_is_not_applied():
+    # Nobody has read the starter's note again since its review date
+    _note(STARTER, written=datetime.combine(PLAYED[0], time(9, 0)), return_date=AHEAD[3], minutes=20,
+          review_date=TODAY - timedelta(days=1))
+    # The Celtic's said out for the season, and he has played three games since it was written
+    _note(CELTIC, written=datetime.combine(PLAYED[1], time(9, 0)), games=0)
+    # The bench player's minutes ran through the last game played
+    _note(BENCH, written=datetime.combine(PLAYED[2], time(9, 0)), kind="role", minutes=30, until_date=LAST_NIGHT)
+
+    inputs = load_inputs(SEASON, TODAY)
+    assert {pid: s.state for pid, s in inputs.standings.items()} == {
+        STARTER: REVIEW_DUE, CELTIC: ENDED, BENCH: ENDED}
+    assert "read again since" in inputs.standings[STARTER].reasons[0]
+    assert f"he played on {LAST_NIGHT.isoformat()}" in inputs.standings[CELTIC].reasons[0]
+    assert set(inputs.notes) == {STARTER, CELTIC, BENCH} and inputs.role_notes == {}
+    assert inputs.known == inputs.known_before_notes
+
+    with_notes = {pid: (r.projected_gp, r.raw["timeline"]) for pid, r in (_run() and _rows()).items()}
+    ProjectionAdjustment.delete().where(ProjectionAdjustment.scope == "season").execute()
+    _run(force=True)
+    assert {pid: (r.projected_gp, r.raw["timeline"]) for pid, r in _rows().items()} == with_notes
+
+
+def test_a_note_is_spent_only_by_a_game_that_tipped_after_it_was_written():
+    Game.update(start_time_et=time(22, 0)).where(Game.game_date == LAST_NIGHT).execute()
+
+    # Written at nine with him out, and he played the late game after all
+    _note(CELTIC, written=datetime.combine(LAST_NIGHT, time(21, 0)), return_date=AHEAD[3])
+    inputs = load_inputs(SEASON, TODAY)
+    assert inputs.last_played[CELTIC] == datetime.combine(LAST_NIGHT, time(22, 0))
+    assert (inputs.standings[CELTIC].state, CELTIC in inputs.known) == (ENDED, False)
+
+    # Read again after the game he was hurt in: that game is not one he came back for
+    _note(CELTIC, written=datetime.combine(LAST_NIGHT, time(23, 45)), return_date=AHEAD[3])
+    inputs = load_inputs(SEASON, TODAY)
+    assert inputs.standings[CELTIC].games is True
+    assert inputs.known[CELTIC] == Availability(return_date=AHEAD[3], out_now=True)
+
+    # The editor reads the same tips for a few players without the season's box scores:
+    # a game with no start time on the schedule is taken to have tipped at seven
+    assert tips_of([CELTIC, STAR, WAITING], SEASON, TODAY) == {
+        CELTIC: datetime.combine(LAST_NIGHT, time(22, 0)), STAR: datetime.combine(PLAYED[1], DEFAULT_TIP)}
+    assert {pid: inputs.last_played[pid] for pid in (CELTIC, STAR)} == tips_of([CELTIC, STAR], SEASON, TODAY)

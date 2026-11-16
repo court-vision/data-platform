@@ -10,6 +10,10 @@ per player a day, his rest-of-season line when he plays, the games he is
 expected to play from here (`projected_gp`, and unrounded in `raw.games`), and
 in `raw` the timeline that prices any window of days and what each part read.
 
+The season's notes are read with it (services.live_notes: a return date, or
+minutes and a share of the offense with an end), and a note saved in the
+projections editor rebuilds the day's snapshot at once.
+
 The preseason snapshots (`cv`, `espn`) are untouched: rooms drafted before
 opening night and their recaps still read them, and they are this model's
 prior. The backend's in-season boards read the newest `cv_live` snapshot, and
@@ -175,13 +179,18 @@ class LiveProjectionPipeline(BasePipeline):
 
         coeffs = load_coefficients()
         morning = build_morning(inputs.lines, inputs.priors, inputs.ahead, day, teams=inputs.teams, ages=inputs.ages)
-        projections = project(morning, coeffs, inputs.known)
+        projections = project(morning, coeffs, inputs.known, inputs.role_notes)
+        for pid, note in inputs.notes.items():
+            # Which note an absence was read from, for the reasons shown later
+            if inputs.standings[pid].games and pid in projections:
+                projections[pid].parts.setdefault("known", {})["note"] = note.id
         rows = [row_of(p, inputs, coeffs, ctx.run_id) for p in projections.values()]
         ctx.log.info(
             "live_projection_built",
             as_of=str(day), players=len(rows), lines=len(inputs.lines), projected=len(inputs.priors),
             prior=inputs.prior_source, prior_as_of=str(inputs.prior_as_of) if inputs.prior_as_of else None,
             known_absences=len(inputs.known), newest_line=str(inputs.newest_line), coefficients=coeffs.version,
+            notes=len(inputs.notes), notes_in_force=sum(1 for s in inputs.standings.values() if s.in_force),
         )
 
         snapshot = (
