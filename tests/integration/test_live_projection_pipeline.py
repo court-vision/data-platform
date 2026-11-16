@@ -214,6 +214,36 @@ def test_it_waits_for_last_nights_box_scores_until_late_morning(monkeypatch):
     assert _run().status == ApiStatus.SUCCESS and stored_on(SEASON, TODAY) == 7
 
 
+def _rebuild():
+    """What a note saved in the projections editor runs."""
+    return LiveProjectionPipeline()._run_sync(options={"rebuild": True})
+
+
+def test_a_notes_rebuild_before_last_night_is_in_stores_nothing_for_the_morning_to_keep(monkeypatch):
+    # Saved after the day turned, before the box scores landed: a snapshot built now
+    # would be kept by the morning's run all day, short of last night's games
+    PlayerGameStats.delete().where(PlayerGameStats.game_date == LAST_NIGHT).execute()
+
+    early = _rebuild()
+    assert early.status == ApiStatus.SUCCESS and early.records_processed == 0
+    assert stored_on(SEASON, TODAY) == 0
+
+    # The same rebuild once the morning has stopped waiting builds the day
+    _clock(monkeypatch, live_projection.WAIT_UNTIL_HOUR_ET)
+    assert _rebuild().records_processed == 7 and stored_on(SEASON, TODAY) == 7
+
+
+def test_a_notes_rebuild_replaces_a_stored_morning():
+    _run()
+    PlayerAvailability.update(expected_return=AHEAD[4]).where(PlayerAvailability.player == STAR).execute()
+    # The stored morning passed the wait; a batch started since does not hold the rebuild
+    PipelineRun.create(pipeline_name=BOX_SCORES_PIPELINE, started_at=datetime.utcnow(), status="running")
+
+    rebuilt = _rebuild()
+    assert rebuilt.status == ApiStatus.SUCCESS and rebuilt.records_processed == 7
+    assert _rows()[STAR].raw["parts"]["known"]["return_date"] == AHEAD[4].isoformat()
+
+
 def test_it_waits_for_a_box_score_batch_that_is_not_done_and_a_forced_run_does_not():
     started = datetime.utcnow() - timedelta(minutes=2)
     PipelineRun.create(pipeline_name=BOX_SCORES_PIPELINE, started_at=started, status="running")

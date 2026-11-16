@@ -395,7 +395,7 @@ def test_saving_a_note_writes_one_season_row_and_rebuilds_the_live_projection(se
         "note": "back on a limit", "source_url": None, "author": "jp",
     }
     # The live projection, and never the preseason one: a note cannot rewrite the prior
-    assert season.runs == [("live_projection", {"options": {"force": True}})]
+    assert season.runs == [("live_projection", {"options": {"rebuild": True}})]
 
 
 def test_a_season_written_off_is_stored_as_no_games_and_keeps_the_review_date_given(season):
@@ -468,7 +468,7 @@ def test_retiring_a_note_withdraws_the_season_row_only_and_rebuilds(season, monk
     assert body["message"] == "Note retired and the live projection rebuilt"
     assert body["data"]["note"] is None and body["data"]["rebuilt"] is True
     assert retired == [(2, os.environ["NBA_SEASON"], "season")]
-    assert season.runs == [("live_projection", {"options": {"force": True}})]
+    assert season.runs == [("live_projection", {"options": {"rebuild": True}})]
 
     monkeypatch.setattr(ProjectionAdjustment, "retire", classmethod(lambda cls, pid, season, scope: 0))
     assert season.http.delete(f"{BASE}/2/note", headers=_AUTH).status_code == 404

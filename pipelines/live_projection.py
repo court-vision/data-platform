@@ -12,7 +12,7 @@ in `raw` the timeline that prices any window of days and what each part read.
 
 The season's notes are read with it (services.live_notes: a return date, or
 minutes and a share of the offense with an end), and a note saved in the
-projections editor rebuilds the day's snapshot at once.
+projections editor rebuilds the day's snapshot at once (`?rebuild`, below).
 
 The preseason snapshots (`cv`, `espn`) are untouched: rooms drafted before
 opening night and their recaps still read them, and they are this model's
@@ -28,6 +28,14 @@ wrote nothing while they were being read, it raises `DataNotReady`, and from
 `WAIT_UNTIL_HOUR_ET` it projects from what there is. And like the boards it stores nothing between midnight and
 `DAY_TURNS_HOUR_ET`: the night's games are still coming in, and a projection
 built then would be the one the morning keeps.
+
+A note's rebuild (`rebuild` in the options, from the projections editor)
+replaces the day's snapshot like a forced run but keeps the wait. A snapshot
+already stored passed that wait, or was built once the morning stopped
+waiting, so it is rebuilt on what there is now. With none stored yet and last
+night's box scores still coming, nothing is stored: the morning's own run
+would keep a snapshot short of last night's games all day, and it reads the
+note anyway when it builds.
 
 Everything is written in one transaction: a reader resolving "the latest
 snapshot" never finds half of one.
@@ -147,6 +155,7 @@ class LiveProjectionPipeline(BasePipeline):
 
     def execute(self, ctx: PipelineContext) -> None:
         force = bool((ctx.options or {}).get("force"))
+        rebuild = bool((ctx.options or {}).get("rebuild"))   # a note was saved: replace, but keep the wait
         season = settings.nba_season
         day = today_et()
         now_et = now_eastern()
@@ -156,7 +165,7 @@ class LiveProjectionPipeline(BasePipeline):
             return
 
         held = stored_on(season, day)
-        if held and not force:
+        if held and not (force or rebuild):
             ctx.log.info("live_projection_kept", as_of=str(day), rows=held)
             return
 
@@ -174,7 +183,12 @@ class LiveProjectionPipeline(BasePipeline):
             games_missing(inputs, last_night), last_night, now_et,
             batch_unsettled(BOX_SCORES_PIPELINE, "box-score", box_scores),
         )
-        if reason and not force:
+        if reason and not force and not held:
+            if rebuild:
+                # The morning's run builds it, note and all, once last night is in
+                ctx.increment_skipped(1, "not_ready")
+                ctx.log.info("live_projection_rebuild_waiting", as_of=str(day), reason=reason)
+                return
             raise DataNotReady(reason)
 
         coeffs = load_coefficients()

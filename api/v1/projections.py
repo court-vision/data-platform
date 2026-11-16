@@ -247,10 +247,12 @@ async def preview_note(req: NotePreviewRequest) -> NotePreviewResponse:
 
 async def _rebuild_live(player_id: int) -> NoteSaved:
     """Rebuild the day's live projection after a write, so the board reads the
-    note at once. A rebuild that did not happen (before the day turns, out of
-    season, or a failure) does not undo the write: the next morning's run
-    reads the note anyway."""
-    result = await run_pipeline("live_projection", options={"force": True})
+    note at once. A rebuild that did not happen (before the day turns, before
+    last night's box scores are in with no snapshot stored yet, out of season,
+    or a failure) does not undo the write: the morning's run reads the note
+    anyway. Not `force`: a forced run skips the wait for last night's box
+    scores, and the snapshot it stored would be the one the morning keeps."""
+    result = await run_pipeline("live_projection", options={"rebuild": True})
     ok = result.status in (ApiStatus.SUCCESS, ApiStatus.SUCCESS.value)
     rebuilt = ok and bool(result.records_processed)
     if not rebuilt:
