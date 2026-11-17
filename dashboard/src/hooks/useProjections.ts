@@ -2,7 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 import { toast } from "sonner"
 
 import { apiFetch, type Schemas } from "@/lib/api"
-import type { AdjustmentChange, AdjustmentSave } from "@/lib/projections"
+import type { AdjustmentChange, AdjustmentSave, NoteChange, NoteSave } from "@/lib/projections"
 import { useToken } from "@/lib/token"
 
 export const PROJECTIONS_KEY = ["dashboard", "projections"] as const
@@ -94,6 +94,74 @@ export function useRetireAdjustment() {
       apiFetch<Schemas["AdjustmentSavedResponse"]>(`${BASE}/${playerId}/adjustment`, { method: "DELETE" }),
     onSuccess: (response, { name }) => reportWrite(name, response),
     onError: (error, { name }) => toast.error(`${name}: not retired`, { description: error.message }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: PROJECTIONS_KEY }),
+  })
+}
+
+// ---- notes in season -----------------------------------------------------------------------
+
+export function playerNewsQuery(playerId: number) {
+  return queryOptions({
+    queryKey: [...PROJECTIONS_KEY, "news", playerId] as const,
+    queryFn: async () => (await apiFetch<Schemas["PlayerNewsResponse"]>(`${BASE}/${playerId}/news`)).data,
+    // The feed moves every few minutes; a form left open should not cite from an old list
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: (failures, error) => giveUpOn(error, failures),
+  })
+}
+
+/** A player's recent stored news: what a season note can cite. Asked for when the note form is open. */
+export function usePlayerNews(playerId: number, enabled: boolean) {
+  const token = useToken()
+  return useQuery({ ...playerNewsQuery(playerId), enabled: enabled && token !== null })
+}
+
+/** One player's live projection under a season note. Writes nothing. */
+export function usePreviewNote() {
+  return useMutation({
+    mutationFn: async ({ playerId, note, reviewDate }: { playerId: number; note: NoteChange | null; reviewDate: string | null }) =>
+      (
+        await apiFetch<Schemas["NotePreviewResponse"]>(`${BASE}/note/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ player_id: playerId, note, review_date: reviewDate }),
+        })
+      ).data,
+    onError: (error) => toast.error("Preview failed", { description: error.message }),
+  })
+}
+
+function reportNote(name: string, response: Schemas["NoteSavedResponse"]) {
+  if (response.data.rebuilt) toast.success(name, { description: response.message })
+  // Kept, and read by the next morning's run: said plainly, not an error.
+  else toast.warning(name, { description: `${response.message}.` })
+}
+
+/** Save a new version of a player's season note; the API rebuilds the day's live projection. */
+export function useSaveNote() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ playerId, body }: { playerId: number; name: string; body: NoteSave }) =>
+      apiFetch<Schemas["NoteSavedResponse"]>(`${BASE}/${playerId}/note`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (response, { name }) => reportNote(name, response),
+    onError: (error, { name }) => toast.error(`${name}: note not saved`, { description: error.message }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: PROJECTIONS_KEY }),
+  })
+}
+
+/** Withdraw a player's live season note; the API rebuilds the day's live projection. */
+export function useRetireNote() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ playerId }: { playerId: number; name: string }) =>
+      apiFetch<Schemas["NoteSavedResponse"]>(`${BASE}/${playerId}/note`, { method: "DELETE" }),
+    onSuccess: (response, { name }) => reportNote(name, response),
+    onError: (error, { name }) => toast.error(`${name}: note not retired`, { description: error.message }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: PROJECTIONS_KEY }),
   })
 }

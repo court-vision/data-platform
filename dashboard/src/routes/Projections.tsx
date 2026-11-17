@@ -7,13 +7,17 @@ import { usePageContext } from "@/components/shell/pageContext"
 import { useNow } from "@/hooks/useNow"
 import { useProjections, useRepublish } from "@/hooks/useProjections"
 import {
+  defaultEditMode,
+  describeLive,
   describePublished,
   describeRanks,
+  EDIT_MODES,
   FILTERS,
   FORMATS,
   SORTS,
   summaryTiles,
   visibleRows,
+  type EditMode,
   type Filter,
   type Format,
   type ProjectionsData,
@@ -30,9 +34,11 @@ function oneOf<T extends string>(options: readonly { key: T }[], value: string |
 }
 
 /**
- * Court Vision's projection, the lines it is built from, and the adjustments
- * on top. The view lives in the URL — format, filter, sort, search and the
- * open player — so a link lands on the row being discussed.
+ * Court Vision's projection, the lines it is built from, and what a person
+ * lays over them: the preseason adjustments, and in season the dated notes
+ * the live projection reads. The view lives in the URL — format, filter,
+ * sort, search, the open player and which of his two forms is open — so a
+ * link lands on the row being discussed.
  */
 export function Projections() {
   usePageContext("Projections")
@@ -47,6 +53,9 @@ export function Projections() {
   const sort = oneOf(SORTS, params.get("sort"), "cv")
   const query = params.get("q") ?? ""
   const openId = Number(params.get("open")) || null
+  // In season a row opens on its note; before the first live projection, on its adjustment
+  const firstMode: EditMode = data ? defaultEditMode(data) : "adjustment"
+  const mode = oneOf(EDIT_MODES, params.get("edit"), firstMode)
 
   /** Change one part of the view; a default is left out of the URL. */
   function update(name: string, value: string | null, fallback: string) {
@@ -67,7 +76,7 @@ export function Projections() {
     <Page>
       <Head
         title="Projections"
-        sub={`Court Vision's projection for ${data?.season ?? "the season"}: the lines it is built from, and the adjustments on top. Saving an adjustment republishes what the draft board reads.`}
+        sub={`Court Vision's projection for ${data?.season ?? "the season"}: the lines it is built from, the adjustments on top, and the season's notes. Saving an adjustment republishes the preseason projection; saving a note rebuilds the day's live projection, which the board is priced on in season.`}
         meta={data && <StatusLines data={data} />}
         actions={
           <>
@@ -131,11 +140,17 @@ export function Projections() {
             ) : (
               <ProjectionsTable
                 rows={rows}
+                players={data.players}
                 format={format}
                 openId={openId}
                 onToggle={(playerId) => update("open", playerId === openId ? null : String(playerId), "")}
-                kinds={data.kinds}
-                espnWeight={data.espn_weight}
+                editing={{
+                  kinds: data.kinds,
+                  espnWeight: data.espn_weight,
+                  season: { liveAsOf: data.live_as_of, confidences: data.confidences, reviewDays: data.review_days },
+                  mode,
+                  onMode: (value) => update("edit", value, firstMode),
+                }}
               />
             )}
           </Block>
@@ -163,6 +178,8 @@ function StatusLines({ data }: { data: ProjectionsData }) {
       </span>
       <Sep />
       <span className={data.unpublished > 0 ? s.warn : undefined}>{describePublished(data)}</span>
+      <Sep />
+      <span>{describeLive(data)}</span>
       <span className={`${p.ranksLine} ${data.ranks_available ? "" : s.warn}`}>{describeRanks(data)}</span>
     </>
   )

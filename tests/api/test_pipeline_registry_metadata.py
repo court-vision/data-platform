@@ -30,6 +30,7 @@ CRON_RUNNER_JOBS = {
     "availability",
     "dime-checkins",
     "news",
+    "daily-rankings",
 }
 
 # SCHEDULED pipelines that no cron-runner job fires (manual trigger only).
@@ -176,4 +177,8 @@ class TestForceOnRun:
         # which made the Run button a no-op. cv-projection's route takes `force`
         # too, but there it means "outside the preseason window" - not what a
         # Run click means.
-        assert [name for name, _ in FORCED] == ["availability", "dime_checkins", "scheduled_pickups"]
+        # daily-rankings skips once the day is stored; its forced Run rebuilds the day,
+        # and so does live-projection's, the first link of the same morning.
+        assert [name for name, _ in FORCED] == [
+            "availability", "daily_rankings", "dime_checkins", "live_projection", "scheduled_pickups",
+        ]

@@ -1,7 +1,8 @@
 import { Loader2, Plus, X } from "lucide-react"
 import { useId, useMemo, useState, type FormEvent, type ReactNode } from "react"
 
-import { Chip, Pop, type Tone } from "@/components/blocks"
+import { Chip, Pop, Rail, Tag, type Tone } from "@/components/blocks"
+import { Evidence, NoteEditor, type SeasonContext } from "@/components/ProjectionNote"
 import {
   useAdjustmentHistory,
   usePreviewAdjustment,
@@ -12,55 +13,76 @@ import { readAuthor, rememberAuthor } from "@/lib/author"
 import {
   changeKey,
   changesSomething,
-  describeChange,
+  describeEntry,
+  EDIT_MODES,
   formFrom,
   formatStat,
   kindLabel,
+  LIVE_COLUMNS,
   parseChange,
   rankMove,
   RATE_KEYS,
   saveBlocker,
+  standingLabel,
   STAT_COLUMNS,
   statDiffers,
   type AdjustmentEntry,
   type AdjustmentForm,
   type AdjustmentKind,
+  type EditMode,
   type ProjectionLine,
   type ProjectionPreview,
   type ProjectionRow,
 } from "@/lib/projections"
-import { formatCentral } from "@/lib/time"
+import { formatCentral, formatDay } from "@/lib/time"
 import dk from "@/desk/desk.module.css"
 import s from "./sheet.module.css"
 import p from "./projections.module.css"
 
 const FIELD = `${dk.input} ${p.field}`
 
+/** What an opened row needs from the page: how to edit, and what a season note is written against. */
+export interface Editing {
+  kinds: string[]
+  espnWeight: number
+  season: SeasonContext
+  /** Which of the two forms is open: the preseason adjustment or the season note. */
+  mode: EditMode
+  onMode: (mode: EditMode) => void
+}
+
 /**
- * One player, opened: the four lines his projection passes through, and the
- * adjustment that turns the blend into the final line. An edit is previewed
- * before it can be saved, so the rank move is seen before it is made.
+ * One player, opened: the four lines his projection passes through, the live
+ * line the board is priced on in season, and the two things a person can lay
+ * over them. A preseason adjustment turns the blend into the final line; a
+ * season note is a fact with an end, read by the live projection. Either is
+ * previewed before it can be saved.
  *
- * The parent keys this by the live adjustment's id, so a save (which replaces
- * that row) starts the form again from what was saved.
+ * The parent keys this by the ids of the live adjustment and the live note,
+ * so a save (which replaces that row) starts the form again from what was
+ * saved.
  */
-export function ProjectionDetail({ row, kinds, espnWeight }: { row: ProjectionRow; kinds: string[]; espnWeight: number }) {
+export function ProjectionDetail({ row, editing }: { row: ProjectionRow; editing: Editing }) {
+  const { kinds, espnWeight, season, mode, onMode } = editing
   return (
     <div className={p.detail}>
       <div className={p.detailSide}>
-        <LinesTable row={row} espnWeight={espnWeight} />
+        <LinesTable row={row} espnWeight={espnWeight} liveAsOf={season.liveAsOf} />
         <History playerId={row.player_id} />
       </div>
-      <AdjustmentEditor row={row} kinds={kinds} />
+      <div className={p.editing}>
+        <Rail label="Edit" options={EDIT_MODES} value={mode} onChange={onMode} />
+        {mode === "note" ? <NoteEditor row={row} kinds={kinds} season={season} /> : <AdjustmentEditor row={row} kinds={kinds} />}
+      </div>
     </div>
   )
 }
 
 // ---- the four lines --------------------------------------------------------------------------
 
-function LinesTable({ row, espnWeight }: { row: ProjectionRow; espnWeight: number }) {
+function LinesTable({ row, espnWeight, liveAsOf }: { row: ProjectionRow; espnWeight: number; liveAsOf: string | null }) {
   const weight = row.espn_weight ?? espnWeight
-  const lines: { label: string; hint: string; line: ProjectionLine | null; against?: ProjectionLine | null }[] = [
+  const lines: { label: string; hint: string; line: ProjectionLine | null; against?: ProjectionLine | null; live?: boolean }[] = [
     {
       label: "Statistical",
       hint: row.statistical
@@ -81,6 +103,17 @@ function LinesTable({ row, espnWeight }: { row: ProjectionRow; espnWeight: numbe
       against: row.blended,
     },
   ]
+  // In season the board is priced on this one. Its games are the ones left, not a season's.
+  if (liveAsOf) {
+    lines.push({
+      label: "Live, from here",
+      hint: row.live
+        ? `The live projection of ${formatDay(liveAsOf)}: his line in a game he plays, over the games he is expected to play from here`
+        : `Not in the live projection of ${formatDay(liveAsOf)}`,
+      line: row.live,
+      live: true,
+    })
+  }
   return (
     <div className={p.miniWrap}>
       <table className={p.mini}>
@@ -95,17 +128,18 @@ function LinesTable({ row, espnWeight }: { row: ProjectionRow; espnWeight: numbe
           </tr>
         </thead>
         <tbody>
-          {lines.map(({ label, hint, line, against }) => (
-            <tr key={label}>
+          {lines.map(({ label, hint, line, against, live }) => (
+            <tr key={label} className={live ? p.liveLine : undefined}>
               <th scope="row" title={hint} className={label === "Final" ? p.final : undefined}>
                 {label}
               </th>
-              {STAT_COLUMNS.map((column) => (
+              {(live ? LIVE_COLUMNS : STAT_COLUMNS).map((column) => (
                 <td
                   key={column.key}
                   // Where the adjustment moved the blend.
                   data-moved={against !== undefined && statDiffers(column, line, against) ? "true" : undefined}
                   className={!line ? s.muted : undefined}
+                  title={live ? column.title : undefined}
                 >
                   {formatStat(column, line)}
                 </td>
@@ -127,7 +161,7 @@ function History({ playerId }: { playerId: number }) {
   const versions = history.data?.versions ?? []
   if (history.isPending) return <p className={`${s.mono} ${s.muted}`}>Loading versions…</p>
   if (history.error) return <p className={`${s.mono} ${s.bad}`}>Versions unavailable: {history.error.message}</p>
-  if (versions.length === 0) return <p className={`${s.mono} ${s.muted}`}>No adjustment has been recorded for him this season.</p>
+  if (versions.length === 0) return <p className={`${s.mono} ${s.muted}`}>No adjustment or note has been recorded for him this season.</p>
   return (
     <div>
       <h3 className={`${dk.label} ${p.sectionLabel}`}>Versions</h3>
@@ -141,18 +175,35 @@ function History({ playerId }: { playerId: number }) {
 }
 
 function VersionItem({ version }: { version: AdjustmentEntry }) {
+  const season = version.scope === "season"
+  // Only the live note has a standing: whether it is still applied this morning.
+  const standing = standingLabel(version.standing)
+  const flagged = standing != null && standing.label !== "in force"
+  const terms = [
+    version.confidence,
+    // Past its review date the standing says so itself
+    version.review_date && version.standing?.state !== "review_due" ? `read again by ${formatDay(version.review_date)}` : null,
+  ].filter(Boolean)
   return (
     <li>
       <div className={p.versionLine}>
         <Chip tone={STATE_TONE[version.state] ?? "quiet"}>{version.state}</Chip>
+        <Tag>{season ? "Season note" : "Preseason"}</Tag>
         <span>{kindLabel(version.kind)}</span>
         <span className={s.sep}>·</span>
-        <span>{describeChange(version)}</span>
+        <span>{describeEntry(version)}</span>
         <span className={s.sep}>·</span>
         <span className={s.muted}>
           {version.author}, {formatCentral(version.created_at)}
         </span>
       </div>
+      {season && (terms.length > 0 || flagged) && (
+        <div className={`${p.versionLine} ${p.versionTerms}`}>
+          {flagged && <Chip tone={standing.tone}>{standing.label}</Chip>}
+          {flagged && standing.detail && <span className={s.muted}>{standing.detail}</span>}
+          {terms.length > 0 && <span className={s.muted}>{terms.join(" · ")}</span>}
+        </div>
+      )}
       <p className={p.versionNote}>
         {version.note}
         {version.source_url && (
@@ -164,6 +215,15 @@ function VersionItem({ version }: { version: AdjustmentEntry }) {
           </>
         )}
       </p>
+      {version.evidence.length > 0 && (
+        <ul className={p.evidence}>
+          {version.evidence.map((item, index) => (
+            <li key={item.id ?? index}>
+              <Evidence item={item} />
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
   )
 }

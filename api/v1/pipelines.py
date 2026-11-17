@@ -43,6 +43,12 @@ from pipelines import (
 )
 from pipelines.availability import Due as AvailabilityDue, due_now as availability_due_now
 from pipelines.config import PipelineCategory
+from pipelines.daily_rankings import (
+    WAIT_UNTIL_HOUR_ET as DAILY_RANKINGS_WAIT_UNTIL_HOUR_ET,
+    now_eastern as daily_rankings_now,
+    stored_on as daily_rankings_stored_on,
+    today_et as daily_rankings_today,
+)
 from pipelines.game_logs import GAME_HISTORY_FIRST_YEAR, SEASON_TYPE_PARAMS
 from pipelines.gates import (
     GateDecision,
@@ -64,6 +70,7 @@ from schemas.pipeline import (
 )
 from schemas.common import ApiStatus
 from services.alert_service import AlertEvent, get_alert_service
+from services.schedule_service import get_season_phase
 
 # The gate routes here (pre-game, post-game, live-stats) are `async def`, so
 # they run on the private process's one event loop, which they share with
@@ -2201,3 +2208,105 @@ async def trigger_cv_projection(
     """
     result = await run_pipeline("cv_projection", date_override=date, options={"force": True} if force else None)
     return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+@router.post("/live-projection", response_model=PipelineResponse)
+async def trigger_live_projection(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(
+        False,
+        description="Rebuild today's projection even when it is stored (the dashboard's Run button).",
+    ),
+) -> PipelineResponse:
+    """
+    Trigger the live-projection pipeline: every player's line for each game his
+    team has left, as of this morning, into nba.player_projections under source
+    `cv_live`.
+
+    It has no cron job of its own: the daily-rankings trigger runs it first
+    every morning of the season, so the day's boards are built on it. This
+    route is the same run on demand. The day's projection is kept once stored
+    and the run waits for last night's box scores; `force` skips both and
+    replaces today's rows.
+    """
+    result = await run_pipeline("live_projection", options={"force": True} if force else None)
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+@router.post("/daily-rankings", response_model=PipelineResponse)
+async def trigger_daily_rankings(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(
+        False,
+        description="Rebuild today's projection and boards even when they are stored (the dashboard's Run button).",
+    ),
+) -> PipelineResponse:
+    """
+    Trigger the morning's rankings: the live-projection pipeline (every
+    player's line for each game left), then the daily-rankings pipeline: Court
+    Vision's two standard boards (points and 9-cat, from the backend, which
+    reads that projection) and ESPN's ranks that morning, into
+    nba.daily_rankings.
+
+    Called hourly through the morning by the 'daily-rankings' cron job. Gates
+    on the calendar and on the day (no run row): outside the regular season
+    there is nothing to store, and once today's boards and ESPN's ranks are
+    both in, the later ticks have nothing to do. A tick before last night's box
+    scores have landed, or while the batch that writes them is not done, fails
+    as waiting and the next one tries again.
+
+    The boards wait for the projection through the early morning: a tick whose
+    projection was not built (it is waiting, or it failed) stores no boards,
+    and answers with the projection's result. From 10 AM ET they are stored on
+    what there is: the backend reads the newest projection it has and, with
+    none in the last days, the blend it used before, and the board's `model`
+    says which.
+
+    A projection run that was skipped because another one holds its lock (a
+    note saved in the editor, the dashboard's Run button, a request retried
+    while the first is still going) is still building today's projection, so
+    no boards are built on this tick, forced or not: they would read
+    yesterday's projection and, kept for the day, never see today's. The next
+    tick builds them.
+
+    `force` skips both gates and those waits, and replaces today's rows.
+    Between midnight and 3 AM ET the backend's day is still yesterday, and a
+    run then, forced or not, stores nothing: yesterday morning's projection
+    and boards are never replaced by ones that have seen last night's games.
+    """
+    if not force:
+        reason = await _daily_rankings_idle()
+        if reason:
+            return PipelineResponse(status=ApiStatus.SKIPPED, message=reason)
+    options = {"force": True} if force else None
+    projection = await run_pipeline("live_projection", options=options)
+    if projection.status == ApiStatus.SKIPPED:
+        log.info("daily_rankings_projection_in_progress", live_projection=projection.message)
+        return PipelineResponse(
+            status=ApiStatus.SKIPPED,
+            message=f"Today's projection is being built by another run; the boards wait for it ({projection.message})",
+            data=projection,
+        )
+    if projection.status == ApiStatus.ERROR and not force and daily_rankings_now().hour < DAILY_RANKINGS_WAIT_UNTIL_HOUR_ET:
+        log.info("daily_rankings_wait_for_projection", live_projection=projection.message)
+        return PipelineResponse(status=projection.status, message=projection.message, data=projection)
+    result = await run_pipeline("daily_rankings", options=options)
+    log.info("daily_rankings_chain_complete", live_projection=projection.status, daily_rankings=result.status)
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+def _daily_rankings_idle_reason(today: date) -> Optional[str]:
+    try:
+        phase = get_season_phase(today)
+    except (FileNotFoundError, ValueError):
+        phase = "regular"   # no calendar on this box: the backend's answer decides
+    if phase != "regular":
+        return "Outside the regular season: no rankings to store"
+    if daily_rankings_stored_on(today).complete:
+        return "Today's rankings are already stored"
+    return None
+
+
+async def _daily_rankings_idle() -> Optional[str]:
+    """Why a daily-rankings tick has nothing to do, or None when it should run."""
+    return await run_in_db_thread(_daily_rankings_idle_reason, daily_rankings_today())

@@ -12,9 +12,17 @@ Routes:
     DELETE /v1/dashboard/projections/{player_id}/adjustment   — retire the live one, then republish
     GET    /v1/dashboard/projections/{player_id}/adjustments  — every version, newest first
 
+    POST   /v1/dashboard/projections/note/preview             — one player's live line under a season note
+    PUT    /v1/dashboard/projections/{player_id}/note         — save a season note, then rebuild the live projection
+    DELETE /v1/dashboard/projections/{player_id}/note         — retire it, then rebuild
+    GET    /v1/dashboard/projections/{player_id}/news         — his recent stored news: what a note can cite
+
 A save writes one row to nba.projection_adjustments (append-only: it
-supersedes the live row) and runs cv-projection, so the snapshot the draft
-board reads is the one the page showed in its preview.
+supersedes the live row of its scope). A preseason adjustment then runs
+cv-projection, so the snapshot the draft board reads is the one the page
+showed in its preview. A season note (the Live rankings plan, step 3) leaves
+the preseason projection alone and rebuilds the day's live projection, which
+is what the board is priced on in season.
 """
 
 from __future__ import annotations
@@ -27,8 +35,11 @@ from fastapi import APIRouter, HTTPException, Path, Security
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
 from core.settings import settings
+from datetime import datetime
+
 from db.base import run_in_db_thread
 from db.models.nba import ProjectionAdjustment
+from db.models.nba.projection_adjustments import SCOPE_SEASON
 from pipelines import run_pipeline
 from schemas.common import ApiStatus
 from schemas.projections import (
@@ -37,11 +48,20 @@ from schemas.projections import (
     AdjustmentSave,
     AdjustmentSaved,
     AdjustmentSavedResponse,
+    NotePreviewRequest,
+    NotePreviewResponse,
+    NoteSave,
+    NoteSaved,
+    NoteSavedResponse,
+    PlayerNews,
+    PlayerNewsResponse,
     PreviewRequest,
     PreviewResponse,
     ProjectionsResponse,
 )
+from services import live_projection_inputs as live_inputs
 from services import projection_editor as editor
+from services import projection_notes as notes
 from services.valuation_client import Valuation, valuation_client_from_settings
 
 router = APIRouter(
@@ -190,4 +210,159 @@ async def get_adjustment_history(player_id: int = _PLAYER_ID) -> AdjustmentHisto
         status="success",
         message=f"{len(versions)} version(s)",
         data=AdjustmentHistory(player_id=player_id, season=season, versions=versions),
+    )
+
+
+# ---- notes in season -----------------------------------------------------------------------
+
+
+def _eastern_now() -> datetime:
+    """Now, as Eastern wall-clock time: when a note saved this moment was written."""
+    return live_inputs.eastern(datetime.utcnow())
+
+
+@router.post("/note/preview", response_model=NotePreviewResponse)
+async def preview_note(req: NotePreviewRequest) -> NotePreviewResponse:
+    """
+    One player's live projection this morning as it stands, and as it would be
+    under the season note in the body (or with none at all): the line in a
+    game he plays, the games he is expected to play from here, and the
+    stretches of the calendar the two are averaged over. Nothing is written.
+
+    It prices the line, not a rank: the board's rank is worked out by the
+    backend on its next read, under its own league.
+    """
+    season = settings.nba_season
+    inputs = await run_in_db_thread(live_inputs.load_inputs, season, notes.today_et())
+    preview = await asyncio.to_thread(
+        notes.preview, inputs, req.player_id, req.note, written=_eastern_now(), review_date=req.review_date
+    )
+    if preview is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Player {req.player_id} is not in the live projection: no game this season and no preseason line",
+        )
+    return NotePreviewResponse(status="success", message="Preview computed; nothing was saved", data=preview)
+
+
+# A note's rebuild that meets another projection run waits for it, this often and this long
+REBUILD_ATTEMPTS = 4
+REBUILD_RETRY_SECONDS = 5.0
+
+
+async def _rebuild_live(player_id: int) -> NoteSaved:
+    """Rebuild the day's live projection after a write, so the board reads the
+    note at once. A rebuild that did not happen (before the day turns, before
+    last night's box scores are in with no snapshot stored yet, out of season,
+    or a failure) does not undo the write: the morning's run reads the note
+    anyway. Not `force`: a forced run skips the wait for last night's box
+    scores, and the snapshot it stored would be the one the morning keeps.
+
+    A rebuild that finds another projection run going (the morning's, or
+    another save) is skipped, and that run may have read the notes before this
+    write and stored a snapshot the morning would then keep. It is tried again
+    once that run is done, a few times."""
+    for attempt in range(REBUILD_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(REBUILD_RETRY_SECONDS)
+        result = await run_pipeline("live_projection", options={"rebuild": True})
+        if result.status not in (ApiStatus.SKIPPED, ApiStatus.SKIPPED.value):
+            break
+    ok = result.status in (ApiStatus.SUCCESS, ApiStatus.SUCCESS.value)
+    rebuilt = ok and bool(result.records_processed)
+    if not rebuilt:
+        log.warning("live_projection_rebuild_skipped", player_id=player_id, message=result.message, error=result.error)
+    return NoteSaved(player_id=player_id, rebuilt=rebuilt, pipeline=result)
+
+
+def _rebuild_message(done: str, saved: NoteSaved, later: str) -> str:
+    """What a save or a retire says about the day's projection. A rebuild that
+    never got past another run is said plainly: that run may have stored a
+    morning without this change, and the day's ticks keep a stored morning."""
+    if saved.rebuilt:
+        return f"Note {done} and the live projection rebuilt"
+    if saved.pipeline is not None and saved.pipeline.status in (ApiStatus.SKIPPED, ApiStatus.SKIPPED.value):
+        return (f"Note {done}, but another projection run was going the whole time: "
+                "today's projection may not have it yet, so save it again in a minute")
+    return f"Note {done}; the live projection {later} on its next run"
+
+
+@router.put("/{player_id}/note", response_model=NoteSavedResponse)
+async def save_note(body: NoteSave, player_id: int = _PLAYER_ID) -> NoteSavedResponse:
+    """
+    Make the body the player's live season note. His previous note is kept and
+    marked superseded; his preseason adjustment is not touched. Then rebuild
+    the day's live projection.
+
+    The note is read again on its review date (two weeks on when the body does
+    not say): past that day it is no longer applied.
+    """
+    season = settings.nba_season
+    today = notes.today_et()
+    if body.depends_on_player_id == player_id:
+        raise HTTPException(status_code=422, detail="A note cannot depend on the player it is about")
+    if body.review_date is not None and body.review_date < today:
+        raise HTTPException(status_code=422, detail="The review date has already passed")
+
+    def write():
+        if not editor.player_exists(player_id):
+            return "player", None
+        if body.depends_on_player_id is not None and not editor.player_exists(body.depends_on_player_id):
+            return "teammate", None
+        evidence, missing = notes.evidence_for(body.evidence_news_ids)
+        if missing:
+            return "evidence", missing
+        record = ProjectionAdjustment.record(player_id, season, **notes.note_fields(body, today, evidence))
+        return "saved", record
+
+    outcome, value = await run_in_db_thread(write)
+    if outcome == "player":
+        raise HTTPException(status_code=404, detail=f"No player {player_id}")
+    if outcome == "teammate":
+        raise HTTPException(status_code=422, detail=f"No player {body.depends_on_player_id} to depend on")
+    if outcome == "evidence":
+        raise HTTPException(status_code=422, detail=f"No stored news item {', '.join(str(i) for i in value)}")
+    record = value
+    log.info("projection_note_saved", player_id=player_id, adjustment_id=record.id, kind=body.kind,
+             author=body.author, review_date=str(record.review_date))
+
+    saved = await _rebuild_live(player_id)
+    history = await run_in_db_thread(editor.adjustment_history, player_id, season)
+    saved.note = next((entry for entry in history if entry.id == record.id), None)
+    return NoteSavedResponse(
+        status="success",
+        message=_rebuild_message("saved", saved, "reads it"),
+        data=saved,
+    )
+
+
+@router.delete("/{player_id}/note", response_model=NoteSavedResponse)
+async def retire_note(player_id: int = _PLAYER_ID) -> NoteSavedResponse:
+    """
+    Withdraw the player's live season note without a replacement (the row is
+    kept, marked retired), then rebuild the day's live projection.
+    """
+    season = settings.nba_season
+    retired = await run_in_db_thread(ProjectionAdjustment.retire, player_id, season, SCOPE_SEASON)
+    if not retired:
+        raise HTTPException(status_code=404, detail=f"Player {player_id} has no live season note for {season}")
+    log.info("projection_note_retired", player_id=player_id)
+
+    saved = await _rebuild_live(player_id)
+    return NoteSavedResponse(
+        status="success",
+        message=_rebuild_message("retired", saved, "drops it"),
+        data=saved,
+    )
+
+
+@router.get("/{player_id}/news", response_model=PlayerNewsResponse)
+async def get_player_news(player_id: int = _PLAYER_ID) -> PlayerNewsResponse:
+    """The player's stored news of the last three weeks, newest first: the
+    items a season note can cite as its evidence."""
+    items = await run_in_db_thread(notes.recent_news, player_id)
+    return PlayerNewsResponse(
+        status="success",
+        message=f"{len(items)} item(s)",
+        data=PlayerNews(player_id=player_id, items=items),
     )

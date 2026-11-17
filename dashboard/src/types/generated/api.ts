@@ -173,6 +173,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/projections/note/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Note
+         * @description One player's live projection this morning as it stands, and as it would be
+         *     under the season note in the body (or with none at all): the line in a
+         *     game he plays, the games he is expected to play from here, and the
+         *     stretches of the calendar the two are averaged over. Nothing is written.
+         *
+         *     It prices the line, not a rank: the board's rank is worked out by the
+         *     backend on its next read, under its own league.
+         */
+        post: operations["preview_note_v1_dashboard_projections_note_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/projections/preview": {
         parameters: {
             query?: never;
@@ -238,6 +264,57 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/projections/{player_id}/news": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Player News
+         * @description The player's stored news of the last three weeks, newest first: the
+         *     items a season note can cite as its evidence.
+         */
+        get: operations["get_player_news_v1_dashboard_projections__player_id__news_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/projections/{player_id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Note
+         * @description Make the body the player's live season note. His previous note is kept and
+         *     marked superseded; his preseason adjustment is not touched. Then rebuild
+         *     the day's live projection.
+         *
+         *     The note is read again on its review date (two weeks on when the body does
+         *     not say): past that day it is no longer applied.
+         */
+        put: operations["save_note_v1_dashboard_projections__player_id__note_put"];
+        post?: never;
+        /**
+         * Retire Note
+         * @description Withdraw the player's live season note without a replacement (the row is
+         *     kept, marked retired), then rebuild the day's live projection.
+         */
+        delete: operations["retire_note_v1_dashboard_projections__player_id__note_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -593,6 +670,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/daily-rankings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Daily Rankings
+         * @description Trigger the morning's rankings: the live-projection pipeline (every
+         *     player's line for each game left), then the daily-rankings pipeline: Court
+         *     Vision's two standard boards (points and 9-cat, from the backend, which
+         *     reads that projection) and ESPN's ranks that morning, into
+         *     nba.daily_rankings.
+         *
+         *     Called hourly through the morning by the 'daily-rankings' cron job. Gates
+         *     on the calendar and on the day (no run row): outside the regular season
+         *     there is nothing to store, and once today's boards and ESPN's ranks are
+         *     both in, the later ticks have nothing to do. A tick before last night's box
+         *     scores have landed, or while the batch that writes them is not done, fails
+         *     as waiting and the next one tries again.
+         *
+         *     The boards wait for the projection through the early morning: a tick whose
+         *     projection was not built (it is waiting, or it failed) stores no boards,
+         *     and answers with the projection's result. From 10 AM ET they are stored on
+         *     what there is: the backend reads the newest projection it has and, with
+         *     none in the last days, the blend it used before, and the board's `model`
+         *     says which.
+         *
+         *     A projection run that was skipped because another one holds its lock (a
+         *     note saved in the editor, the dashboard's Run button, a request retried
+         *     while the first is still going) is still building today's projection, so
+         *     no boards are built on this tick, forced or not: they would read
+         *     yesterday's projection and, kept for the day, never see today's. The next
+         *     tick builds them.
+         *
+         *     `force` skips both gates and those waits, and replaces today's rows.
+         *     Between midnight and 3 AM ET the backend's day is still yesterday, and a
+         *     run then, forced or not, stores nothing: yesterday morning's projection
+         *     and boards are never replaced by ones that have seen last night's games.
+         */
+        post: operations["trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/deploy": {
         parameters: {
             query?: never;
@@ -845,6 +972,34 @@ export interface paths {
          *     and any difference is logged as `lineup_snapshot_drift`.
          */
         post: operations["trigger_lineup_snapshots_v1_internal_pipelines_lineup_snapshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/internal/pipelines/live-projection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Live Projection
+         * @description Trigger the live-projection pipeline: every player's line for each game his
+         *     team has left, as of this morning, into nba.player_projections under source
+         *     `cv_live`.
+         *
+         *     It has no cron job of its own: the daily-rankings trigger runs it first
+         *     every morning of the season, so the day's boards are built on it. This
+         *     route is the same run on demand. The day's projection is kept once stored
+         *     and the run waits for last night's box scores; `force` skips both and
+         *     replaces today's rows.
+         */
+        post: operations["trigger_live_projection_v1_internal_pipelines_live_projection_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1342,16 +1497,27 @@ export interface components {
         };
         /**
          * AdjustmentEntry
-         * @description One version of one player's adjustment (nba.projection_adjustments).
+         * @description One version of one player's adjustment or season note (nba.projection_adjustments).
          */
         AdjustmentEntry: {
             /** Author */
             author: string;
+            /** Confidence */
+            confidence: string | null;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+            /** Depends On Name */
+            depends_on_name: string | null;
+            /**
+             * Depends On Player Id
+             * @description ... or until this teammate plays again
+             */
+            depends_on_player_id: number | null;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceItem"][];
             /** Games */
             games: number | null;
             /** Id */
@@ -1368,13 +1534,35 @@ export interface components {
             } | null;
             /** Return Date */
             return_date: string | null;
+            /** Return Earliest */
+            return_earliest: string | null;
+            /** Return Latest */
+            return_latest: string | null;
+            /**
+             * Review Date
+             * @description Past this day the note is no longer applied
+             */
+            review_date: string | null;
+            /**
+             * Scope
+             * @description preseason: an input to cv-projection. season: a dated note
+             * @default preseason
+             */
+            scope: string;
             /** Source Url */
             source_url: string | null;
+            /** @description For the live season note: how it stands today */
+            standing: components["schemas"]["NoteStanding"] | null;
             /**
              * State
              * @default live
              */
             state: string;
+            /**
+             * Until Date
+             * @description The minutes and usage hold through this day
+             */
+            until_date: string | null;
             /** Usage */
             usage: number | null;
         };
@@ -1893,6 +2081,36 @@ export interface components {
             message: string;
             status: components["schemas"]["ApiStatus"];
         };
+        /**
+         * EvidenceItem
+         * @description A stored item a note rests on, kept as it read when the note was written.
+         */
+        EvidenceItem: {
+            /** Headline */
+            headline: string | null;
+            /** Id */
+            id: number | null;
+            /**
+             * Kind
+             * @description injury, availability, lineup, transaction, performance, rumor
+             */
+            kind: string | null;
+            /** Published At */
+            published_at: string | null;
+            /**
+             * Source
+             * @description espn_injuries, rotowire_rss, ...
+             */
+            source: string | null;
+            /**
+             * Type
+             * @description news: an nba.news_items row
+             * @default news
+             */
+            type: string;
+            /** Url */
+            url: string | null;
+        };
         /** FreshnessData */
         FreshnessData: {
             /**
@@ -2082,6 +2300,16 @@ export interface components {
             requests: number;
         };
         /**
+         * LiveSide
+         * @description One player's live projection: the stored line, and the stretches it averages.
+         */
+        LiveSide: {
+            /** @description A game he plays, and the games he is expected to play from here */
+            line: components["schemas"]["ProjectionLine"];
+            /** Stretches */
+            stretches: components["schemas"]["LiveStretch"][];
+        };
+        /**
          * LiveStatsData
          * @description Data payload for the live stats trigger endpoint.
          */
@@ -2124,6 +2352,253 @@ export interface components {
             /** Message */
             message: string;
             status: components["schemas"]["ApiStatus"];
+        };
+        /**
+         * LiveStretch
+         * @description A run of his team's remaining games he is expected to play alike.
+         */
+        LiveStretch: {
+            /**
+             * Chance
+             * @description That he plays each
+             */
+            chance: number;
+            /**
+             * First
+             * Format: date
+             */
+            first: string;
+            /**
+             * Games
+             * @description His team's games in the stretch
+             */
+            games: number;
+            /**
+             * Last
+             * Format: date
+             */
+            last: string;
+            /** Minutes */
+            minutes: number;
+            /**
+             * Usage
+             * @description His share of the offense against his usual one
+             */
+            usage: number;
+        };
+        /**
+         * NoteChange
+         * @description What a season note states. Minutes and usage are targets, in force while
+         *     the role part holds; a return date says he is out until then.
+         */
+        NoteChange: {
+            /**
+             * Depends On Player Id
+             * @description ... or until this teammate plays again, whichever comes first
+             */
+            depends_on_player_id?: number | null;
+            /**
+             * Minutes
+             * @description Minutes a game while the note holds
+             */
+            minutes?: number | null;
+            /**
+             * Out For Season
+             * @description The season is written off
+             * @default false
+             */
+            out_for_season?: boolean;
+            /**
+             * Return Date
+             * @description The likely first game back: out until then
+             */
+            return_date?: string | null;
+            /**
+             * Return Earliest
+             * @description The early end of the range around it
+             */
+            return_earliest?: string | null;
+            /**
+             * Return Latest
+             * @description The late end
+             */
+            return_latest?: string | null;
+            /**
+             * Until Date
+             * @description The minutes and usage hold through this day
+             */
+            until_date?: string | null;
+            /**
+             * Usage
+             * @description His share of the offense against his usual one while it holds
+             */
+            usage?: number | null;
+        };
+        /**
+         * NotePreview
+         * @description One player's live projection this morning with his note as it is, and as the note tried would leave it.
+         */
+        NotePreview: {
+            after: components["schemas"]["LiveSide"];
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            before: components["schemas"]["LiveSide"];
+            /** Player Id */
+            player_id: number;
+            /** @description How the note tried would stand today; None when previewing having none */
+            standing: components["schemas"]["NoteStanding"] | null;
+        };
+        /** NotePreviewRequest */
+        NotePreviewRequest: {
+            /** @description The note to try. Omit (or null) to preview having none. */
+            note?: components["schemas"]["NoteChange"] | null;
+            /** Player Id */
+            player_id: number;
+            /**
+             * Review Date
+             * @description As on a save: the default when omitted
+             */
+            review_date?: string | null;
+        };
+        /** NotePreviewResponse */
+        NotePreviewResponse: {
+            data: components["schemas"]["NotePreview"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * NoteSave
+         * @description A new version of a player's season note. Saving supersedes his live one.
+         */
+        NoteSave: {
+            /**
+             * Author
+             * @default dashboard
+             */
+            author?: string;
+            /** Confidence */
+            confidence?: ("confirmed" | "likely" | "possible") | null;
+            /**
+             * Depends On Player Id
+             * @description ... or until this teammate plays again, whichever comes first
+             */
+            depends_on_player_id?: number | null;
+            /**
+             * Evidence News Ids
+             * @description The stored news items it rests on (nba.news_items ids)
+             */
+            evidence_news_ids?: number[];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "year2" | "trade" | "role" | "injury_return" | "injury_current" | "age" | "other";
+            /**
+             * Minutes
+             * @description Minutes a game while the note holds
+             */
+            minutes?: number | null;
+            /**
+             * Note
+             * @description Why: the fact being recorded
+             */
+            note: string;
+            /**
+             * Out For Season
+             * @description The season is written off
+             * @default false
+             */
+            out_for_season?: boolean;
+            /**
+             * Return Date
+             * @description The likely first game back: out until then
+             */
+            return_date?: string | null;
+            /**
+             * Return Earliest
+             * @description The early end of the range around it
+             */
+            return_earliest?: string | null;
+            /**
+             * Return Latest
+             * @description The late end
+             */
+            return_latest?: string | null;
+            /**
+             * Review Date
+             * @description Read again by this day; past it the note is not applied. Default: two weeks on
+             */
+            review_date?: string | null;
+            /**
+             * Source Url
+             * @description The report it came from
+             */
+            source_url?: string | null;
+            /**
+             * Until Date
+             * @description The minutes and usage hold through this day
+             */
+            until_date?: string | null;
+            /**
+             * Usage
+             * @description His share of the offense against his usual one while it holds
+             */
+            usage?: number | null;
+        };
+        /**
+         * NoteSaved
+         * @description What a save or a retire of a season note did: the table write, and the rebuild that followed.
+         */
+        NoteSaved: {
+            /** @description The new live note; None after a retire */
+            note: components["schemas"]["AdjustmentEntry"] | null;
+            pipeline: components["schemas"]["PipelineResult"] | null;
+            /** Player Id */
+            player_id: number;
+            /**
+             * Rebuilt
+             * @description Whether the day's live projection was rebuilt with it
+             */
+            rebuilt: boolean;
+        };
+        /** NoteSavedResponse */
+        NoteSavedResponse: {
+            data: components["schemas"]["NoteSaved"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * NoteStanding
+         * @description How a live season note stands today (services.live_notes.standing).
+         */
+        NoteStanding: {
+            /**
+             * Games
+             * @description Its return date, or written-off season, still applies
+             */
+            games: boolean;
+            /**
+             * Reasons
+             * @description Why a part, or all of it, no longer does
+             */
+            reasons: string[];
+            /**
+             * Role
+             * @description Its minutes and usage still apply
+             */
+            role: boolean;
+            /**
+             * State
+             * @description in_force | review_due | ended
+             */
+            state: string;
         };
         /**
          * PipelineHealthEntry
@@ -2416,6 +2891,24 @@ export interface components {
             /** Status */
             status: string;
         };
+        /** PlayerNews */
+        PlayerNews: {
+            /**
+             * Items
+             * @description His recent stored news, newest first: what a note can cite
+             */
+            items: components["schemas"]["EvidenceItem"][];
+            /** Player Id */
+            player_id: number;
+        };
+        /** PlayerNewsResponse */
+        PlayerNewsResponse: {
+            data: components["schemas"]["PlayerNews"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
         /** PreviewRequest */
         PreviewRequest: {
             /** @description The adjustment to try. Omit (or null) to preview having none. */
@@ -2547,8 +3040,12 @@ export interface components {
             espn_weight: number | null;
             /** @description With the live adjustment applied: what is published */
             final: components["schemas"]["ProjectionLine"];
+            /** @description The live projection as stored this morning: his line in a game he plays, and the games he is expected to play from here. None before the season's first snapshot */
+            live: components["schemas"]["ProjectionLine"] | null;
             /** Name */
             name: string;
+            /** @description His live season note, with how it stands today */
+            note: components["schemas"]["AdjustmentEntry"] | null;
             /** Player Id */
             player_id: number;
             /** Position */
@@ -2570,6 +3067,11 @@ export interface components {
             /** Coefficients Version */
             coefficients_version: string;
             /**
+             * Confidences
+             * @description The confidence levels a season note accepts
+             */
+            confidences: string[];
+            /**
              * Espn As Of
              * @description The ESPN snapshot the lines were read from
              */
@@ -2590,6 +3092,11 @@ export interface components {
              */
             kinds: string[];
             league: components["schemas"]["StandardLeague"] | null;
+            /**
+             * Live As Of
+             * @description The live projection's latest snapshot; None before the season's first
+             */
+            live_as_of: string | null;
             /** Players */
             players: components["schemas"]["ProjectionRow"][];
             /**
@@ -2607,6 +3114,12 @@ export interface components {
              * @description Why not, when it did not
              */
             ranks_reason: string | null;
+            /**
+             * Review Days
+             * @description How long a season note runs before it must be read again, by default
+             * @default 14
+             */
+            review_days: number;
             /** Season */
             season: string;
             /**
@@ -3362,6 +3875,39 @@ export interface operations {
             };
         };
     };
+    preview_note_v1_dashboard_projections_note_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     preview_adjustment_v1_dashboard_projections_preview_post: {
         parameters: {
             query?: never;
@@ -3482,6 +4028,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdjustmentHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_player_news_v1_dashboard_projections__player_id__news_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description NBA player id (nba.players.id) */
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerNewsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_note_v1_dashboard_projections__player_id__note_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description NBA player id (nba.players.id) */
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteSave"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteSavedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retire_note_v1_dashboard_projections__player_id__note_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description NBA player id (nba.players.id) */
+                player_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteSavedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3910,6 +4556,38 @@ export interface operations {
             };
         };
     };
+    trigger_daily_rankings_v1_internal_pipelines_daily_rankings_post: {
+        parameters: {
+            query?: {
+                /** @description Rebuild today's projection and boards even when they are stored (the dashboard's Run button). */
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     trigger_deploy_v1_internal_pipelines_deploy_post: {
         parameters: {
             query?: {
@@ -4200,6 +4878,38 @@ export interface operations {
             query?: {
                 /** @description Capture exactly this NBA date's ESPN day for every league, replacing what is stored (YYYY-MM-DD). Omit for the nightly catch-up. */
                 date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_live_projection_v1_internal_pipelines_live_projection_post: {
+        parameters: {
+            query?: {
+                /** @description Rebuild today's projection even when it is stored (the dashboard's Run button). */
+                force?: boolean;
             };
             header?: never;
             path?: never;

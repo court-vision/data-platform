@@ -9,6 +9,9 @@ applied — next to where the final line ranks in standard points and standard
 and the rank move before anything is saved; saving writes a new version and
 republishes the projection.
 
+In season the page also shows, for each of them, the live projection's line
+as stored this morning and his season note (services.projection_notes).
+
 Three kinds of work, kept apart so each runs where it should:
 
 - `load_state` reads the database, once (the caller runs it on a DB thread);
@@ -40,6 +43,7 @@ from schemas.projections import (
     StandardLeague,
     StandardRanks,
 )
+from services import projection_notes as notes
 from services.projection_inputs import ProjectionInputs, load_inputs
 from services.projection_model import (
     LINE_KEYS,
@@ -68,6 +72,10 @@ class EditorState:
     published_as_of: Optional[date] = None
     # id -> (the stored cv line, projected games) of the latest published snapshot
     published: dict[int, tuple[dict[str, float], Optional[int]]] = field(default_factory=dict)
+    # In season: the live projection's newest snapshot, and each player's live season note
+    live_as_of: Optional[date] = None
+    live: dict[int, ProjectionLine] = field(default_factory=dict)
+    notes: dict[int, AdjustmentEntry] = field(default_factory=dict)
 
 
 def load_state(season: str) -> EditorState:
@@ -96,12 +104,16 @@ def load_state(season: str) -> EditorState:
         )
         for rec in published_rows
     }
+    live_as_of, live = notes.load_live(season)
     return EditorState(
         inputs=inputs,
         players=players,
         market=market,
         published_as_of=max((rec.as_of_date for rec in published_rows), default=None),
         published=published,
+        live_as_of=live_as_of,
+        live=live,
+        notes=notes.load_notes(season, notes.today_et()),
     )
 
 
@@ -179,23 +191,7 @@ def _espn_line(e: Optional[EspnLine]) -> Optional[ProjectionLine]:
 
 
 def adjustment_entry(record: ProjectionAdjustment) -> AdjustmentEntry:
-    state = "retired" if record.retired_at is not None else (
-        "superseded" if record.superseded_by_id is not None else "live"
-    )
-    return AdjustmentEntry(
-        id=record.id,
-        kind=record.kind,
-        minutes=float(record.minutes) if record.minutes is not None else None,
-        games=int(record.games) if record.games is not None else None,
-        return_date=record.return_date,
-        usage=float(record.usage) if record.usage is not None else None,
-        rates={k: float(v) for k, v in record.rates.items()} if record.rates else None,
-        note=record.note,
-        source_url=record.source_url,
-        author=record.author,
-        created_at=record.created_at,
-        state=state,
-    )
+    return notes.note_entry(record)
 
 
 def _ranks(valuation: Valuation, player_id: int) -> StandardRanks:
@@ -252,6 +248,8 @@ def build_view(
             ranks=_ranks(valuation, b.player_id),
             espn_ranks=StandardRanks(points=espn_points, categories=espn_categories),
             adjustment=adjustment_entry(record) if record is not None else None,
+            live=state.live.get(b.player_id),
+            note=state.notes.get(b.player_id),
         ))
     rows.sort(key=lambda r: (r.ranks.points is None, r.ranks.points or 0, r.name))
 
@@ -274,6 +272,9 @@ def build_view(
             else None
         ),
         kinds=list(ADJUSTMENT_KINDS),
+        live_as_of=state.live_as_of,
+        confidences=notes.confidences(),
+        review_days=notes.DEFAULT_REVIEW_DAYS,
         players=rows,
         fetched_at=now or datetime.now(timezone.utc),
     )
@@ -304,13 +305,14 @@ def build_preview(
 
 
 def adjustment_history(player_id: int, season: str) -> list[AdjustmentEntry]:
-    """Every version of a player's adjustment for the season, newest first."""
-    records = (
+    """Every version of a player's adjustment and of his season note, newest
+    first. The live season note says how it stands today."""
+    records = list(
         ProjectionAdjustment.select()
         .where((ProjectionAdjustment.player == player_id) & (ProjectionAdjustment.season == season))
         .order_by(ProjectionAdjustment.id.desc())
     )
-    return [adjustment_entry(record) for record in records]
+    return notes.note_history_entries(records, season, notes.today_et())
 
 
 def player_exists(player_id: int) -> bool:

@@ -89,6 +89,14 @@
   white-space: nowrap;
 }
 
+/* His season note over his preseason adjustment, when he has both. */
+.judgments {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
 /* ---------------------------------------------------------------- the opened row */
 
 .table .detailRow > td {
@@ -180,6 +188,15 @@
   font-weight: 600;
 }
 
+/* The live projection's line: another morning's numbers, set apart from the four above it. */
+.mini .liveLine > * {
+  border-top: 1px solid var(--line-2);
+}
+
+.mini .liveLine th {
+  color: var(--accent);
+}
+
 .versions {
   display: flex;
   flex-direction: column;
@@ -206,7 +223,85 @@
   color: var(--text-2);
 }
 
+.versionTerms {
+  margin-top: 3px;
+}
+
+/* The stored items a note rests on, or can: one a line. */
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidenceItem {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
 /* ---------------------------------------------------------------- the editor */
+
+/* The switch between a player's two forms, over whichever is open. */
+.editing {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.editing > form {
+  align-self: stretch;
+}
+
+/* How his live note stands this morning. */
+.standing {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.standing[data-state="review_due"] {
+  color: var(--warn);
+}
+
+.check {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.check input {
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  transform: translateY(1px);
+}
+
+/* A sentence beside two fields, on the grid's remaining columns. */
+.fieldNote {
+  grid-column: span 2;
+  align-self: end;
+  padding-bottom: 6px;
+}
 
 .editor {
   display: flex;
@@ -377,4 +472,17 @@
   font-family: var(--desk-sans), ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   color: var(--text);
+}
+
+/* His team's games from here under the note: one stretch a line. */
+.stretches {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--text-2);
 }
