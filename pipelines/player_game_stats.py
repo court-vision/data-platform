@@ -5,8 +5,13 @@ Fetches yesterday's game stats from NBA API and ESPN ownership data,
 then inserts into the nba schema tables.
 """
 
+from datetime import datetime, timedelta
+
+from peewee import IntegrityError
+
 from core.season import season_for_date
 from core.settings import settings
+from db.base import db
 from db.models.nba import Player, PlayerGameStats
 from db.models.nba.games import FANTASY_SEASON_TYPES, Game
 from pipelines.base import BasePipeline, DataNotReady
@@ -15,7 +20,11 @@ from pipelines.context import PipelineContext
 from pipelines.extractors import ESPNExtractor, NBAApiExtractor
 from pipelines.game_logs import box_score_stats
 from pipelines.transformers import normalize_name
+from services.alert_service import AlertEvent, get_alert_service
 
+# One alert per clashing ESPN id per day: the post-game job retries every
+# 15 minutes until the night lands, and the clash stays until someone fixes it.
+ESPN_ID_TAKEN_ALERT_DEDUPE = timedelta(hours=24)
 
 
 def _expected_games(game_date) -> list[Game]:
@@ -29,6 +38,54 @@ def _expected_games(game_date) -> list[Game]:
         game for game in Game.get_games_on_date(game_date)
         if game.season_type is None or game.season_type in FANTASY_SEASON_TYPES
     ]
+
+
+def claim_espn_id(player: Player, espn_id: int, ctx: PipelineContext) -> bool:
+    """Give a box score's player the ESPN id ESPN lists under his name.
+
+    nba.players.espn_id is unique, and a row this box score never touches can
+    already hold the id: a stale or duplicate row an earlier name match gave
+    it. The write runs in a savepoint, so that clash costs this one player his
+    ESPN id until someone settles which row is right, never the night's box
+    scores (2026-11-17: Tacko Fall's id, held by another row, failed every
+    post-game run from 05:30 UTC). The holder keeps the id: a name match never
+    takes an id off another row. Returns whether the player holds the id now.
+    """
+    if player.espn_id == espn_id:
+        return True
+    try:
+        with db.atomic():
+            (
+                Player.update(espn_id=espn_id, updated_at=datetime.utcnow())
+                .where(Player.id == player.id)
+                .execute()
+            )
+    except IntegrityError:
+        holder = Player.get_or_none(Player.espn_id == espn_id)
+        detail = {
+            "player_id": player.id,
+            "player_name": player.name,
+            "espn_id": espn_id,
+            "held_by_player_id": holder.id if holder else None,
+            "held_by_name": holder.name if holder else None,
+        }
+        ctx.log.warning("espn_id_taken", **detail)
+        get_alert_service().notify(AlertEvent(
+            key=f"espn_id_taken:{espn_id}",
+            severity="warning",
+            title=f"ESPN id clash: {player.name}",
+            body=(
+                f"ESPN lists {player.name} (NBA id {player.id}) under ESPN id {espn_id}, "
+                f"but another nba.players row holds it. His box score was stored without "
+                f"the ESPN id; clear the wrong row's espn_id and the next run gives it to him."
+            ),
+            fields={"pipeline": ctx.pipeline_name, "run_id": str(ctx.run_id), **detail},
+            dedupe=ESPN_ID_TAKEN_ALERT_DEDUPE,
+        ))
+        return False
+    player.espn_id = espn_id
+    return True
+
 
 class PlayerGameStatsPipeline(BasePipeline):
     """
@@ -132,12 +189,11 @@ class PlayerGameStatsPipeline(BasePipeline):
             espn_info = espn_data.get(normalized_name)
             espn_id = espn_info["espn_id"] if espn_info else None
 
-            # Upsert player dimension record
-            Player.upsert_player(
-                player_id=player_id,
-                name=player_name,
-                espn_id=espn_id,
-            )
+            # Upsert player dimension record. The ESPN id goes on separately:
+            # an id another row holds must not fail the night (claim_espn_id).
+            player = Player.upsert_player(player_id=player_id, name=player_name)
+            if espn_id:
+                claim_espn_id(player, espn_id, ctx)
 
             # Insert game stats
             PlayerGameStats.upsert_game_stats(

@@ -202,3 +202,73 @@ def test_a_playoff_night_is_not_held_for_games_this_pipeline_does_not_fetch(inte
 
     assert result.status == ApiStatus.SUCCESS
     assert PlayerGameStats.select().count() == 0
+
+
+def _night_with_tacko_fall(game_id: str = "0022500001") -> pd.DataFrame:
+    """Curry's line plus Tacko Fall's: the 2026-11-16 box score that failed every run."""
+    stats = pd.concat([_stats_df(game_id=game_id)] * 2, ignore_index=True)
+    stats.loc[1, ["PLAYER_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "MIN"]] = [1629605, "Tacko Fall", "LAL", "2:00"]
+    return stats
+
+
+TACKO_ESPN_ID = 3904625
+ESPN_FOR_THE_NIGHT = {
+    "stephen curry": {"espn_id": 3975, "rost_pct": 99.1},
+    "tacko fall": {"espn_id": TACKO_ESPN_ID, "rost_pct": 0.1},
+}
+
+
+@pytest.mark.integration
+def test_an_espn_id_another_row_holds_does_not_fail_the_night(integration_db, alerts) -> None:
+    """nba.players.espn_id is unique; a row the box score never touches can hold the id.
+
+    2026-11-17: ESPN listed Tacko Fall under 3904625, another row already held it,
+    and the IntegrityError failed every post-game run, so the night never landed.
+    Now his line lands without the id, the holder keeps it, and ops hears once.
+    """
+    game_date = date(2026, 2, 14)
+    _seed_expected_game(game_date, "0022500001")
+    # The live box score wrote his row during the game (no ESPN id there).
+    Player.create(id=1629605, name="Tacko Fall", name_normalized="tacko fall")
+    Player.create(id=99, name="Stale Row", name_normalized="stale row", espn_id=TACKO_ESPN_ID)
+
+    pipeline = PlayerGameStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: ESPN_FOR_THE_NIGHT
+    pipeline.nba_extractor.get_game_logs = lambda *_: _night_with_tacko_fall()
+
+    first = pipeline._run_sync(date_override=game_date)
+    second = pipeline._run_sync(date_override=game_date)
+
+    assert first.status == ApiStatus.SUCCESS
+    assert second.status == ApiStatus.SUCCESS
+    assert {row.player_id for row in PlayerGameStats.select()} == {201939, 1629605}
+    assert Player.get_by_id(201939).espn_id == 3975, "everyone else still gets his id"
+    assert Player.get_by_id(1629605).espn_id is None
+    assert Player.get_by_id(99).espn_id == TACKO_ESPN_ID, "a name match never takes an id off another row"
+
+    assert alerts.keys() == [f"espn_id_taken:{TACKO_ESPN_ID}"], "once, not every retry"
+    event = alerts.events[0]
+    assert event.severity == "warning"
+    assert event.fields["player_id"] == 1629605
+    assert event.fields["held_by_player_id"] == 99
+
+
+@pytest.mark.integration
+def test_clearing_the_wrong_rows_id_lets_the_next_run_give_it_to_him(integration_db, alerts) -> None:
+    """The cleanup the alert asks for: null the holder's espn_id, and the next run claims it."""
+    game_date = date(2026, 2, 14)
+    _seed_expected_game(game_date, "0022500001")
+    Player.create(id=99, name="Stale Row", name_normalized="stale row", espn_id=TACKO_ESPN_ID)
+
+    pipeline = PlayerGameStatsPipeline()
+    pipeline.espn_extractor.get_player_data = lambda: ESPN_FOR_THE_NIGHT
+    pipeline.nba_extractor.get_game_logs = lambda *_: _night_with_tacko_fall()
+
+    assert pipeline._run_sync(date_override=game_date).status == ApiStatus.SUCCESS
+    assert Player.get_by_id(1629605).espn_id is None, "a player new to nba.players lands too"
+
+    Player.update(espn_id=None).where(Player.id == 99).execute()
+    assert pipeline._run_sync(date_override=game_date).status == ApiStatus.SUCCESS
+
+    assert Player.get_by_id(1629605).espn_id == TACKO_ESPN_ID
+    assert PlayerGameStats.select().count() == 2
