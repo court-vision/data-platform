@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import threading
 from datetime import date, datetime, time, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 import pytz
@@ -97,10 +98,12 @@ def _stamp(when: datetime) -> datetime:
 
 
 def _news(pid: int, kind: str, headline: str, *, ago: timedelta = timedelta(hours=4),
-          source: str = "espn_player_news") -> str:
-    """A stored item about a player, fetched `ago` before the morning's clock. Returns its ref."""
+          source: str = "espn_player_news", published_ago: timedelta | None = None) -> str:
+    """A stored item about a player, fetched `ago` before the morning's clock, and published
+    then too unless `published_ago` dates it earlier. Returns its ref."""
     at = _stamp(NOW - ago)
-    item = NewsItem.create(source=source, source_item_id=f"{pid}-{headline}", published_at=at, fetched_at=at,
+    published = _stamp(NOW - published_ago) if published_ago is not None else at
+    item = NewsItem.create(source=source, source_item_id=f"{pid}-{headline}", published_at=published, fetched_at=at,
                            headline=headline, url=f"https://news.example/{pid}/{kind}", kind=kind)
     NewsItemPlayer.create(news_item=item, player=pid, linked_by="espn_id")
     return f"news:{item.id}"
@@ -449,6 +452,24 @@ def test_a_new_item_is_read_and_the_rest_of_the_morning_is_not(refs, monkeypatch
     assert _rows(SHADOW_SOURCE)[CELTIC].raw["parts"]["known"]["return_date"] == AHEAD[3].isoformat()
 
 
+def test_an_item_that_arrives_late_with_an_older_date_is_read_too(refs, monkeypatch):
+    """Stored after his last read, published before the item that read saw: it sorts below
+    that one, and it is still news to the analyst."""
+    _run({STAR: _later(refs), BENCH: _starts(refs)})
+    _read_at()
+
+    late = _news(CELTIC, "injury", "Celtic (ankle) had an MRI", ago=timedelta(hours=-1),
+                 published_ago=timedelta(days=6))
+    _clock(monkeypatch, hour=8, now=NOW + timedelta(hours=2))
+    again, backend, _ = _run()
+
+    assert again.status == ApiStatus.SUCCESS and backend.asked == [CELTIC]
+    body = backend.body(CELTIC)
+    assert body["reasons"][0] == "1 new item since his last read: injury"
+    assert [item["ref"] for item in body["items"]] == [refs[CELTIC], late]
+    assert AnalystRead.select().where(AnalystRead.player == CELTIC).count() == 2
+
+
 def test_a_morning_reads_no_more_than_its_cap_strongest_reason_first(refs, monkeypatch):
     monkeypatch.setattr(settings, "analyst_max_reads", 1)
 
@@ -655,6 +676,48 @@ def test_a_backend_that_cannot_be_asked_fails_the_run_and_the_next_one_reads_aga
     result, backend, _ = _run({STAR: _later(refs)})
     assert result.status == ApiStatus.SUCCESS and backend.asked == [STAR, BENCH, CELTIC]
     assert _reads()[STAR].outcome == "note" and AnalystRead.select().count() == 6
+
+
+def test_reads_stopped_by_a_backend_that_went_quiet_fail_the_run_even_when_a_slower_read_then_answers(
+        refs, monkeypatch):
+    """Two reads are out at once. The first cannot be asked, which ends the asking, and the
+    second answers after that: in order, the run's last read is a good one. The third player
+    was never asked about, so the run fails and the next tick takes him up."""
+    monkeypatch.setattr(analyst, "READ_WORKERS", 2)
+    monkeypatch.setattr(analyst, "FAILURES_STOP", 1)
+    both_out, stopped = threading.Event(), threading.Event()
+
+    class Stop(threading.Event):
+        def set(self):
+            super().set()
+            stopped.set()
+
+    monkeypatch.setattr(analyst, "threading", SimpleNamespace(Event=Stop, Lock=threading.Lock))
+
+    class SlowBench(Backend):
+        def read(self, body, correlation_id=None):
+            if body["player_id"] == STAR:
+                assert both_out.wait(5), "the second read never went out"
+            if body["player_id"] == BENCH:
+                both_out.set()
+                assert stopped.wait(5), "the failed read never ended the asking"
+            return super().read(body, correlation_id)
+
+    pipeline = AnalystPipeline()
+    pipeline.client = backend = SlowBench({STAR: ReadResult.unavailable("http_503"), BENCH: _starts(refs)})
+    pipeline.valuation_client = Boards()
+    result = pipeline._run_sync()
+
+    assert backend.asked == [STAR, BENCH]
+    assert result.status == ApiStatus.ERROR
+    assert "could not be asked for 1 reads in a row (http_503), and 1 were never asked" in result.error
+    reads = _reads()
+    assert (reads[STAR].outcome, reads[BENCH].outcome) == ("failed", "note") and CELTIC not in reads
+    assert due_reason(SEASON, TODAY) is None
+
+    # The next tick asks about the two who are still unread, and not about the one who was read
+    result, backend, _ = _run({BENCH: _starts(refs)})
+    assert result.status == ApiStatus.SUCCESS and backend.asked == [STAR, CELTIC]
 
 
 def test_an_answer_that_is_no_proposal_or_was_declined_is_logged_and_asked_again(refs):

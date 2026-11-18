@@ -30,7 +30,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Mapping, Optional, Sequence
+from typing import Iterable, Mapping, Optional, Sequence
 
 import pytz
 from peewee import fn
@@ -561,21 +561,34 @@ def packet(
     return body
 
 
+def last_stored(refs: Iterable[str], kind: str) -> Optional[str]:
+    """The ref of this kind that was stored last, whatever date its source put on it.
+
+    Ids are handed out as items are stored, so the highest is the last to
+    arrive. The newest by its own date is not: a source can publish, or be
+    fetched, late, and such an item is new to a read while sitting below one
+    it has already seen.
+    """
+    ids = [int(ref.split(":", 1)[1]) for ref in refs if ref.startswith(f"{kind}:")]
+    return f"{kind}:{max(ids)}" if ids else None
+
+
 def fingerprint(body: Mapping, own: Optional[list], owner_note_id: Optional[int]) -> str:
     """A hash of the facts a read turns on.
 
-    His newest news item and newest report (an item ageing out of the window
-    is not news), the feed's verdict, whether the projection has him out and
-    until when, how the analyst's own note stands (`own_state`), which note
-    the owner has written, and which of his teammates are out. Not the
-    morning, not the box scores, not a rank: those move every day.
+    The news item and the report that were stored last (an older item ageing
+    out of the window is not news), the feed's verdict, whether the projection
+    has him out and until when, how the analyst's own note stands
+    (`own_state`), which note the owner has written, and which of his
+    teammates are out. Not the morning, not the box scores, not a rank: those
+    move every day.
     """
     refs = [item["ref"] for item in body.get("items", ())]
     availability = body.get("availability") or {}
     projection = body.get("projection") or {}
     facts = {
-        "news": next((r for r in refs if r.startswith("news:")), None),
-        "report": next((r for r in refs if r.startswith("report:")), None),
+        "news": last_stored(refs, "news"),
+        "report": last_stored(refs, "report"),
         "feed": [availability.get("verdict"), availability.get("expected_return")],
         "model": [projection.get("out_now"), projection.get("return_date"), projection.get("out_for_season")],
         "own": own,

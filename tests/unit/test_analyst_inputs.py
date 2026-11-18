@@ -161,6 +161,9 @@ class TestTheFingerprint:
     @pytest.mark.parametrize("moved", [
         {"items": [{"ref": "report:7"}, {"ref": "news:95"}, {"ref": "news:91"}]},        # a newer news item
         {"items": [{"ref": "report:8"}, {"ref": "report:7"}, {"ref": "news:91"}]},       # a newer report
+        # Stored since his last read with an older date on it, so it sorts below what he has seen
+        {"items": [{"ref": "report:7"}, {"ref": "news:91"}, {"ref": "news:95"}, {"ref": "news:80"}]},
+        {"items": [{"ref": "report:7"}, {"ref": "report:9"}, {"ref": "news:91"}, {"ref": "news:80"}]},
         {"availability": {"verdict": "out", "expected_return": None}},
         {"availability": {"verdict": "questionable", "expected_return": "2026-11-20"}},
         {"projection": {"out_now": True, "return_date": None, "out_for_season": False}},
@@ -170,6 +173,10 @@ class TestTheFingerprint:
     ])
     def test_a_fact_a_read_turns_on_does(self, moved):
         assert fingerprint(body(**moved), None, None) != fingerprint(body(), None, None)
+
+    def test_the_order_the_items_are_shown_in_does_not_move_it(self):
+        shuffled = {"items": [{"ref": "news:80"}, {"ref": "news:91"}, {"ref": "report:7"}]}
+        assert fingerprint(body(**shuffled), None, None) == fingerprint(body(), None, None)
 
     def test_its_own_note_and_the_owners_are_facts_too(self):
         plain = fingerprint(body(), None, None)

@@ -262,7 +262,7 @@ class AnalystPipeline(BasePipeline):
             ctx.log.warning("analyst_budget_reached", unread=len(planned))
             return None
 
-        results = self._ask(planned)
+        results, broken_off = self._ask(planned)
         counts: dict[str, int] = {}
         cost = 0
         for plan, result in zip(planned, results):
@@ -282,16 +282,27 @@ class AnalystPipeline(BasePipeline):
             tail += 1
         if tail >= FAILURES_STOP or (asked and tail == len(asked)):
             return f"the backend could not be asked for the last {tail} reads ({asked[-1].detail})"
+        if broken_off is not None:
+            # The reads that ended the asking are not always the last in order: one that
+            # was already out can come back with an answer after them
+            unasked = len(results) - len(asked)
+            return (f"the backend could not be asked for {FAILURES_STOP} reads in a row ({broken_off}), "
+                    f"and {unasked} were never asked")
         return None
 
-    def _ask(self, planned: list[Planned]) -> list[Optional[ReadResult]]:
+    def _ask(self, planned: list[Planned]) -> tuple[list[Optional[ReadResult]], Optional[str]]:
         """Ask for every planned read, a few at a time, in order. A read comes back
         None when it was never asked: the budget ran out, the analyst was switched
-        off, or the backend stopped answering."""
+        off, or the backend stopped answering.
+
+        Also returns why, when it was the backend not answering that ended the
+        asking: the run has to fail on that whatever came back afterwards, or the
+        players never asked about would wait for tomorrow."""
         correlation_id = get_correlation_id()
         stop = threading.Event()
         lock = threading.Lock()
         failures = [0]
+        broken_off: list[Optional[str]] = []
 
         def one(plan: Planned) -> Optional[ReadResult]:
             if stop.is_set():
@@ -301,6 +312,8 @@ class AnalystPipeline(BasePipeline):
                 if result.outcome == UNAVAILABLE:
                     failures[0] += 1
                     if failures[0] >= FAILURES_STOP:
+                        if not broken_off:
+                            broken_off.append(result.detail)
                         stop.set()
                 else:
                     failures[0] = 0
@@ -309,7 +322,8 @@ class AnalystPipeline(BasePipeline):
             return result
 
         with ThreadPoolExecutor(max_workers=READ_WORKERS, thread_name_prefix="analyst-read") as pool:
-            return list(pool.map(one, planned))
+            results = list(pool.map(one, planned))
+        return results, (broken_off[0] if broken_off else None)
 
     def _settle(self, ctx: PipelineContext, plan: Planned, result: ReadResult,
                 gathered: analyst_inputs.Gathered, inputs: LiveInputs) -> str:
