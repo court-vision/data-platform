@@ -175,3 +175,71 @@ class TestGateReusesTheProbe:
             pipelines._espn_scoring_period_advanced(date(2026, 3, 4))
 
         assert seen["period"] == 22
+
+
+@pytest.fixture
+def saved_teams(monkeypatch):
+    """Stand in for `usr.teams`; hydrating just echoes the stored league_info."""
+    import json
+
+    from core.settings import settings
+    from db.models.teams import Team
+    from services import credential_service
+
+    monkeypatch.setattr(settings, "espn_year", 2027)
+    monkeypatch.setattr(
+        credential_service, "hydrate", lambda team, league_info: dict(league_info, hydrated=True)
+    )
+
+    def _install(rows):
+        teams = [
+            SimpleNamespace(team_id=team_id, league_info=json.dumps(info))
+            for team_id, info in rows
+        ]
+        monkeypatch.setattr(Team, "select", classmethod(lambda cls, *a: iter(teams)))
+
+    return _install
+
+
+@pytest.mark.unit
+class TestTheGateReadsThisSeason:
+    """Saved teams from an earlier season stay in `usr.teams`.
+
+    The gate used to read the first ESPN team it found, and on 2026-11-16 that
+    was an earlier season's: ESPN answered day 175, every current team looked
+    unseeded in that league's matchup period, so the gate said "period_advanced"
+    on every poll and spent its retries before midnight instead of waiting for
+    ESPN's batch.
+    """
+
+    def test_the_probe_league_skips_earlier_seasons_and_yahoo(self, saved_teams):
+        saved_teams([
+            (3, {"provider": "espn", "league_id": 1, "year": 2026}),
+            (8, {"provider": "yahoo", "year": 2027}),
+            (23, {"provider": "espn", "league_id": 2, "year": 2027}),
+        ])
+        team, league_info = pipelines._first_espn_league()
+        assert team.team_id == 23
+        assert league_info["league_id"] == 2
+        assert league_info["hydrated"] is True
+
+    def test_no_league_this_season_means_no_league(self, saved_teams):
+        """The gate's "no ESPN league" branch runs once a night; a dead league
+        would hold it open every poll instead."""
+        saved_teams([(3, {"provider": "espn", "league_id": 1, "year": 2026})])
+        assert pipelines._first_espn_league() == (None, None)
+
+    def test_a_team_without_a_year_is_this_seasons(self, saved_teams):
+        saved_teams([(5, {"league_id": 9})])  # provider and year both defaulted
+        team, _ = pipelines._first_espn_league()
+        assert team.team_id == 5
+
+    def test_the_baselines_cover_this_seasons_espn_teams_only(self, saved_teams):
+        saved_teams([
+            (3, {"provider": "espn", "year": 2026}),
+            (8, {"provider": "yahoo", "year": 2027}),
+            (21, {"provider": "espn", "year": 2027}),
+            (23, {"provider": "espn", "year": "2027"}),
+            (40, {"provider": "espn", "year": "not a year"}),
+        ])
+        assert pipelines._espn_team_ids() == [21, 23]

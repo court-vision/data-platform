@@ -53,6 +53,7 @@ from pipelines.game_logs import GAME_HISTORY_FIRST_YEAR, SEASON_TYPE_PARAMS
 from pipelines.gates import (
     GateDecision,
     espn_batch_gate,
+    post_game_close_floor,
     post_game_window,
     pre_game_window,
 )
@@ -222,22 +223,45 @@ _ESPN_ENDPOINT = (
 )
 
 
+def _is_current_espn_season(league_info: dict) -> bool:
+    """An ESPN team in this season's league (`settings.espn_year`).
+
+    Saved teams from earlier seasons stay in `usr.teams`. Their leagues are
+    over: ESPN answers with the last day of that season (day 175 in the
+    2026-11-17 logs) and a matchup period no current snapshot is in, so they
+    say nothing about tonight's batch. Lineup snapshots skip them the same way
+    (`season_mismatch`).
+    """
+    from core.settings import settings
+
+    if league_info.get("provider", "espn") != "espn":
+        return False
+    try:
+        return int(league_info.get("year") or settings.espn_year) == settings.espn_year
+    except (TypeError, ValueError):
+        return False
+
+
 def _first_espn_league():
-    """(team, league_info) for the first ESPN team found, or (None, None).
+    """(team, league_info) for the first ESPN team in this season, or (None, None).
 
     A single league is enough for both the gate and the watermark probe:
     `latestScoringPeriod` is ESPN's league-level day index, and every NBA league
-    shares the same calendar.
+    shares the same calendar. It has to be this season's league, though: the
+    first team found used to be an earlier season's, so the gate compared day 175
+    against this season's snapshots, never waited for ESPN, and spent its retry
+    budget in the evening.
     """
     import json
     from db.models.teams import Team
     from services import credential_service
 
-    for team in Team.select().limit(10):
+    for team in Team.select():
         try:
-            league_info = credential_service.hydrate(team, json.loads(team.league_info))
-            if league_info.get("provider", "espn") == "espn":
-                return team, league_info
+            stored = json.loads(team.league_info)
+            if not _is_current_espn_season(stored):
+                continue
+            return team, credential_service.hydrate(team, stored)
         except Exception:
             continue
     return None, None
@@ -265,13 +289,15 @@ def _fetch_espn_league(league_info, views):
 
 
 def _espn_team_ids() -> list[int]:
-    """Team ids of every saved ESPN team.
+    """Team ids of every saved ESPN team in this season's leagues.
 
     The gate compares ESPN's day index against what we stored **for each of
     them**: one team's newest row is not evidence about another's, and reading
     it as if it were is why a partial run could never retry the teams it
     missed. `league_info` is read unhydrated — the provider tag is not a secret
-    and decrypting five credential blobs to read it would be silly.
+    and decrypting five credential blobs to read it would be silly. A team from
+    an earlier season is scored against its own finished league, so its rows
+    say nothing about tonight's batch and can hold the gate open every poll.
     """
     import json
     from db.models.teams import Team
@@ -279,7 +305,7 @@ def _espn_team_ids() -> list[int]:
     ids = []
     for team in Team.select():
         try:
-            if json.loads(team.league_info).get("provider", "espn") == "espn":
+            if _is_current_espn_season(json.loads(team.league_info)):
                 ids.append(team.team_id)
         except Exception:
             continue
@@ -884,6 +910,9 @@ async def trigger_post_game(
             nba_date,
             settings.estimated_game_duration_minutes,
             settings.post_game_pipeline_window_minutes,
+            # However early the last tip, the window outlasts ESPN's nightly
+            # batch, so the ESPN-gated snapshot still gets its polls.
+            closes_no_earlier_than=post_game_close_floor(nba_date),
         )
         window_open_utc = (
             eastern.localize(window.opens_at).astimezone(pytz.utc).replace(tzinfo=None)
