@@ -2263,6 +2263,13 @@ async def trigger_daily_rankings(
     none in the last days, the blend it used before, and the board's `model`
     says which.
 
+    A projection run that was skipped because another one holds its lock (a
+    note saved in the editor, the dashboard's Run button, a request retried
+    while the first is still going) is still building today's projection, so
+    no boards are built on this tick, forced or not: they would read
+    yesterday's projection and, kept for the day, never see today's. The next
+    tick builds them.
+
     `force` skips both gates and those waits, and replaces today's rows.
     Between midnight and 3 AM ET the backend's day is still yesterday, and a
     run then, forced or not, stores nothing: yesterday morning's projection
@@ -2275,6 +2282,13 @@ async def trigger_daily_rankings(
             return PipelineResponse(status=ApiStatus.SKIPPED, message=reason)
     options = {"force": True} if force else None
     projection = await run_pipeline("live_projection", options=options)
+    if projection.status == ApiStatus.SKIPPED:
+        log.info("daily_rankings_projection_in_progress", live_projection=projection.message)
+        return PipelineResponse(
+            status=ApiStatus.SKIPPED,
+            message=f"Today's projection is being built by another run; the boards wait for it ({projection.message})",
+            data=projection,
+        )
     if projection.status == ApiStatus.ERROR and not force and daily_rankings_now().hour < DAILY_RANKINGS_WAIT_UNTIL_HOUR_ET:
         log.info("daily_rankings_wait_for_projection", live_projection=projection.message)
         return PipelineResponse(status=projection.status, message=projection.message, data=projection)

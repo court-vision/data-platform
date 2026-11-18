@@ -183,11 +183,14 @@ class Prior:
     """What was expected of him before the season: the preseason projection, per game."""
 
     minutes: float
-    games: float                                # of a full season
+    games: Optional[float]                      # of a full season; None when the projection gave none
     per_game: Mapping[str, float]               # LINE_KEYS
 
     @property
-    def share(self) -> float:
+    def share(self) -> Optional[float]:
+        """The share of a full season he was projected to play; None when unknown."""
+        if self.games is None:
+            return None
         return min(max(self.games, 0.0) / SEASON_GAMES, 1.0)
 
     @property
@@ -425,7 +428,9 @@ def play_lean(state: PlayerState, coeffs: Coefficients) -> float:
     attended = (
         state.n / max(state.team_played, 1) if (state.n >= 5 and b == 0) else coeffs.mean_attendance
     )
-    lean = (coeffs.lean_prior_share * (state.prior.share - coeffs.mean_prior_share)
+    # Projected games unknown (an ESPN projection can carry none): no lean either way
+    share = state.prior.share if state.prior.share is not None else coeffs.mean_prior_share
+    lean = (coeffs.lean_prior_share * (share - coeffs.mean_prior_share)
             + coeffs.lean_attendance * (attended - coeffs.mean_attendance))
     return min(max(q + lean, MIN_PLAY_SHARE), MAX_PLAY_SHARE) / q
 
@@ -557,8 +562,10 @@ def _with_twos(totals: Mapping[str, float]) -> dict[str, float]:
 
 
 def prior_totals(prior: Prior) -> dict[str, float]:
-    """The projection as season totals: what the prior weights are counted against."""
-    games = max(prior.games, 1.0)
+    """The projection as season totals: what the prior weights are counted against.
+    A projection that gave no games is counted over a full season: the volume
+    rates are per minute either way, and its shooting is not shrunk to nothing."""
+    games = max(prior.games if prior.games is not None else SEASON_GAMES, 1.0)
     out = {k: float(prior.per_game.get(k, 0.0)) * games for k in LINE_KEYS}
     out["min"] = prior.minutes * games
     return _with_twos(out)
@@ -878,7 +885,9 @@ def project_player(
         "season_minutes": round(state.totals.get("min", 0.0) / state.n, 1) if state.n else None,
         "recent_minutes": round(role.base, 1) if role is not None else None,
         "prior_minutes": round(state.prior.minutes, 1) if state.prior is not None else None,
-        "prior_games": round(state.prior.games, 1) if state.prior is not None else None,
+        "prior_games": (
+            round(state.prior.games, 1) if state.prior is not None and state.prior.games is not None else None
+        ),
         "missing_so_far": round(seen, 1) if seen is not None else None,
         "missing_ahead": round(outlook.average(outlook.missing) or 0.0, 1) if outlook.missing else None,
         "slope": round(role.slope, 3) if role is not None else None,

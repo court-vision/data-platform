@@ -401,7 +401,7 @@ def test_saving_a_note_writes_one_season_row_and_rebuilds_the_live_projection(se
         "note": "back on a limit", "source_url": None, "author": "jp",
     }
     # The live projection, and never the preseason one: a note cannot rewrite the prior
-    assert season.runs == [("live_projection", {"options": {"force": True}})]
+    assert season.runs == [("live_projection", {"options": {"rebuild": True}})]
 
 
 def test_a_season_written_off_is_stored_as_no_games_and_keeps_the_review_date_given(season):
@@ -434,6 +434,35 @@ def test_a_rebuild_that_stored_nothing_keeps_the_note_and_says_so(season, monkey
     monkeypatch.setattr(projections, "run_pipeline", failing)
     res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
     assert res.status_code == 200 and res.json()["data"]["rebuilt"] is False
+
+
+def test_a_rebuild_that_meets_another_projection_run_is_tried_again_once_it_is_done(season, monkeypatch):
+    # The other run may have read the notes before this save: its snapshot would be the morning's
+    answers = ["skipped", "success"]
+    runs = []
+
+    async def contended(name, **kwargs):
+        runs.append((name, kwargs))
+        status = answers.pop(0) if answers else "skipped"
+        return PipelineResult(status=status, message=status, started_at="2026-11-16T12:00:00",
+                              records_processed=7 if status == "success" else 0)
+
+    monkeypatch.setattr(projections, "run_pipeline", contended)
+    monkeypatch.setattr(projections, "REBUILD_RETRY_SECONDS", 0)
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
+    assert res.status_code == 200 and res.json()["data"]["rebuilt"] is True
+    assert runs == [("live_projection", {"options": {"rebuild": True}})] * 2
+
+    # Still held after every try: the note is kept, and the answer says to save it again,
+    # since the run holding the lock may store a morning without it
+    runs.clear()
+    res = season.http.put(f"{BASE}/2/note", headers=_AUTH, json={"kind": "role", "minutes": 30, "note": "starting"})
+    assert res.status_code == 200 and res.json()["data"]["rebuilt"] is False
+    assert len(runs) == projections.REBUILD_ATTEMPTS
+    assert res.json()["message"] == (
+        "Note saved, but another projection run was going the whole time: "
+        "today's projection may not have it yet, so save it again in a minute"
+    )
 
 
 @pytest.mark.parametrize("pid, extra, status, says", [
@@ -474,7 +503,7 @@ def test_retiring_a_note_withdraws_the_season_row_only_and_rebuilds(season, monk
     assert body["message"] == "Note retired and the live projection rebuilt"
     assert body["data"]["note"] is None and body["data"]["rebuilt"] is True
     assert retired == [(2, os.environ["NBA_SEASON"], "season")]
-    assert season.runs == [("live_projection", {"options": {"force": True}})]
+    assert season.runs == [("live_projection", {"options": {"rebuild": True}})]
 
     monkeypatch.setattr(ProjectionAdjustment, "retire", classmethod(lambda cls, pid, season, scope: 0))
     assert season.http.delete(f"{BASE}/2/note", headers=_AUTH).status_code == 404

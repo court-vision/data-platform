@@ -504,12 +504,30 @@ export function noteKey(parsed: Pick<ParsedNote, "change" | "review_date">): str
 }
 
 /** What stands between the note form and Save, or null when it can be saved. */
-export function noteSaveBlocker(form: NoteForm, parsed: ParsedNote, previewedKey: string | null): string | null {
+/**
+ * Why the note cannot be saved yet, or null. `newsPending`: his news is still
+ * loading, so what the note cites cannot be checked against what is stored,
+ * and a save now would drop every citation without saying so.
+ */
+export function noteSaveBlocker(
+  form: NoteForm,
+  parsed: ParsedNote,
+  previewedKey: string | null,
+  newsPending = false,
+): string | null {
   if (Object.keys(parsed.errors).length > 0) return "Fix the highlighted fields"
   if (!noteStatesSomething(parsed.change)) return "Set a return date, a season written off, minutes or usage"
   if (!form.note.trim()) return "Say why: a note is required"
   if (previewedKey !== noteKey(parsed)) return "Preview this note first"
+  if (newsPending && form.evidence.length > 0) return "Wait for his news to load: the note cites it"
   return null
+}
+
+/** The form with the season written off, or not: a season written off has no return date to keep. */
+export function withOutForSeason(form: NoteForm, out: boolean): NoteForm {
+  return out
+    ? { ...form, out_for_season: true, return_date: "", return_earliest: "", return_latest: "" }
+    : { ...form, out_for_season: false }
 }
 
 // ---- the page's summary ---------------------------------------------------------------------

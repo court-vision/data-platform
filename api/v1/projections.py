@@ -255,17 +255,46 @@ async def preview_note(req: NotePreviewRequest) -> NotePreviewResponse:
     return NotePreviewResponse(status="success", message="Preview computed; nothing was saved", data=preview)
 
 
+# A note's rebuild that meets another projection run waits for it, this often and this long
+REBUILD_ATTEMPTS = 4
+REBUILD_RETRY_SECONDS = 5.0
+
+
 async def _rebuild_live(player_id: int) -> NoteSaved:
     """Rebuild the day's live projection after a write, so the board reads the
-    note at once. A rebuild that did not happen (before the day turns, out of
-    season, or a failure) does not undo the write: the next morning's run
-    reads the note anyway."""
-    result = await run_pipeline("live_projection", options={"force": True})
+    note at once. A rebuild that did not happen (before the day turns, before
+    last night's box scores are in with no snapshot stored yet, out of season,
+    or a failure) does not undo the write: the morning's run reads the note
+    anyway. Not `force`: a forced run skips the wait for last night's box
+    scores, and the snapshot it stored would be the one the morning keeps.
+
+    A rebuild that finds another projection run going (the morning's, or
+    another save) is skipped, and that run may have read the notes before this
+    write and stored a snapshot the morning would then keep. It is tried again
+    once that run is done, a few times."""
+    for attempt in range(REBUILD_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(REBUILD_RETRY_SECONDS)
+        result = await run_pipeline("live_projection", options={"rebuild": True})
+        if result.status not in (ApiStatus.SKIPPED, ApiStatus.SKIPPED.value):
+            break
     ok = result.status in (ApiStatus.SUCCESS, ApiStatus.SUCCESS.value)
     rebuilt = ok and bool(result.records_processed)
     if not rebuilt:
         log.warning("live_projection_rebuild_skipped", player_id=player_id, message=result.message, error=result.error)
     return NoteSaved(player_id=player_id, rebuilt=rebuilt, pipeline=result)
+
+
+def _rebuild_message(done: str, saved: NoteSaved, later: str) -> str:
+    """What a save or a retire says about the day's projection. A rebuild that
+    never got past another run is said plainly: that run may have stored a
+    morning without this change, and the day's ticks keep a stored morning."""
+    if saved.rebuilt:
+        return f"Note {done} and the live projection rebuilt"
+    if saved.pipeline is not None and saved.pipeline.status in (ApiStatus.SKIPPED, ApiStatus.SKIPPED.value):
+        return (f"Note {done}, but another projection run was going the whole time: "
+                "today's projection may not have it yet, so save it again in a minute")
+    return f"Note {done}; the live projection {later} on its next run"
 
 
 @router.put("/{player_id}/note", response_model=NoteSavedResponse)
@@ -312,8 +341,7 @@ async def save_note(body: NoteSave, player_id: int = _PLAYER_ID) -> NoteSavedRes
     saved.note = next((entry for entry in history if entry.id == record.id), None)
     return NoteSavedResponse(
         status="success",
-        message="Note saved and the live projection rebuilt" if saved.rebuilt
-        else "Note saved; the live projection reads it on its next run",
+        message=_rebuild_message("saved", saved, "reads it"),
         data=saved,
     )
 
@@ -333,8 +361,7 @@ async def retire_note(player_id: int = _PLAYER_ID) -> NoteSavedResponse:
     saved = await _rebuild_live(player_id)
     return NoteSavedResponse(
         status="success",
-        message="Note retired and the live projection rebuilt" if saved.rebuilt
-        else "Note retired; the live projection drops it on its next run",
+        message=_rebuild_message("retired", saved, "drops it"),
         data=saved,
     )
 

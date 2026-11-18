@@ -157,6 +157,32 @@ def test_a_forced_run_builds_the_boards_whatever_the_projection_did(run_calls, g
     assert run_calls == [("live_projection", {"force": True}), ("daily_rankings", {"force": True})]
 
 
+def _locked(results):
+    """Another live-projection run holds the lock: a note's rebuild, the Run button, a retried request."""
+    results["live_projection"] = PipelineResult(
+        status=ApiStatus.SKIPPED, message="live_projection skipped — another run holds the lock",
+        started_at="2026-11-16T05:00:00")
+
+
+@pytest.mark.api
+@pytest.mark.parametrize("hour", [6, 10, 11])
+def test_a_projection_still_being_built_holds_the_boards(run_calls, gate, results, monkeypatch, hour):
+    # Built now, the boards would read yesterday's projection and be kept all day
+    _locked(results)
+    monkeypatch.setattr(pipelines_api, "daily_rankings_now", lambda: datetime(2026, 11, 16, hour, 0))
+    res = _client().post(PATH, headers=_auth())
+    assert res.status_code == 200 and res.json()["status"] == "skipped"
+    assert "being built by another run" in res.json()["message"]
+    assert run_calls == [("live_projection", None)]
+
+
+@pytest.mark.api
+def test_a_forced_run_also_waits_for_a_projection_being_built(run_calls, gate, results):
+    _locked(results)
+    assert _client().post(f"{PATH}?force=true", headers=_auth()).json()["status"] == "skipped"
+    assert run_calls == [("live_projection", {"force": True})]
+
+
 @pytest.mark.api
 @pytest.mark.parametrize("phase", ["offseason", "preseason"])
 def test_outside_the_regular_season_is_skipped_without_a_query(run_calls, gate, phase):

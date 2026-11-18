@@ -138,7 +138,8 @@ def preseason_priors(season: str) -> tuple[Optional[str], Optional[date], dict[i
         rows = PlayerProjection.latest_for_season(season, source=source)
         priors = {
             r.player_id: Prior(
-                minutes=float(r.min), games=float(r.projected_gp or 0),
+                # No games is not zero games: the model then leans neither way
+                minutes=float(r.min), games=float(r.projected_gp) if r.projected_gp is not None else None,
                 per_game={k: float(getattr(r, k) or 0) for k in LINE_KEYS},
             )
             for r in rows if r.min is not None and float(r.min) > 0
