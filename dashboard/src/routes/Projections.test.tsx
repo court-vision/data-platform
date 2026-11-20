@@ -492,6 +492,12 @@ describe("Projections: the analyst's morning", () => {
     expect(render(morning(digest()), "?view=analyst&day=yesterday")).toContain(">note written</span>")
     // One morning needs no picker
     expect(render(morning(digest({ days: ["2026-11-20"] })), "?view=analyst")).not.toContain("<select")
+    // A day nobody was read, asked for by its address: the picker still offers the one morning with reads
+    const nobody = digest({ as_of: "2026-11-10", days: ["2026-11-20"], reads: [], counts: {}, cost_usd: 0, moved: [] })
+    const empty = render(morning(nobody, "2026-11-10"), "?view=analyst&day=2026-11-10")
+    expect(empty).toContain("Nobody was read that morning.")
+    expect(empty).toContain('<option value="2026-11-20">Nov 20 (newest)</option>')
+    expect(empty).toContain('<option value="2026-11-10" selected="">Nov 10</option>')
   })
 
   test("before its first run, switched off, or with the backend silent, the page says so", () => {

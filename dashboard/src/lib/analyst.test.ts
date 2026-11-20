@@ -10,6 +10,7 @@ import {
   matchesRead,
   movedBoardsDay,
   outcomeOf,
+  pickerDays,
   pointsMove,
   ruleLabel,
   SIDE_COLUMNS,
@@ -180,5 +181,15 @@ describe("the two projections", () => {
     const days = ["2026-11-20", "2026-11-19"]
     expect(dayLabel("2026-11-20", days)).toBe("Nov 20 (newest)")
     expect(dayLabel("2026-11-19", days)).toBe("Nov 19")
+  })
+
+  test("the picker offers the morning shown even when nobody was read then, in its place by date", () => {
+    const days = ["2026-11-20", "2026-11-18"]
+    expect(pickerDays({ as_of: "2026-11-20", days })).toBe(days)
+    expect(pickerDays({ as_of: "2026-11-19", days })).toEqual(["2026-11-20", "2026-11-19", "2026-11-18"])
+    expect(pickerDays({ as_of: "2026-10-30", days })).toEqual(["2026-11-20", "2026-11-18", "2026-10-30"])
+    // One morning with reads and another asked for: two to pick between, so there is a way back
+    expect(pickerDays({ as_of: "2026-11-10", days: ["2026-11-20"] })).toEqual(["2026-11-20", "2026-11-10"])
+    expect(pickerDays({ as_of: null, days: [] })).toEqual([])
   })
 })

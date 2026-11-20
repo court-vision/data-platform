@@ -240,6 +240,16 @@ export function movedBoardsDay(digest: Pick<AnalystDigest, "as_of" | "shadow_as_
   return digest.as_of
 }
 
+/**
+ * The mornings the picker offers, newest first: those with reads, and the one
+ * shown when it is not among them (asked for by its address: older than the
+ * mornings listed, or a day nobody was read).
+ */
+export function pickerDays(digest: Pick<AnalystDigest, "as_of" | "days">): string[] {
+  if (digest.as_of == null || digest.days.includes(digest.as_of)) return digest.days
+  return [...digest.days, digest.as_of].sort().reverse()
+}
+
 /** The morning named in the picker: "Nov 20", and "Nov 20 (newest)" for the first. */
 export function dayLabel(day: string, days: readonly string[]): string {
   return day === days[0] ? `${formatDay(day)} (newest)` : formatDay(day)

@@ -11,6 +11,7 @@ import {
   formatSide,
   movedBoardsDay,
   outcomeOf,
+  pickerDays,
   pointsMove,
   READ_FILTERS,
   ruleLabel,
@@ -143,11 +144,11 @@ export function AnalystDigestView({
   )
 }
 
-/** The mornings with reads, newest first. One morning needs no picker. */
+/** The mornings with reads, newest first, and the one shown. One morning needs no picker. */
 function DayPicker({ digest, onDay }: { digest: AnalystDigest; onDay: (day: string | null) => void }) {
-  if (digest.as_of == null || digest.days.length < 2) return null
-  // A morning asked for by its address may be older than the mornings listed
-  const days = digest.days.includes(digest.as_of) ? digest.days : [digest.as_of, ...digest.days]
+  // A morning asked for by its address may not be among those listed: it is offered too, so there is a way back
+  const days = pickerDays(digest)
+  if (digest.as_of == null || days.length < 2) return null
   return (
     <label className={a.day}>
       <span className={dk.label}>Morning</span>

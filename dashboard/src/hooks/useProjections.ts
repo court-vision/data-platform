@@ -177,8 +177,11 @@ export function analystDigestQuery(day: string | null) {
     queryKey: [...PROJECTIONS_KEY, "analyst", day ?? "newest"] as const,
     queryFn: async () =>
       (await apiFetch<Schemas["AnalystDigestResponse"]>(`${BASE}/analyst${day ? `?day=${encodeURIComponent(day)}` : ""}`)).data,
-    // A run's reads land over a few minutes; a page left open on the morning should not sit on its first few
-    staleTime: 60_000,
+    // A cheap read, and a run's reads land over a few minutes: it is asked
+    // again every time the view opens, so coming back to it never shows a
+    // morning's first few reads as the whole of it. Not on a timer, and not
+    // every time the window regains focus.
+    staleTime: 0,
     refetchOnWindowFocus: false,
     retry: (failures, error) => giveUpOn(error, failures),
   })
