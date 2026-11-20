@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from "react"
+import { useId, useState, type FormEvent } from "react"
 import { useSearchParams } from "react-router"
 
 import { Block, Choice, Head, Notice, Page, RefreshNote, Sep, SheetSkeleton, Tag, Tiles, type TileSpec } from "@/components/blocks"
@@ -16,6 +16,7 @@ import {
   capShare,
   checkinKindLabel,
   FEATURES,
+  followReport,
   formatShare,
   formatTokens,
   formatUsd,
@@ -314,18 +315,31 @@ export function CapEditor({
   const [text, setText] = useState(shown)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The report value the field last followed, and whether this field's own save just landed
+  const [base, setBase] = useState(shown)
+  const [saved, setSaved] = useState(false)
   const inputId = useId()
 
-  // A fresh report (after a save, or on the minute) resets an untouched field
-  useEffect(() => {
-    setText(shown)
-    setError(null)
-  }, [shown])
+  // A fresh report (after a save here or elsewhere, or on the minute) moves an
+  // untouched field; a cap being typed keeps what was typed
+  if (shown !== base) {
+    const next = followReport(text, base, shown, saved)
+    if (next !== text) {
+      setText(next)
+      setError(null)
+    }
+    setBase(shown)
+    setSaved(false)
+  }
 
   async function run(usd: string | null) {
     setBusy(true)
     try {
       await onSave(usd)
+      // Written as the report will show it ("12.50" comes back "12.5"), and the
+      // report's next value is this field's to take
+      if (usd != null) setText(String(Number(usd)))
+      setSaved(true)
     } catch {
       // the toast says why; the field keeps what was typed
     } finally {
@@ -357,7 +371,10 @@ export function CapEditor({
         placeholder={cap.cap_micros == null ? "none" : undefined}
         value={text}
         aria-invalid={error ? true : undefined}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => {
+          setText(event.target.value)
+          setSaved(false)
+        }}
       />
       <button type="submit" className={`${dk.btn} ${dk.btnSmall} ${dirty ? dk.btnPrimary : ""}`} disabled={busy || !dirty}>
         Save

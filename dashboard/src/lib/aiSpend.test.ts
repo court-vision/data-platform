@@ -9,6 +9,7 @@ import {
   capInput,
   capShare,
   featuresUsed,
+  followReport,
   formatTokens,
   formatUsd,
   niceTop,
@@ -70,6 +71,18 @@ describe("money", () => {
     expect(capShare(100, 100)).toEqual({ share: 1, tone: "down" })
     expect(capShare(0, 0)).toEqual({ share: 0, tone: "down" })
     expect(capShare(1, 0)).toEqual({ share: 1, tone: "down" })
+  })
+
+  test("a refreshed report moves an untouched cap field, never one being typed", () => {
+    // Nobody touched it: it follows the report
+    expect(followReport("25", "25", "20", false)).toBe("20")
+    expect(followReport(" 25 ", "25", "20", false)).toBe("20")
+    // A draft stays, though the desk cap's save moved this user's share under it
+    expect(followReport("30", "25", "20", false)).toBe("30")
+    expect(followReport("", "25", "20", false)).toBe("")
+    // This field's own save (or Default) just landed: the report's value is the field's
+    expect(followReport("30", "25", "30", true)).toBe("30")
+    expect(followReport("30", "30", "25", true)).toBe("25")
   })
 
   test("the window is 7, 30 or 90 days, 30 when the URL says otherwise", () => {
