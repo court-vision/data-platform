@@ -547,3 +547,61 @@ class TestDependenciesMeanTonight:
         assert all(second[name] == "skipped" for name in waits_on_espn_gate)
         assert not waits_on_espn_gate & set(ran)
         assert ran.index("game_schedule") < ran.index("team_stats")
+
+
+@pytest.mark.api
+class TestAnEarlyLastTip:
+    """A night whose last game tips at 9 PM ET, as on 2026-11-16.
+
+    Counted from the tip, the window closed at 03:00 ET, 02:00 CST: the minute
+    `daily_matchup_scores` is first allowed to run. The poll that should have
+    written the next morning's score snapshot swept the night instead, and the
+    Week desk's live scores read 0 the next evening.
+    """
+
+    @pytest.fixture
+    def nine_pm(self, monkeypatch):
+        monkeypatch.setattr(
+            Game, "get_latest_game_time_on_date", classmethod(lambda cls, d: time(21, 0))
+        )
+
+    def test_the_snapshot_runs_after_two_central(self, client, batches, alerts, nine_pm, monkeypatch):
+        from pipelines.extractors.nba_api import NBAApiExtractor
+
+        dispatched = []
+
+        def fake_background(job_id, **kwargs):
+            dispatched.append(kwargs)
+            return asyncio.sleep(0)
+
+        _ran(monkeypatch, set())
+        monkeypatch.setattr(PipelineRun, "is_running", classmethod(lambda cls, n, **kw: False))
+        monkeypatch.setattr(PipelineRun, "count_since", classmethod(lambda cls, n, c: 0))
+        monkeypatch.setattr(NBAApiExtractor, "check_all_games_final", lambda self, d: True)
+        monkeypatch.setattr(pipelines_api, "probe_espn_watermark", lambda: None)
+        monkeypatch.setattr(
+            pipelines_api,
+            "_espn_scoring_period_advanced",
+            lambda nba_date, observed=None, succeeded_tonight=False, attempts_tonight=0: (
+                pipelines_api.GateDecision(True, "period_advanced", {})
+            ),
+        )
+        monkeypatch.setattr(pipelines_api, "_run_pipelines_background", fake_background)
+
+        with freeze_time("2026-03-05T08:15:00Z"):  # 02:15 CST, 03:15 ET
+            res = client.post(PATH, headers=_headers())
+
+        assert "triggered" in res.json()["message"]
+        assert not [r for r in batches if r["decision"] == "window_closed"]
+        assert "daily_matchup_scores" in dispatched[0]["pipeline_names"]
+
+    def test_the_night_is_still_swept_once_the_floor_passes(
+        self, client, batches, alerts, nine_pm, monkeypatch
+    ):
+        _ran(monkeypatch, set())
+
+        with freeze_time("2026-03-05T09:31:00Z"):  # 03:31 CST, 04:31 ET
+            client.post(PATH, headers=_headers())
+
+        row = next(r for r in batches if r["decision"] == "window_closed")
+        assert row["reason"] == "incomplete"

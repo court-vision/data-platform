@@ -17,6 +17,7 @@ from pipelines.gates import (
     CENTRAL,
     espn_batch_gate,
     espn_fallback_at,
+    post_game_close_floor,
     post_game_window,
     pre_game_window,
 )
@@ -90,6 +91,59 @@ class TestPostGameWindow:
         args = (time(22, 0), NBA_DATE, 150, 210)
         assert post_game_window(datetime(2026, 3, 4, 20, 0), *args).state == "before"
         assert post_game_window(datetime(2026, 3, 5, 5, 0), *args).state == "closed"
+
+
+@pytest.mark.unit
+class TestPostGameCloseFloor:
+    """The window outlasts ESPN's nightly batch however early the last tip.
+
+    2026-11-16's last game tipped at 9 PM ET, so the window counted from the
+    tip closed at 03:00 ET, 02:00 CST: the minute `daily_matchup_scores` is
+    first allowed to run. It never ran after ESPN's batch, Nov 17's score
+    snapshot was never written, and every live score in the Week desk read 0
+    the next night.
+    """
+
+    def test_the_floor_is_three_thirty_central_the_morning_after(self):
+        floor = post_game_close_floor(date(2026, 11, 16))
+        assert floor == datetime(2026, 11, 17, 4, 30)  # naive ET, 03:30 CST
+
+    def test_the_floor_follows_daylight_time(self):
+        # ET and CT change on the same night, so it stays 04:30 ET either side.
+        assert post_game_close_floor(date(2026, 3, 4)) == datetime(2026, 3, 5, 4, 30)
+        assert post_game_close_floor(date(2026, 4, 1)) == datetime(2026, 4, 2, 4, 30)
+
+    def test_a_nine_pm_last_tip_still_has_polls_after_two_central(self):
+        nba_date = date(2026, 11, 16)
+        args = (time(21, 0), nba_date, 150, 210)  # tip close: 03:00 ET on the 17th
+        floor = post_game_close_floor(nba_date)
+
+        two_fifteen_cst = datetime(2026, 11, 17, 3, 15)  # naive ET
+        assert post_game_window(two_fifteen_cst, *args).closed  # what happened
+        assert post_game_window(two_fifteen_cst, *args, closes_no_earlier_than=floor).open
+        # Past the fallback (02:30 CST) too, with polls to spare.
+        assert post_game_window(datetime(2026, 11, 17, 4, 30), *args, closes_no_earlier_than=floor).open
+        assert post_game_window(datetime(2026, 11, 17, 4, 31), *args, closes_no_earlier_than=floor).closed
+
+    def test_the_floor_never_brings_a_late_night_forward(self):
+        nba_date = date(2026, 11, 17)
+        args = (time(23, 0), nba_date, 150, 210)  # tip close: 05:00 ET on the 18th
+        window = post_game_window(
+            datetime(2026, 11, 18, 4, 45), *args,
+            closes_no_earlier_than=post_game_close_floor(nba_date),
+        )
+        assert window.open
+        assert window.closes_at == datetime(2026, 11, 18, 5, 0)
+
+    def test_the_floor_does_not_move_the_opening(self):
+        nba_date = date(2026, 11, 16)
+        floor = post_game_close_floor(nba_date)
+        window = post_game_window(
+            datetime(2026, 11, 16, 23, 0), time(21, 0), nba_date, 150, 210,
+            closes_no_earlier_than=floor,
+        )
+        assert window.state == "before"
+        assert window.opens_at == datetime(2026, 11, 16, 23, 30)
 
 
 # ---------------------------------------------------------------------------

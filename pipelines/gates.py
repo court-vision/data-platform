@@ -23,11 +23,22 @@ from typing import Mapping, Optional
 import pytz
 
 CENTRAL = pytz.timezone("US/Central")
+EASTERN = pytz.timezone("US/Eastern")
 
 # The hour ESPN's nightly batch is assumed to have landed by, after which the
 # gate stops waiting for `latestScoringPeriod` to advance. Anchored to the day
 # *after* the NBA date, never to a bare hour-of-day.
 ESPN_FALLBACK_TIME_CST = time(2, 30)
+
+# The post-game window never closes before this hour on the morning after the
+# NBA date: an hour past the ESPN fallback. The window's own length is counted
+# from the last tip, so on a night whose last game tips at 9 PM ET it closed at
+# 03:00 ET, 02:00 CST, the minute `daily_matchup_scores` is first allowed to
+# run (`earliest_run_time_cst`). That pipeline then never ran after ESPN's
+# nightly batch, the next day's score snapshot was never written, and the Week
+# desk's live score fell back to an older snapshot (all zeros on a period's
+# second day, 2026-11-17).
+POST_GAME_CLOSE_FLOOR_CST = time(3, 30)
 
 
 @dataclass(frozen=True)
@@ -90,18 +101,38 @@ def pre_game_window(
 # ---------------------------------------------------------------------------
 
 
+def post_game_close_floor(nba_date: date) -> datetime:
+    """`POST_GAME_CLOSE_FLOOR_CST` on the morning after `nba_date`, as naive ET.
+
+    Naive ET because that is the frame `post_game_window` works in.
+    """
+    aware = CENTRAL.localize(
+        datetime.combine(nba_date + timedelta(days=1), POST_GAME_CLOSE_FLOOR_CST)
+    )
+    return aware.astimezone(EASTERN).replace(tzinfo=None)
+
+
 def post_game_window(
     now_et_naive: datetime,
     latest_game_time: time,
     nba_date: date,
     estimated_duration_minutes: int,
     window_minutes: int,
+    closes_no_earlier_than: Optional[datetime] = None,
 ) -> Window:
-    """Opens when the last game is estimated to have ended, closes `window_minutes` later."""
+    """Opens when the last game is estimated to have ended, closes `window_minutes` later.
+
+    `closes_no_earlier_than` (naive ET) holds the close back on an early night,
+    so pipelines gated on the small hours (`earliest_run_time_cst`, the ESPN
+    batch gate) still get polls; the endpoint passes `post_game_close_floor`.
+    It never brings a late night's close forward.
+    """
     opens_at = datetime.combine(nba_date, latest_game_time) + timedelta(
         minutes=estimated_duration_minutes
     )
     closes_at = opens_at + timedelta(minutes=window_minutes)
+    if closes_no_earlier_than is not None:
+        closes_at = max(closes_at, closes_no_earlier_than)
 
     if now_et_naive < opens_at:
         state = "before"
