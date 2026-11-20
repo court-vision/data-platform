@@ -1,0 +1,131 @@
+/* The analyst's morning on the Projections page. Shares the note and table
+   styles with the players' view (projections.module.css); what is here is the
+   list of reads and the morning's own lines. */
+
+.status {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin: 0;
+  padding: 10px var(--gutter);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.day {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.daySelect {
+  height: 30px;
+  font-size: 12px;
+}
+
+.reads {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.read {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.read:first-child {
+  padding-top: 2px;
+}
+.read:last-child {
+  padding-bottom: 2px;
+  border-bottom: 0;
+}
+
+.readHead {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+}
+.readMeta {
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.player {
+  font-size: 13px;
+  text-decoration: none;
+}
+.player:hover,
+.player:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.reasons li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+.summary {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+/* A read that went wrong says why in its summary */
+.read[data-outcome="refused"] .summary,
+.read[data-outcome="declined"] .summary,
+.read[data-outcome="failed"] .summary {
+  color: var(--warn);
+}
+
+.note {
+  padding-left: 10px;
+  border-left: 2px solid var(--line-2);
+}
+
+.disagrees {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  max-width: 78ch;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+/* Five numbers and a row name: narrow enough to sit in a phone's width unscrolled */
+.sides {
+  min-width: 21rem;
+  max-width: 36rem;
+}
+
+.moved th[scope="row"] {
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
