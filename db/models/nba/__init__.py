@@ -15,6 +15,7 @@ from db.models.nba.player_ownership import PlayerOwnership
 from db.models.nba.player_projections import PlayerProjection
 from db.models.nba.player_history import PlayerHistory
 from db.models.nba.projection_adjustments import ProjectionAdjustment
+from db.models.nba.analyst_reads import AnalystRead
 from db.models.nba.player_profiles import PlayerProfile
 from db.models.nba.player_advanced_stats import PlayerAdvancedStats
 from db.models.nba.games import Game
@@ -47,6 +48,8 @@ __all__ = [
     # Court Vision projection inputs
     "PlayerHistory",
     "ProjectionAdjustment",
+    # Live rankings: what the analyst read each morning
+    "AnalystRead",
     # Team stats
     "TeamStats",
     # Extended data tables

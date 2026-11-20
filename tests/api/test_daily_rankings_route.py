@@ -1,6 +1,7 @@
 """POST /pipelines/daily-rankings gates on the season and on the day being stored, and
 runs the morning's chain (the live projection, then the boards built on it) only
-when there is a board to store."""
+when there is a board to store. Once they are stored it starts the analyst's
+morning run in the background, on this tick or a later one, until a run has succeeded."""
 
 import os
 from datetime import date, datetime
@@ -58,7 +59,9 @@ def run_calls(monkeypatch, results):
 @pytest.fixture
 def gate(monkeypatch):
     """The gate's three reads, answered from memory: the date, the season's phase, the day's rows."""
-    state = {"phase": "regular", "stored": Stored(cv=0, espn=0), "asked": []}
+    state = {"phase": "regular", "stored": Stored(cv=0, espn=0), "asked": [],
+             # Why the analyst is not started (None: it is due), and what was started behind the answer
+             "analyst": "the analyst has run this morning", "analyst_asked": [], "background": []}
 
     async def thread_hop(fn, *args, **kwargs):
         return fn(*args, **kwargs)
@@ -72,10 +75,21 @@ def gate(monkeypatch):
         state["asked"].append(day)
         return state["stored"]
 
+    def analyst_due(season, day):
+        state["analyst_asked"].append(day)
+        return state["analyst"]
+
+    def background(coro):
+        # Not run: what matters here is which pipeline was started behind the answer
+        state["background"].append(coro.cr_frame.f_locals["name"])
+        coro.close()
+
     monkeypatch.setattr(pipelines_api, "run_in_db_thread", thread_hop)
     monkeypatch.setattr(pipelines_api, "daily_rankings_today", lambda: TODAY)
     monkeypatch.setattr(pipelines_api, "get_season_phase", phase)
     monkeypatch.setattr(pipelines_api, "daily_rankings_stored_on", stored)
+    monkeypatch.setattr(pipelines_api, "analyst_due_reason", analyst_due)
+    monkeypatch.setattr(pipelines_api, "_start_in_background", background)
     return state
 
 
@@ -177,6 +191,8 @@ def test_outside_the_regular_season_is_skipped_without_a_query(run_calls, gate, 
     assert res.json() == {"status": "skipped", "message": "Outside the regular season: no rankings to store",
                           "data": None}
     assert run_calls == [] and gate["asked"] == []
+    # Nor is the analyst asked about: there is nothing for it to read against
+    assert gate["analyst_asked"] == [] and gate["background"] == []
 
 
 @pytest.mark.api
@@ -205,3 +221,67 @@ def test_the_projection_has_its_own_route_for_a_run_on_demand(run_calls, gate):
     assert _client().post(f"{path}?force=true", headers=_auth()).status_code == 200
     assert run_calls == [("live_projection", None), ("live_projection", {"force": True})]
     assert gate["asked"] == []
+
+
+# ---- the analyst, started behind the answer ------------------------------------------------
+
+
+@pytest.mark.api
+def test_the_analyst_starts_in_the_background_once_the_boards_are_stored(run_calls, gate):
+    gate["analyst"] = None
+    res = _client().post(PATH, headers=_auth())
+    # The answer is still the boards': the reads take minutes and are not waited for
+    assert res.json()["status"] == "success" and res.json()["data"]["records_processed"] == 1860
+    assert run_calls == CHAIN and gate["background"] == ["analyst"]
+    assert gate["analyst_asked"] == [TODAY]
+
+
+@pytest.mark.api
+def test_a_later_tick_starts_the_analyst_again_until_a_run_has_succeeded(run_calls, gate):
+    gate["stored"] = Stored(cv=1040, espn=820)
+    gate["analyst"] = None
+    res = _client().post(PATH, headers=_auth())
+    assert res.json()["status"] == "skipped" and run_calls == []
+    assert gate["background"] == ["analyst"]
+
+    # Once it has run, the later ticks leave it alone
+    gate["analyst"] = "the analyst has run this morning"
+    _client().post(PATH, headers=_auth())
+    assert gate["background"] == ["analyst"]
+
+
+@pytest.mark.api
+def test_the_analyst_waits_for_the_projection_with_the_boards(run_calls, gate, results):
+    _waiting(results)
+    gate["analyst"] = None
+    _client().post(PATH, headers=_auth())
+    assert run_calls == [("live_projection", None)] and gate["background"] == []
+
+
+@pytest.mark.api
+def test_a_forced_chain_outside_the_season_starts_no_analyst(run_calls, gate):
+    gate["phase"] = "offseason"
+    gate["analyst"] = None
+    _client().post(f"{PATH}?force=true", headers=_auth())
+    assert gate["background"] == [] and gate["analyst_asked"] == []
+
+
+@pytest.mark.api
+def test_the_analyst_has_its_own_route_for_a_run_on_demand(run_calls, gate, results):
+    path = "/v1/internal/pipelines/analyst"
+    results["analyst"] = PipelineResult(status=ApiStatus.SUCCESS, message="analyst completed successfully",
+                                        started_at="2026-11-16T06:00:00", records_processed=1052)
+    assert _client().post(path).status_code in (401, 403)
+
+    # Started behind the answer: the run takes minutes
+    res = _client().post(path, headers=_auth())
+    assert res.status_code == 200
+    assert res.json() == {"status": "success", "message": "The analyst's morning run was started", "data": None}
+    assert gate["background"] == ["analyst"] and run_calls == []
+
+    # ... or waited for
+    res = _client().post(f"{path}?wait=true", headers=_auth())
+    assert res.json()["data"]["records_processed"] == 1052
+    assert run_calls == [("analyst", None)]
+    # A run on demand does not ask whether one is due
+    assert gate["analyst_asked"] == []

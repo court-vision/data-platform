@@ -8,6 +8,9 @@ The season's notes have the same four routes of their own (the Live rankings
 plan, step 3): a note tried on the live projection, a save and a retire that
 rebuild the live projection and leave the preseason one alone, and the news a
 note can cite.
+
+The analyst's morning digest (step 4) is one read-only route: the day asked
+for, the month from the backend's ledger, and nothing run.
 """
 
 import os
@@ -20,11 +23,14 @@ from fastapi.testclient import TestClient
 
 from api.v1 import projections
 from db.models.nba import ProjectionAdjustment
+from schemas.analyst import AnalystDigest, DigestRead, DigestSide
 from schemas.pipeline import PipelineResult
 from schemas.projections import EvidenceItem
+from services import analyst_digest
 from services import live_projection_inputs as live_inputs
 from services import projection_editor as editor
 from services import projection_notes as notes
+from services.analyst_client import Month
 from services.live_projection_model import BoxLine, Prior
 from services.projection_inputs import ProjectionInputs
 from services.projection_model import LINE_KEYS, Coefficients, EspnLine, HistoryRow
@@ -102,7 +108,7 @@ def client(monkeypatch):
     ("get", BASE), ("post", f"{BASE}/preview"), ("put", f"{BASE}/2/adjustment"),
     ("delete", f"{BASE}/2/adjustment"), ("get", f"{BASE}/2/adjustments"),
     ("post", f"{BASE}/note/preview"), ("put", f"{BASE}/2/note"), ("delete", f"{BASE}/2/note"),
-    ("get", f"{BASE}/2/news"),
+    ("get", f"{BASE}/2/news"), ("get", f"{BASE}/analyst"),
 ])
 def test_every_route_needs_the_token(client, method, path):
     assert getattr(client.http, method)(path).status_code in (401, 403)
@@ -521,3 +527,71 @@ def test_the_news_route_lists_what_a_note_can_cite(season, monkeypatch):
     assert body["data"] == {"player_id": 2, "items": [{
         "type": "news", "id": 8, "source": "rotowire_rss", "kind": "injury", "headline": "Out two weeks",
         "url": "https://example.com/8", "published_at": "2026-11-15T22:05:00"}]}
+
+
+# ---- the analyst's morning digest -------------------------------------------------------------
+
+
+@pytest.fixture
+def digest(client, monkeypatch):
+    """The digest route with the backend's ledger and the database both scripted."""
+    client.month = Month(available=True, enabled=True, spent_micros=1_250_000, cap_micros=40_000_000,
+                         read_max_micros=300_000, model="claude-opus-5-5", prompt_version="analyst-1")
+    client.built = []
+
+    def build(season, day, month, today):
+        client.built.append((season, day, month, today))
+        out = AnalystDigest(season=season, as_of=day, days=[d for d in (day,) if d],
+                            spend=analyst_digest.spend_of(month))
+        if day is not None:
+            out.reads.append(DigestRead(
+                id=5, player_id=2, name="Vet", team="PHX", as_of=day, read_at=datetime(2026, 11, 16, 11, 5),
+                outcome="none", summary="Nothing a box score cannot say.",
+                live=DigestSide(games=60.0, minutes=24.0, points=14.4, points_rank=88, categories_rank=91),
+            ))
+            out.counts = {"none": 1}
+        return out
+
+    monkeypatch.setattr(projections, "analyst_client_from_settings",
+                        lambda settings: SimpleNamespace(month=lambda: client.month))
+    monkeypatch.setattr(analyst_digest, "build", build)
+    monkeypatch.setattr(notes, "today_et", lambda: date(2026, 11, 16))
+    return client
+
+
+def test_the_digest_is_the_morning_asked_for_with_the_month_from_the_backend(digest):
+    res = digest.http.get(f"{BASE}/analyst", headers=_AUTH, params={"day": "2026-11-15"})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "success" and body["message"] == "1 read(s) on 2026-11-15"
+    ((season, day, month, today),) = digest.built
+    assert (day, month, today) == (date(2026, 11, 15), digest.month, date(2026, 11, 16)) and season
+    data = body["data"]
+    assert data["as_of"] == "2026-11-15" and data["in_shadow"] is True and data["counts"] == {"none": 1}
+    assert data["spend"] == {"available": True, "enabled": True, "month_spent_usd": 1.25, "month_cap_usd": 40.0,
+                             "model": "claude-opus-5-5", "prompt_version": "analyst-1"}
+    (read,) = data["reads"]
+    assert (read["name"], read["outcome"], read["note"], read["shadow"]) == ("Vet", "none", None, None)
+    assert read["live"] == {"games": 60.0, "minutes": 24.0, "points": 14.4, "points_rank": 88,
+                            "categories_rank": 91}
+    # Reading the digest runs nothing and values nothing
+    assert digest.runs == [] and digest.valued == []
+
+
+def test_the_digest_before_the_first_run_and_without_the_backend(digest):
+    digest.month = Month.unavailable("timeout")
+
+    res = digest.http.get(f"{BASE}/analyst", headers=_AUTH)
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["message"] == "The analyst has not run yet" and digest.built[0][1] is None
+    assert body["data"]["as_of"] is None and body["data"]["reads"] == []
+    # The reads would still show without the month
+    assert body["data"]["spend"]["available"] is False
+
+
+def test_the_digest_refuses_a_day_that_is_not_one(digest):
+    res = digest.http.get(f"{BASE}/analyst", headers=_AUTH, params={"day": "yesterday"})
+    assert res.status_code == 422 and digest.built == []

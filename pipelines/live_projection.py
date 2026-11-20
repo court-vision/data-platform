@@ -62,7 +62,7 @@ from pipelines.daily_rankings import (
 )
 from pipelines.readiness import REGULAR_SEASON_PREFIX
 from services.live_projection_inputs import LiveInputs, load_coefficients, load_inputs
-from services.live_projection_model import Coefficients, LiveProjection, build_morning, project
+from services.live_projection_model import Coefficients, LiveProjection, Morning, build_morning, project
 
 SOURCE = "cv_live"
 BATCH_SIZE = 500
@@ -74,11 +74,11 @@ BOX_SCORES_PIPELINE = "player_game_stats"
 DAY_TURNS_HOUR_ET = 3
 
 
-def stored_on(season: str, day: date) -> int:
+def stored_on(season: str, day: date, source: str = SOURCE) -> int:
     """How many players the day's live snapshot holds."""
     return (
         PlayerProjection.select()
-        .where((PlayerProjection.season == season) & (PlayerProjection.source == SOURCE)
+        .where((PlayerProjection.season == season) & (PlayerProjection.source == source)
                & (PlayerProjection.as_of_date == day))
         .count()
     )
@@ -116,12 +116,12 @@ def waiting_on(
     return unsettled
 
 
-def row_of(p: LiveProjection, inputs: LiveInputs, coeffs: Coefficients, run_id) -> dict:
+def row_of(p: LiveProjection, inputs: LiveInputs, coeffs: Coefficients, run_id, source: str = SOURCE) -> dict:
     """One player's projection as his nba.player_projections row."""
     return {
         "player": p.player_id,
         "season": inputs.season,
-        "source": SOURCE,
+        "source": source,
         "as_of_date": inputs.as_of,
         **p.line(),
         "projected_gp": int(round(p.games)),
@@ -136,6 +136,46 @@ def row_of(p: LiveProjection, inputs: LiveInputs, coeffs: Coefficients, run_id) 
         },
         "pipeline_run_id": run_id,
     }
+
+
+def build_rows(inputs: LiveInputs, morning: Morning, coeffs: Coefficients, run_id, source: str = SOURCE) -> list[dict]:
+    """The morning's projection of every player as rows, read with the notes `inputs` carries."""
+    projections = project(morning, coeffs, inputs.known, inputs.role_notes)
+    for pid, note in inputs.notes.items():
+        # Which note an absence was read from, for the reasons shown later
+        if inputs.standings[pid].games and pid in projections:
+            projections[pid].parts.setdefault("known", {})["note"] = note.id
+    return [row_of(p, inputs, coeffs, run_id, source) for p in projections.values()]
+
+
+def store(rows: list[dict], season: str, day: date, source: str = SOURCE) -> None:
+    """Publish one day's snapshot of `source`, replacing what the day held, in one
+    transaction: a reader resolving "the latest snapshot" never finds half of one."""
+    snapshot = (
+        (PlayerProjection.season == season)
+        & (PlayerProjection.source == source)
+        & (PlayerProjection.as_of_date == day)
+    )
+    preserve = [getattr(PlayerProjection, key) for key in PlayerProjection.STAT_KEYS] + [
+        PlayerProjection.projected_gp, PlayerProjection.raw, PlayerProjection.pipeline_run_id,
+    ]
+    with db.atomic():
+        stale = PlayerProjection.delete().where(snapshot)
+        if rows:
+            stale = stale.where(PlayerProjection.player.not_in([row["player"] for row in rows]))
+        stale.execute()
+        for i in range(0, len(rows), BATCH_SIZE):
+            (
+                PlayerProjection.insert_many(rows[i : i + BATCH_SIZE])
+                .on_conflict(
+                    conflict_target=[
+                        PlayerProjection.player, PlayerProjection.season,
+                        PlayerProjection.source, PlayerProjection.as_of_date,
+                    ],
+                    preserve=preserve,
+                )
+                .execute()
+            )
 
 
 class LiveProjectionPipeline(BasePipeline):
@@ -193,12 +233,7 @@ class LiveProjectionPipeline(BasePipeline):
 
         coeffs = load_coefficients()
         morning = build_morning(inputs.lines, inputs.priors, inputs.ahead, day, teams=inputs.teams, ages=inputs.ages)
-        projections = project(morning, coeffs, inputs.known, inputs.role_notes)
-        for pid, note in inputs.notes.items():
-            # Which note an absence was read from, for the reasons shown later
-            if inputs.standings[pid].games and pid in projections:
-                projections[pid].parts.setdefault("known", {})["note"] = note.id
-        rows = [row_of(p, inputs, coeffs, ctx.run_id) for p in projections.values()]
+        rows = build_rows(inputs, morning, coeffs, ctx.run_id)
         ctx.log.info(
             "live_projection_built",
             as_of=str(day), players=len(rows), lines=len(inputs.lines), projected=len(inputs.priors),
@@ -207,29 +242,5 @@ class LiveProjectionPipeline(BasePipeline):
             notes=len(inputs.notes), notes_in_force=sum(1 for s in inputs.standings.values() if s.in_force),
         )
 
-        snapshot = (
-            (PlayerProjection.season == season)
-            & (PlayerProjection.source == SOURCE)
-            & (PlayerProjection.as_of_date == day)
-        )
-        preserve = [getattr(PlayerProjection, key) for key in PlayerProjection.STAT_KEYS] + [
-            PlayerProjection.projected_gp, PlayerProjection.raw, PlayerProjection.pipeline_run_id,
-        ]
-        with db.atomic():
-            stale = PlayerProjection.delete().where(snapshot)
-            if rows:
-                stale = stale.where(PlayerProjection.player.not_in([row["player"] for row in rows]))
-            stale.execute()
-            for i in range(0, len(rows), BATCH_SIZE):
-                (
-                    PlayerProjection.insert_many(rows[i : i + BATCH_SIZE])
-                    .on_conflict(
-                        conflict_target=[
-                            PlayerProjection.player, PlayerProjection.season,
-                            PlayerProjection.source, PlayerProjection.as_of_date,
-                        ],
-                        preserve=preserve,
-                    )
-                    .execute()
-                )
+        store(rows, season, day)
         ctx.increment_records(len(rows))

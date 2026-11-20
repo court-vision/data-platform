@@ -17,20 +17,27 @@ Routes:
     DELETE /v1/dashboard/projections/{player_id}/note         — retire it, then rebuild
     GET    /v1/dashboard/projections/{player_id}/news         — his recent stored news: what a note can cite
 
+    GET    /v1/dashboard/projections/analyst                  — the analyst's morning digest (in shadow)
+
 A save writes one row to nba.projection_adjustments (append-only: it
 supersedes the live row of its scope). A preseason adjustment then runs
 cv-projection, so the snapshot the draft board reads is the one the page
 showed in its preview. A season note (the Live rankings plan, step 3) leaves
 the preseason projection alone and rebuilds the day's live projection, which
 is what the board is priced on in season.
+
+The analyst (the Live rankings plan, step 4) writes notes of its own, in a
+scope of its own, which in shadow reach only a second projection and second
+boards. Its digest is read here; nothing on this page writes for it.
 """
 
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Path, Security
+from fastapi import APIRouter, HTTPException, Path, Query, Security
 
 from core.logging import get_logger
 from core.pipeline_auth import verify_pipeline_token
@@ -41,6 +48,7 @@ from db.base import run_in_db_thread
 from db.models.nba import ProjectionAdjustment
 from db.models.nba.projection_adjustments import SCOPE_SEASON
 from pipelines import run_pipeline
+from schemas.analyst import AnalystDigestResponse
 from schemas.common import ApiStatus
 from schemas.projections import (
     AdjustmentHistory,
@@ -59,9 +67,11 @@ from schemas.projections import (
     PreviewResponse,
     ProjectionsResponse,
 )
+from services import analyst_digest
 from services import live_projection_inputs as live_inputs
 from services import projection_editor as editor
 from services import projection_notes as notes
+from services.analyst_client import analyst_client_from_settings
 from services.valuation_client import Valuation, valuation_client_from_settings
 
 router = APIRouter(
@@ -365,4 +375,35 @@ async def get_player_news(player_id: int = _PLAYER_ID) -> PlayerNewsResponse:
         status="success",
         message=f"{len(items)} item(s)",
         data=PlayerNews(player_id=player_id, items=items),
+    )
+
+
+# ---- the analyst, in shadow ----------------------------------------------------------------
+
+
+@router.get("/analyst", response_model=AnalystDigestResponse)
+async def get_analyst_digest(
+    day: Optional[date] = Query(None, description="The morning to show. Omit for the newest with reads."),
+) -> AnalystDigestResponse:
+    """
+    The analyst's morning: every read with why the screen picked the player,
+    what the read came to, the note it left with the stored items it rests on,
+    and what it says against a note written by hand. Beside each, the player
+    on the live projection and boards and on the second ones, which have the
+    analyst's notes applied and which nothing else reads. `moved` is the
+    widest moves between the two points boards that morning, and `spend` the
+    month's bill for reads from the backend's ledger.
+
+    In shadow this is the only place the analyst's work shows. To act on a
+    read, save a note of your own from it: a note written by hand is the one
+    applied wherever a player has both.
+    """
+    season = settings.nba_season
+    month = await asyncio.to_thread(analyst_client_from_settings(settings).month)
+    digest = await run_in_db_thread(analyst_digest.build, season, day, month, notes.today_et())
+    reads = len(digest.reads)
+    return AnalystDigestResponse(
+        status="success",
+        message=f"{reads} read(s) on {digest.as_of.isoformat()}" if digest.as_of else "The analyst has not run yet",
+        data=digest,
     )

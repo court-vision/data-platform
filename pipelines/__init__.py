@@ -39,6 +39,7 @@ from pipelines.dime_checkins import DimeCheckinsPipeline
 from pipelines.news_feed import NewsFeedPipeline
 from pipelines.daily_rankings import DailyRankingsPipeline
 from pipelines.live_projection import LiveProjectionPipeline
+from pipelines.analyst import AnalystPipeline
 from schemas.pipeline import PipelineResult
 from schemas.common import ApiStatus
 
@@ -92,6 +93,10 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     # Court Vision's two standard boards and ESPN's ranks, stored each morning of the
     # season (hourly through the morning; its route gates on the day being stored).
     "daily_rankings": DailyRankingsPipeline,
+    # The live rankings' analyst, in shadow: the morning's reads, and a second
+    # projection and boards with its notes applied (started in the background by the
+    # daily-rankings trigger once the day's boards are stored).
+    "analyst": AnalystPipeline,
 }
 
 
@@ -220,6 +225,7 @@ __all__ = [
     "CVProjectionPipeline",
     "LiveProjectionPipeline",
     "DailyRankingsPipeline",
+    "AnalystPipeline",
     # Registry
     "PIPELINE_REGISTRY",
     "get_pipelines_by_category",

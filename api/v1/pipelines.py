@@ -41,6 +41,7 @@ from pipelines import (
     PIPELINE_REGISTRY,
     get_pipelines_by_category,
 )
+from pipelines.analyst import due_reason as analyst_due_reason
 from pipelines.availability import Due as AvailabilityDue, due_now as availability_due_now
 from pipelines.config import PipelineCategory
 from pipelines.daily_rankings import (
@@ -2306,6 +2307,7 @@ async def trigger_daily_rankings(
     if not force:
         reason = await _daily_rankings_idle()
         if reason:
+            await _start_analyst_if_due()
             return PipelineResponse(status=ApiStatus.SKIPPED, message=reason)
     options = {"force": True} if force else None
     projection = await run_pipeline("live_projection", options=options)
@@ -2320,7 +2322,9 @@ async def trigger_daily_rankings(
         log.info("daily_rankings_wait_for_projection", live_projection=projection.message)
         return PipelineResponse(status=projection.status, message=projection.message, data=projection)
     result = await run_pipeline("daily_rankings", options=options)
-    log.info("daily_rankings_chain_complete", live_projection=projection.status, daily_rankings=result.status)
+    analyst = await _start_analyst_if_due()
+    log.info("daily_rankings_chain_complete", live_projection=projection.status, daily_rankings=result.status,
+             analyst_started=analyst)
     return PipelineResponse(status=result.status, message=result.message, data=result)
 
 
@@ -2339,3 +2343,64 @@ def _daily_rankings_idle_reason(today: date) -> Optional[str]:
 async def _daily_rankings_idle() -> Optional[str]:
     """Why a daily-rankings tick has nothing to do, or None when it should run."""
     return await run_in_db_thread(_daily_rankings_idle_reason, daily_rankings_today())
+
+
+def _analyst_idle_reason(today: date) -> Optional[str]:
+    from core.settings import settings
+
+    try:
+        phase = get_season_phase(today)
+    except (FileNotFoundError, ValueError):
+        phase = "regular"   # no calendar on this box: the pipeline's own checks decide
+    if phase != "regular":
+        return "outside the regular season"
+    return analyst_due_reason(settings.nba_season, today)
+
+
+async def _start_analyst_if_due() -> bool:
+    """Start the analyst's morning run in the background when it is due: the day's
+    projection and boards are stored and no run of it has succeeded today. Its
+    reads take minutes, far longer than cron-runner waits for this tick, so the
+    run is not awaited: it has its own row in nba.pipeline_runs, alerts on
+    failure like any run, and a failed one is started again by the next tick."""
+    reason = await run_in_db_thread(_analyst_idle_reason, daily_rankings_today())
+    if reason:
+        log.debug("analyst_not_started", reason=reason)
+        return False
+    _start_in_background(run_pipeline("analyst"))
+    return True
+
+
+@router.post("/analyst", response_model=PipelineResponse)
+async def trigger_analyst(
+    _: str = Security(verify_pipeline_token),
+    wait: bool = Query(
+        False,
+        description="Answer with the run's result instead of starting it in the background (it takes minutes).",
+    ),
+) -> PipelineResponse:
+    """
+    Trigger the analyst's morning run, in shadow (the Live rankings plan, step 4).
+
+    A fixed screen picks the players whose stored news might say something a
+    box score cannot; each gets one read from the backend's analyst, whose
+    proposal is checked here (it must cite a stored item and stay inside its
+    bounds) before it becomes a note in nba.projection_adjustments' `analyst`
+    scope. Every read is logged in nba.analyst_reads. Then the morning's
+    projection is built again with those notes applied (`cv_live_shadow`) and
+    the backend's two boards on it are stored under the source `cv_shadow`.
+    Nothing a user sees reads any of it.
+
+    It has no cron job of its own: the daily-rankings trigger starts it once
+    the day's projection and boards are stored, and again on each later tick
+    until a run has succeeded. This route is the same run on demand, and a run
+    on demand is never a second bill: a player whose facts are the ones his
+    last completed read saw is not read again. The run takes minutes, so the
+    route answers at once unless `wait` is set; the reads show in the
+    projections editor's digest as they finish.
+    """
+    if wait:
+        result = await run_pipeline("analyst")
+        return PipelineResponse(status=result.status, message=result.message, data=result)
+    _start_in_background(run_pipeline("analyst"))
+    return PipelineResponse(status=ApiStatus.SUCCESS, message="The analyst's morning run was started")

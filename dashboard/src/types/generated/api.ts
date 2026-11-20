@@ -173,6 +173,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/projections/analyst": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Analyst Digest
+         * @description The analyst's morning: every read with why the screen picked the player,
+         *     what the read came to, the note it left with the stored items it rests on,
+         *     and what it says against a note written by hand. Beside each, the player
+         *     on the live projection and boards and on the second ones, which have the
+         *     analyst's notes applied and which nothing else reads. `moved` is the
+         *     widest moves between the two points boards that morning, and `spend` the
+         *     month's bill for reads from the backend's ledger.
+         *
+         *     In shadow this is the only place the analyst's work shows. To act on a
+         *     read, save a note of your own from it: a note written by hand is the one
+         *     applied wherever a player has both.
+         */
+        get: operations["get_analyst_digest_v1_dashboard_projections_analyst_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/projections/note/preview": {
         parameters: {
             query?: never;
@@ -505,6 +535,43 @@ export interface paths {
          *     Pass ?date=YYYY-MM-DD to backfill all pipelines for a specific date.
          */
         post: operations["trigger_all_pipelines_sync_v1_internal_pipelines_all_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/internal/pipelines/analyst": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Analyst
+         * @description Trigger the analyst's morning run, in shadow (the Live rankings plan, step 4).
+         *
+         *     A fixed screen picks the players whose stored news might say something a
+         *     box score cannot; each gets one read from the backend's analyst, whose
+         *     proposal is checked here (it must cite a stored item and stay inside its
+         *     bounds) before it becomes a note in nba.projection_adjustments' `analyst`
+         *     scope. Every read is logged in nba.analyst_reads. Then the morning's
+         *     projection is built again with those notes applied (`cv_live_shadow`) and
+         *     the backend's two boards on it are stored under the source `cv_shadow`.
+         *     Nothing a user sees reads any of it.
+         *
+         *     It has no cron job of its own: the daily-rankings trigger starts it once
+         *     the day's projection and boards are stored, and again on each later tick
+         *     until a run has succeeded. This route is the same run on demand, and a run
+         *     on demand is never a second bill: a player whose facts are the ones his
+         *     last completed read saw is not read again. The run takes minutes, so the
+         *     route answers at once unless `wait` is set; the reads show in the
+         *     projections editor's digest as they finish.
+         */
+        post: operations["trigger_analyst_v1_internal_pipelines_analyst_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1677,6 +1744,70 @@ export interface components {
             status: components["schemas"]["ApiStatus"];
         };
         /**
+         * AnalystDigest
+         * @description A morning of the analyst in shadow.
+         */
+        AnalystDigest: {
+            /**
+             * As Of
+             * @description The morning shown; None before its first run
+             */
+            as_of: string | null;
+            /**
+             * Cost Usd
+             * @description What the morning's reads cost
+             * @default 0
+             */
+            cost_usd: number;
+            /**
+             * Counts
+             * @description Reads by outcome
+             */
+            counts: {
+                [key: string]: number;
+            };
+            /**
+             * Days
+             * @description The mornings with reads, newest first
+             */
+            days: string[];
+            /**
+             * In Shadow
+             * @description Its notes reach only the second projection and boards
+             * @default true
+             */
+            in_shadow: boolean;
+            /**
+             * Moved
+             * @description The widest moves between the two points boards that morning
+             */
+            moved: components["schemas"]["DigestMove"][];
+            /**
+             * Notes Live
+             * @description Notes of the analyst's standing today
+             * @default 0
+             */
+            notes_live: number;
+            /** Reads */
+            reads: components["schemas"]["DigestRead"][];
+            /** Season */
+            season: string;
+            /**
+             * Shadow As Of
+             * @description The morning of the newest shadow boards
+             */
+            shadow_as_of: string | null;
+            spend: components["schemas"]["DigestSpend"];
+        };
+        /** AnalystDigestResponse */
+        AnalystDigestResponse: {
+            data: components["schemas"]["AnalystDigest"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * ApiStatus
          * @description Standard API response statuses
          * @enum {string}
@@ -2080,6 +2211,149 @@ export interface components {
             /** Message */
             message: string;
             status: components["schemas"]["ApiStatus"];
+        };
+        /**
+         * DigestMove
+         * @description A player whose place on the points board the analyst's notes moved, his own note or a teammate's.
+         */
+        DigestMove: {
+            live: components["schemas"]["DigestSide"];
+            /** Name */
+            name: string;
+            /** Player Id */
+            player_id: number;
+            shadow: components["schemas"]["DigestSide"];
+            /** Team */
+            team: string | null;
+        };
+        /**
+         * DigestRead
+         * @description One read: why he was picked, what it came to, and what it would have moved.
+         */
+        DigestRead: {
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            /**
+             * Cost Usd
+             * @default 0
+             */
+            cost_usd: number;
+            /**
+             * Disagrees
+             * @description What it says against the note written by hand, which is the one applied
+             */
+            disagrees: string | null;
+            /** Id */
+            id: number;
+            /** @description The projection and boards everybody sees */
+            live: components["schemas"]["DigestSide"] | null;
+            /** Name */
+            name: string;
+            /** @description The note it left, as stored */
+            note: components["schemas"]["AdjustmentEntry"] | null;
+            /**
+             * Note Live
+             * @description Whether that note is still the analyst's live one
+             * @default false
+             */
+            note_live: boolean;
+            /**
+             * Outcome
+             * @description note | unchanged | none | retired | refused | declined | failed
+             */
+            outcome: string;
+            /**
+             * Owner Note
+             * @description Whether a note written by hand stands for him
+             * @default false
+             */
+            owner_note: boolean;
+            /** Player Id */
+            player_id: number;
+            /**
+             * Read At
+             * Format: date-time
+             */
+            read_at: string;
+            /** Reasons */
+            reasons: components["schemas"]["DigestReason"][];
+            /** @description The same with the analyst's notes applied */
+            shadow: components["schemas"]["DigestSide"] | null;
+            /** Summary */
+            summary: string | null;
+            /** Team */
+            team: string | null;
+        };
+        /** DigestReason */
+        DigestReason: {
+            /**
+             * Rule
+             * @description note_due | status_changed | new_item | teammate_change | minutes_gap | rank_gap
+             */
+            rule: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * DigestSide
+         * @description One player on one of the two projections, and where its boards rank him.
+         */
+        DigestSide: {
+            /**
+             * Categories Rank
+             * @description On the standard nine-category board
+             */
+            categories_rank: number | null;
+            /**
+             * Games
+             * @description Games he is expected to play from here
+             */
+            games: number | null;
+            /**
+             * Minutes
+             * @description A game, when he plays
+             */
+            minutes: number | null;
+            /**
+             * Points
+             * @description Points a game, when he plays
+             */
+            points: number | null;
+            /**
+             * Points Rank
+             * @description On the standard points board
+             */
+            points_rank: number | null;
+        };
+        /**
+         * DigestSpend
+         * @description The analyst's month, from the backend's ledger. None of it when the backend cannot be asked.
+         */
+        DigestSpend: {
+            /** Available */
+            available: boolean;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /** Model */
+            model: string | null;
+            /**
+             * Month Cap Usd
+             * @default 0
+             */
+            month_cap_usd: number;
+            /**
+             * Month Spent Usd
+             * @default 0
+             */
+            month_spent_usd: number;
+            /** Prompt Version */
+            prompt_version: string | null;
         };
         /**
          * EvidenceItem
@@ -3875,6 +4149,38 @@ export interface operations {
             };
         };
     };
+    get_analyst_digest_v1_dashboard_projections_analyst_get: {
+        parameters: {
+            query?: {
+                /** @description The morning to show. Omit for the newest with reads. */
+                day?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalystDigestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     preview_note_v1_dashboard_projections_note_preview_post: {
         parameters: {
             query?: never;
@@ -4349,6 +4655,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AllPipelinesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_analyst_v1_internal_pipelines_analyst_post: {
+        parameters: {
+            query?: {
+                /** @description Answer with the run's result instead of starting it in the background (it takes minutes). */
+                wait?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
                 };
             };
             /** @description Validation Error */
