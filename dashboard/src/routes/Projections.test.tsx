@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router"
 
-import { adjustmentHistoryQuery, playerNewsQuery, projectionsQuery } from "@/hooks/useProjections"
+import { adjustmentHistoryQuery, analystDigestQuery, playerNewsQuery, projectionsQuery } from "@/hooks/useProjections"
+import type { AnalystDigest, DigestRead, DigestSide } from "@/lib/analyst"
 import { ApiError } from "@/lib/api"
 import type { AdjustmentEntry, ProjectionLine, ProjectionRow, ProjectionsData } from "@/lib/projections"
 import { Projections } from "@/routes/Projections"
@@ -295,5 +296,223 @@ describe("Projections", () => {
       // No game this season and no preseason line: the live projection does not have him
       expect(render(loaded(inSeason()), "?open=3")).toContain("Not in the live projection of Nov 16")
     })
+  })
+})
+
+// ---- the analyst's morning -------------------------------------------------------------------
+
+function side(overrides: Partial<DigestSide> = {}): DigestSide {
+  return { games: 38.2, minutes: 33.5, points: 27.9, points_rank: 3, categories_rank: 2, ...overrides }
+}
+
+/** The note the analyst left for Jokić: the same facts as NOTE, in its own scope. */
+const ANALYST_NOTE: AdjustmentEntry = {
+  ...NOTE, id: 120, scope: "analyst", author: "analyst", created_at: "2026-11-20T11:02:10",
+  note: "Re-evaluated in two weeks is not back in two weeks.",
+}
+
+function read(overrides: Partial<DigestRead> = {}): DigestRead {
+  return {
+    id: 1, player_id: 1, name: "Nikola Jokić", team: "DEN", as_of: "2026-11-20", read_at: "2026-11-20T11:02:10",
+    reasons: [
+      { rule: "status_changed", text: "the availability feed moved him to out on 2026-11-19" },
+      { rule: "new_item", text: "an injury item stored since his last read" },
+    ],
+    outcome: "note", summary: "Re-evaluated in two weeks is not back in two weeks.", disagrees: null,
+    note: ANALYST_NOTE, note_live: true, owner_note: false,
+    live: side(), shadow: side({ games: 31, points_rank: 9, categories_rank: 7 }), cost_usd: 0.0431,
+    ...overrides,
+  }
+}
+
+const QUIET = read({
+  id: 2, player_id: 4, name: "Jamal Murray", reasons: [{ rule: "teammate_change", text: "Nikola Jokić went out" }],
+  outcome: "none", summary: "His role with Jokić out is already what the last ten games show.", note: null, note_live: false,
+  live: side({ points_rank: 30, categories_rank: 33 }), shadow: side({ points_rank: 30, categories_rank: 33 }), cost_usd: 0.0388,
+})
+const REFUSED = read({
+  id: 3, player_id: 2, name: "Walker Kessler", team: "LAL", reasons: [{ rule: "minutes_gap", text: "24.1 minutes a game against 30.0 projected" }],
+  outcome: "refused", summary: "Refused: it cites no stored item", note: null, note_live: false,
+  live: side({ points_rank: 57, categories_rank: 43 }), shadow: side({ points_rank: 57, categories_rank: 43 }), cost_usd: 0.0402,
+})
+
+function digest(overrides: Partial<AnalystDigest> = {}): AnalystDigest {
+  return {
+    season: "2026-27", as_of: "2026-11-20", days: ["2026-11-20", "2026-11-19"], in_shadow: true,
+    reads: [read(), QUIET, REFUSED], counts: { note: 1, none: 1, refused: 1 }, cost_usd: 0.1221, notes_live: 1,
+    shadow_as_of: "2026-11-20",
+    moved: [
+      { player_id: 1, name: "Nikola Jokić", team: "DEN", live: side(), shadow: side({ games: 31, points_rank: 9, categories_rank: 7 }) },
+      { player_id: 4, name: "Jamal Murray", team: "DEN", live: side({ points_rank: 30 }), shadow: side({ points_rank: 26 }) },
+    ],
+    spend: { available: true, enabled: true, month_spent_usd: 1.84, month_cap_usd: 40, model: "claude-opus-5-5", prompt_version: "analyst-1" },
+    ...overrides,
+  }
+}
+
+/** The analyst's morning in the cache, under the morning the address asks for (the newest when none). */
+function morning(data: AnalystDigest, day: string | null = null): QueryClient {
+  const client = new QueryClient()
+  client.setQueryData(analystDigestQuery(day).queryKey, data)
+  return client
+}
+
+/** One read's markup, from the list of reads alone: the board's moves name the same players. */
+function readOf(html: string, name: string): string {
+  const reads = html.split('<ol class="reads">')[1]?.split("</ol>")[0] ?? ""
+  return reads.split('<li class="read"').find((item) => item.includes(`>${name}</a>`))!
+}
+
+describe("Projections: the analyst's morning", () => {
+  test("the players are the page's first view, and the analyst's morning is one switch away", () => {
+    const players = render(loaded(payload()))
+    expect(players).toMatch(pressed("Players"))
+    expect(players).not.toContain("Moved on the second board")
+
+    const html = render(morning(digest()), "?view=analyst")
+    expect(html).toMatch(pressed("Analyst"))
+    // Its own head: what it is, what it runs on, the month against its cap, and where its runs are
+    expect(html).toContain("The analyst&#x27;s morning for 2026-27, in shadow.")
+    expect(html).toContain("in shadow: its notes reach only the second projection and boards")
+    expect(html).toContain("claude-opus-5-5, prompt analyst-1")
+    expect(html).toContain("$1.84 of $40.00 this month")
+    expect(html).toContain('href="/pipelines/analyst"')
+    // Republish belongs to the players' projection
+    expect(html).not.toContain(">Republish</button>")
+    expect(names(html)).toEqual([])
+  })
+
+  test("a read says why he was picked, what it came to, the note it left and what that rests on", () => {
+    const html = render(morning(digest()), "?view=analyst")
+    const jokic = readOf(html, "Nikola Jokić")
+    expect(jokic).toContain('data-outcome="note"')
+    expect(jokic).toContain(">note written</span>")
+    expect(jokic).toContain(">status changed</span>")
+    expect(jokic).toContain("the availability feed moved him to out on Nov 19")
+    expect(jokic).toContain(">new item</span>")
+    expect(jokic).toContain("$0.04 · Nov 20, 5:02 AM CT")
+    // The note as stored: what it states, how sure, when to read it again, and the report under it
+    expect(jokic).toContain(">its note</span>")
+    expect(jokic).toContain("back Dec 8 (Dec 1 to Dec 20)")
+    expect(jokic).toContain("likely · read again by Nov 30")
+    expect(jokic).toContain('href="https://example.test/jokic-knee"')
+    expect(jokic).toContain("Jokić (knee) to be re-evaluated in two weeks")
+    // The read's reason is the note's text: said once
+    expect(jokic.split("Re-evaluated in two weeks is not back in two weeks.")).toHaveLength(2)
+    // His name opens his row among the players, on his season note
+    expect(jokic).toContain('href="/projections?open=1&amp;edit=note"')
+  })
+
+  test("he is shown on both projections, and what the note moved is marked", () => {
+    const jokic = readOf(render(morning(digest()), "?view=analyst"), "Nikola Jokić")
+    const [, live, shadow] = jokic.split("<tr><th scope=\"row\">")
+    expect(live).toContain("Live</th><td>3</td><td>2</td><td>38.2</td><td>33.5</td><td>27.9</td>")
+    expect(shadow).toContain('With its notes</th><td data-moved="true">9</td><td data-moved="true">7</td><td data-moved="true">31.0</td><td>33.5</td>')
+    // A read that wrote nothing moved nothing: one line where the table would be
+    const murray = readOf(render(morning(digest()), "?view=analyst"), "Jamal Murray")
+    expect(murray).toContain("The same with its notes applied: points rank 30 · 9-cat rank 33 · 38.2 games left.")
+    expect(murray).not.toContain("<table")
+  })
+
+  test("the morning is counted, and the reads can be narrowed from the URL", () => {
+    const html = render(morning(digest()), "?view=analyst")
+    expect(html).toContain("1 note written · 1 with nothing to write · 1 refused")
+    const tile = html.split("<dt").find((cells) => cells.includes(">Reads</dt>"))!
+    expect(tile).toContain(">3</dd>")
+    expect(tile).toContain("1 went wrong")
+    expect(html.split("<dt").find((cells) => cells.includes("Morning&#x27;s cost"))).toContain("$0.04 a read")
+
+    const trouble = render(morning(digest()), "?view=analyst&reads=trouble")
+    expect(trouble).toMatch(pressed("Went wrong"))
+    expect(trouble).toContain(">1 of 3</span>")
+    const kessler = readOf(trouble, "Walker Kessler")
+    expect(kessler).toContain(">refused</span>")
+    expect(kessler).toContain("Refused: it cites no stored item")
+    expect(readOf(trouble, "Jamal Murray")).toBeUndefined()
+    expect(readOf(trouble, "Nikola Jokić")).toBeUndefined()
+
+    const clean = render(morning(digest({ reads: [QUIET], counts: { none: 1 } })), "?view=analyst&reads=trouble")
+    expect(clean).toContain("No read of that kind that morning.")
+  })
+
+  test("a note written by hand is said to stand, with what the analyst says against it", () => {
+    const html = render(
+      morning(digest({ reads: [read({ owner_note: true, disagrees: "The team now says four weeks; your note has him back Dec 8." })] })),
+      "?view=analyst",
+    )
+    const jokic = readOf(html, "Nikola Jokić")
+    expect(jokic).toContain(">your note stands</span>")
+    expect(jokic).toContain(">against your note</span>")
+    expect(jokic).toContain("The team now says four weeks; your note has him back Dec 8.")
+  })
+
+  test("a note a later read replaced is not shown as its live one", () => {
+    const html = render(morning(digest({ reads: [read({ note_live: false, note: { ...ANALYST_NOTE, standing: null } })] })), "?view=analyst")
+    const jokic = readOf(html, "Nikola Jokić")
+    expect(jokic).toContain(">replaced since</span>")
+    expect(jokic).not.toContain(">in force</span>")
+  })
+
+  test("the widest moves between the two points boards are listed, with places gained and lost", () => {
+    const html = render(morning(digest()), "?view=analyst")
+    expect(html).toContain("second boards of Nov 20")
+    const moved = html.split('<table class="table moved">')[1]
+    const jokic = moved.split("<tr").find((cells) => cells.includes("Nikola Jokić"))!
+    expect(jokic).toMatch(/>3<\/td><td[^>]*>9<\/td><td class="num bad">−6<\/td>/)
+    expect(jokic).toContain(">38.2 → 31.0</td>")
+    const murray = moved.split("<tr").find((cells) => cells.includes("Jamal Murray"))!
+    expect(murray).toMatch(/>30<\/td><td[^>]*>26<\/td><td class="num good">\+4<\/td>/)
+    // A number the notes left alone is shown once
+    expect(murray).toContain(">38.2</td>")
+
+    const still = render(morning(digest({ moved: [] })), "?view=analyst")
+    expect(still).toContain("Nobody&#x27;s place differs between the two boards.")
+  })
+
+  test("another morning is asked for by the address, and the picker lists the mornings with reads", () => {
+    const yesterday = digest({ as_of: "2026-11-19", reads: [QUIET], counts: { none: 1 }, cost_usd: 0.0388 })
+    const html = render(morning(yesterday, "2026-11-19"), "?view=analyst&day=2026-11-19")
+    expect(html).toContain('<option value="2026-11-20">Nov 20 (newest)</option>')
+    expect(html).toContain('<option value="2026-11-19" selected="">Nov 19</option>')
+    expect(readOf(html, "Jamal Murray")).toContain(">nothing to write</span>")
+    // Not a date: the newest morning, not a request for nonsense
+    expect(render(morning(digest()), "?view=analyst&day=yesterday")).toContain(">note written</span>")
+    // One morning needs no picker
+    expect(render(morning(digest({ days: ["2026-11-20"] })), "?view=analyst")).not.toContain("<select")
+  })
+
+  test("before its first run, switched off, or with the backend silent, the page says so", () => {
+    const never = render(
+      morning(digest({ as_of: null, days: [], reads: [], counts: {}, cost_usd: 0, notes_live: 0, shadow_as_of: null, moved: [] })),
+      "?view=analyst",
+    )
+    expect(never).toContain("The analyst has not read anybody yet.")
+    expect(never).not.toContain("Moved on the second board")
+    expect(never).toContain("$1.84 of $40.00 this month")
+
+    const off = render(morning(digest({ spend: { ...digest().spend, enabled: false } })), "?view=analyst")
+    expect(off).toContain("switched off on the backend · $1.84 of $40.00 this month")
+    const silent = render(
+      morning(digest({ spend: { available: false, enabled: false, month_spent_usd: 0, month_cap_usd: 0, model: null, prompt_version: null } })),
+      "?view=analyst",
+    )
+    expect(silent).toContain("the backend could not be asked about the month&#x27;s spend")
+    expect(silent.split("<dt").find((cells) => cells.includes(">This month</dt>"))).toContain("the backend did not answer")
+  })
+
+  test("a failed load says so; a failed refresh keeps the last good morning", () => {
+    const empty = new QueryClient()
+    const failed = empty.getQueryCache().build(empty, { queryKey: analystDigestQuery(null).queryKey })
+    failed.setState({ status: "error", error: new ApiError(502, "Bad Gateway"), fetchStatus: "idle" })
+    const html = render(empty, "?view=analyst")
+    expect(html).toContain("Could not load the analyst&#x27;s morning: Bad Gateway")
+    expect(html).not.toContain("<table")
+
+    const stale = morning(digest())
+    stale.getQueryCache().find({ queryKey: analystDigestQuery(null).queryKey })!
+      .setState({ error: new ApiError(502, "Bad Gateway"), status: "error" })
+    const kept = render(stale, "?view=analyst")
+    expect(kept).toContain("Showing the last good data.")
+    expect(kept).toContain(">note written</span>")
   })
 })

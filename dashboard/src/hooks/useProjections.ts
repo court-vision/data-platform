@@ -26,10 +26,13 @@ export function projectionsQuery() {
   })
 }
 
-/** Every projected player: the four lines, the ranks, the live adjustment. */
-export function useProjections() {
+/**
+ * Every projected player: the four lines, the ranks, the live adjustment.
+ * Off while the page shows the analyst's morning, which needs none of it.
+ */
+export function useProjections(enabled = true) {
   const token = useToken()
-  return useQuery({ ...projectionsQuery(), enabled: token !== null })
+  return useQuery({ ...projectionsQuery(), enabled: enabled && token !== null })
 }
 
 export function adjustmentHistoryQuery(playerId: number) {
@@ -164,6 +167,27 @@ export function useRetireNote() {
     onError: (error, { name }) => toast.error(`${name}: note not retired`, { description: error.message }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: PROJECTIONS_KEY }),
   })
+}
+
+// ---- the analyst, in shadow ------------------------------------------------------------------
+
+/** `day` null is the newest morning with reads. */
+export function analystDigestQuery(day: string | null) {
+  return queryOptions({
+    queryKey: [...PROJECTIONS_KEY, "analyst", day ?? "newest"] as const,
+    queryFn: async () =>
+      (await apiFetch<Schemas["AnalystDigestResponse"]>(`${BASE}/analyst${day ? `?day=${encodeURIComponent(day)}` : ""}`)).data,
+    // A run's reads land over a few minutes; a page left open on the morning should not sit on its first few
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    retry: (failures, error) => giveUpOn(error, failures),
+  })
+}
+
+/** A morning of the analyst: its reads, the notes they left, what those moved and the month's spend. */
+export function useAnalystDigest(day: string | null, enabled: boolean) {
+  const token = useToken()
+  return useQuery({ ...analystDigestQuery(day), enabled: enabled && token !== null })
 }
 
 /** Run cv-projection by hand: for a snapshot a failed republish left behind. */
