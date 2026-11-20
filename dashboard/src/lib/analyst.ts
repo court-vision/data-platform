@@ -229,6 +229,17 @@ export function pointsMove(move: Pick<DigestMove, "live" | "shadow">): string {
   return rankMove(move.live.points_rank ?? null, move.shadow.points_rank ?? null)
 }
 
+/**
+ * The day whose two boards a morning's moves are read off: that morning's own.
+ * `shadow_as_of` is the newest day with second boards whichever morning is
+ * shown, so it says only whether this morning's can be stored yet, never
+ * which boards are being compared. Null when they cannot be.
+ */
+export function movedBoardsDay(digest: Pick<AnalystDigest, "as_of" | "shadow_as_of">): string | null {
+  if (digest.as_of == null || digest.shadow_as_of == null || digest.shadow_as_of < digest.as_of) return null
+  return digest.as_of
+}
+
 /** The morning named in the picker: "Nov 20", and "Nov 20 (newest)" for the first. */
 export function dayLabel(day: string, days: readonly string[]): string {
   return day === days[0] ? `${formatDay(day)} (newest)` : formatDay(day)

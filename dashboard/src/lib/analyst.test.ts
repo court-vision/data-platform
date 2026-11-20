@@ -8,6 +8,7 @@ import {
   describeSpend,
   formatSide,
   matchesRead,
+  movedBoardsDay,
   outcomeOf,
   pointsMove,
   ruleLabel,
@@ -163,6 +164,16 @@ describe("the two projections", () => {
     expect(pointsMove({ live: side({ points_rank: 41 }), shadow: side({ points_rank: 37 }) })).toBe("+4")
     expect(pointsMove({ live: side(), shadow: side() })).toBe("")
     expect(pointsMove({ live: side({ points_rank: null }), shadow: side() })).toBe("")
+  })
+
+  test("a morning's moves are read off its own two boards, when its second boards can be stored", () => {
+    expect(movedBoardsDay({ as_of: "2026-11-20", shadow_as_of: "2026-11-20" })).toBe("2026-11-20")
+    // An older morning: the newest second boards are a later day's, and are not the ones compared
+    expect(movedBoardsDay({ as_of: "2026-11-19", shadow_as_of: "2026-11-20" })).toBe("2026-11-19")
+    // Read, but its second boards are not stored yet; and no second boards at all
+    expect(movedBoardsDay({ as_of: "2026-11-20", shadow_as_of: "2026-11-19" })).toBeNull()
+    expect(movedBoardsDay({ as_of: "2026-11-20", shadow_as_of: null })).toBeNull()
+    expect(movedBoardsDay({ as_of: null, shadow_as_of: null })).toBeNull()
   })
 
   test("the newest morning is marked in the picker", () => {

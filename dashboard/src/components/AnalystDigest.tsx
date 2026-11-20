@@ -9,6 +9,7 @@ import {
   describeSide,
   describeSpend,
   formatSide,
+  movedBoardsDay,
   outcomeOf,
   pointsMove,
   READ_FILTERS,
@@ -67,6 +68,7 @@ export function AnalystDigestView({
 }) {
   const spend = describeSpend(digest.spend)
   const reads = visibleReads(digest.reads, show)
+  const boardsDay = movedBoardsDay(digest)
 
   return (
     <>
@@ -124,11 +126,13 @@ export function AnalystDigestView({
           <Block
             title="Moved on the second board"
             count={digest.moved.length}
-            note={digest.shadow_as_of ? `second boards of ${formatDay(digest.shadow_as_of)}` : "no second boards stored yet"}
+            note={boardsDay ? `the two boards of ${formatDay(boardsDay)}` : "no second boards stored for that morning yet"}
             text="The widest moves between the two standard points boards that morning: the live one, and the one priced on the projection with the analyst's notes applied. A player moves for his own note or for a teammate's."
           >
             {digest.moved.length === 0 ? (
-              <p className={s.empty}>Nobody's place differs between the two boards.</p>
+              <p className={s.empty}>
+                {boardsDay ? "Nobody's place differs between the two boards." : "The second boards of that morning are not stored yet, so there is nothing to compare."}
+              </p>
             ) : (
               <MovedTable moved={digest.moved} playerLink={playerLink} />
             )}

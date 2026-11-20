@@ -455,7 +455,7 @@ describe("Projections: the analyst's morning", () => {
 
   test("the widest moves between the two points boards are listed, with places gained and lost", () => {
     const html = render(morning(digest()), "?view=analyst")
-    expect(html).toContain("second boards of Nov 20")
+    expect(html).toContain("the two boards of Nov 20")
     const moved = html.split('<table class="table moved">')[1]
     const jokic = moved.split("<tr").find((cells) => cells.includes("Nikola Jokić"))!
     expect(jokic).toMatch(/>3<\/td><td[^>]*>9<\/td><td class="num bad">−6<\/td>/)
@@ -467,6 +467,19 @@ describe("Projections: the analyst's morning", () => {
 
     const still = render(morning(digest({ moved: [] })), "?view=analyst")
     expect(still).toContain("Nobody&#x27;s place differs between the two boards.")
+  })
+
+  test("an older morning's moves are dated by that morning, not by the newest second boards", () => {
+    // shadow_as_of stays the newest day with second boards, whichever morning is shown
+    const yesterday = render(morning(digest({ as_of: "2026-11-19" }), "2026-11-19"), "?view=analyst&day=2026-11-19")
+    expect(yesterday).toContain("the two boards of Nov 19")
+    expect(yesterday).not.toContain("boards of Nov 20")
+
+    // A morning read before its second boards were stored has nothing to compare, and says so
+    const early = render(morning(digest({ shadow_as_of: "2026-11-19", moved: [] })), "?view=analyst")
+    expect(early).toContain("no second boards stored for that morning yet")
+    expect(early).toContain("The second boards of that morning are not stored yet, so there is nothing to compare.")
+    expect(early).not.toContain("Nobody&#x27;s place differs")
   })
 
   test("another morning is asked for by the address, and the picker lists the mornings with reads", () => {
