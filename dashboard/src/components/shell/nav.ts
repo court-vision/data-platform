@@ -1,9 +1,9 @@
-import { Activity, Database, FlaskConical, SlidersHorizontal, Timer, UserX, type LucideIcon } from "lucide-react"
+import { Activity, Coins, Database, FlaskConical, SlidersHorizontal, Timer, UserX, type LucideIcon } from "lucide-react"
 
 export interface Page {
   to: string
   label: string
-  /** Shown instead of the label on a phone, where six words do not fit the bar. */
+  /** Shown instead of the label on a phone, where seven words do not fit the bar. */
   icon: LucideIcon
   /** The number key that opens it. */
   key: string
@@ -17,6 +17,7 @@ export const PAGES: readonly Page[] = [
   { to: "/projections", label: "Projections", icon: SlidersHorizontal, key: "4" },
   { to: "/latency", label: "Latency", icon: Timer, key: "5" },
   { to: "/availability", label: "Availability", icon: UserX, key: "6" },
+  { to: "/ai-spend", label: "AI spend", icon: Coins, key: "7" },
 ]
 
 /**

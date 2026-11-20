@@ -548,6 +548,660 @@
         "title": "AdjustmentSavedResponse",
         "type": "object"
       },
+      "AiCapData": {
+        "properties": {
+          "cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In force; null: no cap of the user's own on this line",
+            "title": "Cap Micros"
+          },
+          "cap_set": {
+            "default": false,
+            "description": "Set from this page",
+            "title": "Cap Set",
+            "type": "boolean"
+          },
+          "default_cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What applies with no cap set; null: none",
+            "title": "Default Cap Micros"
+          },
+          "line": {
+            "enum": [
+              "desk",
+              "autopilot",
+              "analyst"
+            ],
+            "title": "Line",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "cap_micros",
+          "default_cap_micros",
+          "cap_set",
+          "updated_at",
+          "updated_by",
+          "line",
+          "user_id"
+        ],
+        "title": "AiCapData",
+        "type": "object"
+      },
+      "AiCapRequest": {
+        "description": "Set a line's monthly cap (no `user_id`) or one user's on the desk or autopilot\nline. `monthly_usd` null clears it: the backend's default applies again.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "line": {
+            "enum": [
+              "desk",
+              "autopilot",
+              "analyst"
+            ],
+            "title": "Line",
+            "type": "string"
+          },
+          "monthly_usd": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,4}|(?=[\\d.]{1,7}0*$)\\d{0,4}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Usd"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "line"
+        ],
+        "title": "AiCapRequest",
+        "type": "object"
+      },
+      "AiCapResponse": {
+        "description": "Response for PUT /v1/dashboard/ai-spend/caps.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AiCapData"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "AiCapResponse",
+        "type": "object"
+      },
+      "AiSpendLine": {
+        "description": "One line's month so far.",
+        "properties": {
+          "cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In force; null: no cap of the user's own on this line",
+            "title": "Cap Micros"
+          },
+          "cap_set": {
+            "default": false,
+            "description": "Set from this page",
+            "title": "Cap Set",
+            "type": "boolean"
+          },
+          "default_cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What applies with no cap set; null: none",
+            "title": "Default Cap Micros"
+          },
+          "line": {
+            "enum": [
+              "desk",
+              "autopilot",
+              "analyst"
+            ],
+            "title": "Line",
+            "type": "string"
+          },
+          "open_micros": {
+            "description": "This month, reserved and not settled: running now, or died mid-call and counted at its ceiling",
+            "title": "Open Micros",
+            "type": "integer"
+          },
+          "spent_micros": {
+            "description": "This month, settled",
+            "title": "Spent Micros",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "required": [
+          "cap_micros",
+          "default_cap_micros",
+          "cap_set",
+          "updated_at",
+          "updated_by",
+          "line",
+          "spent_micros",
+          "open_micros"
+        ],
+        "title": "AiSpendLine",
+        "type": "object"
+      },
+      "AiSpendReport": {
+        "properties": {
+          "as_of": {
+            "format": "date-time",
+            "title": "As Of",
+            "type": "string"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/AiSpendLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "month_start": {
+            "format": "date",
+            "title": "Month Start",
+            "type": "string"
+          },
+          "read_max_micros": {
+            "description": "What one analyst read reserves before it starts",
+            "title": "Read Max Micros",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/AiSpendRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "since": {
+            "description": "First UTC day of the window",
+            "format": "date",
+            "title": "Since",
+            "type": "string"
+          },
+          "teams": {
+            "items": {
+              "$ref": "#/components/schemas/AiSpendTeam"
+            },
+            "title": "Teams",
+            "type": "array"
+          },
+          "turn_max_micros": {
+            "description": "What one desk turn or check-in reserves before it starts",
+            "title": "Turn Max Micros",
+            "type": "integer"
+          },
+          "usage": {
+            "items": {
+              "$ref": "#/components/schemas/AiUsageRow"
+            },
+            "title": "Usage",
+            "type": "array"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/AiSpendUser"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "as_of",
+          "month_start",
+          "since",
+          "days",
+          "turn_max_micros",
+          "read_max_micros",
+          "lines",
+          "rows",
+          "usage",
+          "users",
+          "teams"
+        ],
+        "title": "AiSpendReport",
+        "type": "object"
+      },
+      "AiSpendResponse": {
+        "description": "Response for GET /v1/dashboard/ai-spend.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AiSpendReport"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "AiSpendResponse",
+        "type": "object"
+      },
+      "AiSpendRow": {
+        "description": "The ledger over the window, per UTC day, line, feature, user and team.",
+        "properties": {
+          "cost_micros": {
+            "description": "Settled and open together, as the caps count it",
+            "title": "Cost Micros",
+            "type": "integer"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A check-in's kind: morning, weekly, pre_lock, night, event",
+            "title": "Detail"
+          },
+          "entries": {
+            "title": "Entries",
+            "type": "integer"
+          },
+          "feature": {
+            "enum": [
+              "chat",
+              "draft",
+              "checkin_reply",
+              "checkin",
+              "analyst",
+              "unlinked"
+            ],
+            "title": "Feature",
+            "type": "string"
+          },
+          "line": {
+            "enum": [
+              "desk",
+              "autopilot",
+              "analyst"
+            ],
+            "title": "Line",
+            "type": "string"
+          },
+          "open_micros": {
+            "title": "Open Micros",
+            "type": "integer"
+          },
+          "team_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "day",
+          "line",
+          "feature",
+          "detail",
+          "user_id",
+          "team_id",
+          "cost_micros",
+          "open_micros",
+          "entries"
+        ],
+        "title": "AiSpendRow",
+        "type": "object"
+      },
+      "AiSpendTeam": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "team_id": {
+            "title": "Team Id",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team_id",
+          "user_id",
+          "name"
+        ],
+        "title": "AiSpendTeam",
+        "type": "object"
+      },
+      "AiSpendUser": {
+        "properties": {
+          "allowed": {
+            "description": "On the AI desk's allowlist (AI_AGENT_USER_IDS)",
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "autopilot": {
+            "$ref": "#/components/schemas/AiUserLine"
+          },
+          "desk": {
+            "$ref": "#/components/schemas/AiUserLine"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "allowed",
+          "desk",
+          "autopilot"
+        ],
+        "title": "AiSpendUser",
+        "type": "object"
+      },
+      "AiUsageRow": {
+        "description": "What each call's record says it used, per UTC day, feature and model.",
+        "properties": {
+          "cache_creation_input_tokens": {
+            "title": "Cache Creation Input Tokens",
+            "type": "integer"
+          },
+          "cache_read_input_tokens": {
+            "title": "Cache Read Input Tokens",
+            "type": "integer"
+          },
+          "cost_micros": {
+            "title": "Cost Micros",
+            "type": "integer"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "feature": {
+            "enum": [
+              "chat",
+              "draft",
+              "checkin_reply",
+              "checkin",
+              "analyst",
+              "unlinked"
+            ],
+            "title": "Feature",
+            "type": "string"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "model_calls": {
+            "title": "Model Calls",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "records": {
+            "description": "Turns, or analyst reads",
+            "title": "Records",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "feature",
+          "model",
+          "records",
+          "model_calls",
+          "input_tokens",
+          "output_tokens",
+          "cache_read_input_tokens",
+          "cache_creation_input_tokens",
+          "cost_micros"
+        ],
+        "title": "AiUsageRow",
+        "type": "object"
+      },
+      "AiUserLine": {
+        "properties": {
+          "cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In force; null: no cap of the user's own on this line",
+            "title": "Cap Micros"
+          },
+          "cap_set": {
+            "default": false,
+            "description": "Set from this page",
+            "title": "Cap Set",
+            "type": "boolean"
+          },
+          "default_cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What applies with no cap set; null: none",
+            "title": "Default Cap Micros"
+          },
+          "spent_micros": {
+            "description": "This month, settled and open",
+            "title": "Spent Micros",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "required": [
+          "cap_micros",
+          "default_cap_micros",
+          "cap_set",
+          "updated_at",
+          "updated_by",
+          "spent_micros"
+        ],
+        "title": "AiUserLine",
+        "type": "object"
+      },
       "AllPipelinesResponse": {
         "description": "Response for triggering all pipelines",
         "properties": {
@@ -5855,6 +6509,106 @@
           }
         },
         "summary": "Ping"
+      }
+    },
+    "/v1/dashboard/ai-spend": {
+      "get": {
+        "description": "This month's spend on each line (Dime's desk, its check-ins, the analyst)\nagainst its cap, the ledger over the window by day, feature, user and team,\nwhat each call's record says it used (model and tokens), and every user with\nspend or a cap.",
+        "operationId": "get_ai_spend_v1_dashboard_ai_spend_get",
+        "parameters": [
+          {
+            "description": "How many UTC days back, today included",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "description": "How many UTC days back, today included",
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiSpendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Ai Spend",
+        "tags": [
+          "ai spend"
+        ]
+      }
+    },
+    "/v1/dashboard/ai-spend/caps": {
+      "put": {
+        "description": "Set a line's monthly cap, or one user's on the desk or autopilot line, from the\nnext turn, check-in or read on. `monthly_usd` null clears it, and the backend's\ndefault applies again. `author` is the name typed on the page.",
+        "operationId": "put_ai_cap_v1_dashboard_ai_spend_caps_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiCapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiCapResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Ai Cap",
+        "tags": [
+          "ai spend"
+        ]
       }
     },
     "/v1/dashboard/availability": {

@@ -38,6 +38,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/ai-spend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ai Spend
+         * @description This month's spend on each line (Dime's desk, its check-ins, the analyst)
+         *     against its cap, the ledger over the window by day, feature, user and team,
+         *     what each call's record says it used (model and tokens), and every user with
+         *     spend or a cap.
+         */
+        get: operations["get_ai_spend_v1_dashboard_ai_spend_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/dashboard/ai-spend/caps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Ai Cap
+         * @description Set a line's monthly cap, or one user's on the desk or autopilot line, from the
+         *     next turn, check-in or read on. `monthly_usd` null clears it, and the backend's
+         *     default applies again. `author` is the name typed on the page.
+         */
+        put: operations["put_ai_cap_v1_dashboard_ai_spend_caps_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/availability": {
         parameters: {
             query?: never;
@@ -1729,6 +1774,283 @@ export interface components {
             message: string;
             /** Status */
             status: string;
+        };
+        /** AiCapData */
+        AiCapData: {
+            /**
+             * Cap Micros
+             * @description In force; null: no cap of the user's own on this line
+             */
+            cap_micros: number | null;
+            /**
+             * Cap Set
+             * @description Set from this page
+             * @default false
+             */
+            cap_set: boolean;
+            /**
+             * Default Cap Micros
+             * @description What applies with no cap set; null: none
+             */
+            default_cap_micros: number | null;
+            /**
+             * Line
+             * @enum {string}
+             */
+            line: "desk" | "autopilot" | "analyst";
+            /** Updated At */
+            updated_at: string | null;
+            /** Updated By */
+            updated_by: string | null;
+            /** User Id */
+            user_id: number | null;
+        };
+        /**
+         * AiCapRequest
+         * @description Set a line's monthly cap (no `user_id`) or one user's on the desk or autopilot
+         *     line. `monthly_usd` null clears it: the backend's default applies again.
+         */
+        AiCapRequest: {
+            /** Author */
+            author?: string | null;
+            /**
+             * Line
+             * @enum {string}
+             */
+            line: "desk" | "autopilot" | "analyst";
+            /** Monthly Usd */
+            monthly_usd?: number | string | null;
+            /** User Id */
+            user_id?: number | null;
+        };
+        /**
+         * AiCapResponse
+         * @description Response for PUT /v1/dashboard/ai-spend/caps.
+         */
+        AiCapResponse: {
+            data: components["schemas"]["AiCapData"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * AiSpendLine
+         * @description One line's month so far.
+         */
+        AiSpendLine: {
+            /**
+             * Cap Micros
+             * @description In force; null: no cap of the user's own on this line
+             */
+            cap_micros: number | null;
+            /**
+             * Cap Set
+             * @description Set from this page
+             * @default false
+             */
+            cap_set: boolean;
+            /**
+             * Default Cap Micros
+             * @description What applies with no cap set; null: none
+             */
+            default_cap_micros: number | null;
+            /**
+             * Line
+             * @enum {string}
+             */
+            line: "desk" | "autopilot" | "analyst";
+            /**
+             * Open Micros
+             * @description This month, reserved and not settled: running now, or died mid-call and counted at its ceiling
+             */
+            open_micros: number;
+            /**
+             * Spent Micros
+             * @description This month, settled
+             */
+            spent_micros: number;
+            /** Updated At */
+            updated_at: string | null;
+            /** Updated By */
+            updated_by: string | null;
+        };
+        /** AiSpendReport */
+        AiSpendReport: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /** Days */
+            days: number;
+            /** Lines */
+            lines: components["schemas"]["AiSpendLine"][];
+            /**
+             * Month Start
+             * Format: date
+             */
+            month_start: string;
+            /**
+             * Read Max Micros
+             * @description What one analyst read reserves before it starts
+             */
+            read_max_micros: number;
+            /** Rows */
+            rows: components["schemas"]["AiSpendRow"][];
+            /**
+             * Since
+             * Format: date
+             * @description First UTC day of the window
+             */
+            since: string;
+            /** Teams */
+            teams: components["schemas"]["AiSpendTeam"][];
+            /**
+             * Turn Max Micros
+             * @description What one desk turn or check-in reserves before it starts
+             */
+            turn_max_micros: number;
+            /** Usage */
+            usage: components["schemas"]["AiUsageRow"][];
+            /** Users */
+            users: components["schemas"]["AiSpendUser"][];
+        };
+        /**
+         * AiSpendResponse
+         * @description Response for GET /v1/dashboard/ai-spend.
+         */
+        AiSpendResponse: {
+            data: components["schemas"]["AiSpendReport"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * AiSpendRow
+         * @description The ledger over the window, per UTC day, line, feature, user and team.
+         */
+        AiSpendRow: {
+            /**
+             * Cost Micros
+             * @description Settled and open together, as the caps count it
+             */
+            cost_micros: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /**
+             * Detail
+             * @description A check-in's kind: morning, weekly, pre_lock, night, event
+             */
+            detail: string | null;
+            /** Entries */
+            entries: number;
+            /**
+             * Feature
+             * @enum {string}
+             */
+            feature: "chat" | "draft" | "checkin_reply" | "checkin" | "analyst" | "unlinked";
+            /**
+             * Line
+             * @enum {string}
+             */
+            line: "desk" | "autopilot" | "analyst";
+            /** Open Micros */
+            open_micros: number;
+            /** Team Id */
+            team_id: number | null;
+            /** User Id */
+            user_id: number | null;
+        };
+        /** AiSpendTeam */
+        AiSpendTeam: {
+            /** Name */
+            name: string;
+            /** Team Id */
+            team_id: number;
+            /** User Id */
+            user_id: number;
+        };
+        /** AiSpendUser */
+        AiSpendUser: {
+            /**
+             * Allowed
+             * @description On the AI desk's allowlist (AI_AGENT_USER_IDS)
+             */
+            allowed: boolean;
+            autopilot: components["schemas"]["AiUserLine"];
+            desk: components["schemas"]["AiUserLine"];
+            /** Email */
+            email: string;
+            /** User Id */
+            user_id: number;
+        };
+        /**
+         * AiUsageRow
+         * @description What each call's record says it used, per UTC day, feature and model.
+         */
+        AiUsageRow: {
+            /** Cache Creation Input Tokens */
+            cache_creation_input_tokens: number;
+            /** Cache Read Input Tokens */
+            cache_read_input_tokens: number;
+            /** Cost Micros */
+            cost_micros: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /**
+             * Feature
+             * @enum {string}
+             */
+            feature: "chat" | "draft" | "checkin_reply" | "checkin" | "analyst" | "unlinked";
+            /** Input Tokens */
+            input_tokens: number;
+            /** Model */
+            model: string;
+            /** Model Calls */
+            model_calls: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /**
+             * Records
+             * @description Turns, or analyst reads
+             */
+            records: number;
+        };
+        /** AiUserLine */
+        AiUserLine: {
+            /**
+             * Cap Micros
+             * @description In force; null: no cap of the user's own on this line
+             */
+            cap_micros: number | null;
+            /**
+             * Cap Set
+             * @description Set from this page
+             * @default false
+             */
+            cap_set: boolean;
+            /**
+             * Default Cap Micros
+             * @description What applies with no cap set; null: none
+             */
+            default_cap_micros: number | null;
+            /**
+             * Spent Micros
+             * @description This month, settled and open
+             */
+            spent_micros: number;
+            /** Updated At */
+            updated_at: string | null;
+            /** Updated By */
+            updated_by: string | null;
         };
         /**
          * AllPipelinesResponse
@@ -3968,6 +4290,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_ai_spend_v1_dashboard_ai_spend_get: {
+        parameters: {
+            query?: {
+                /** @description How many UTC days back, today included */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiSpendResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_ai_cap_v1_dashboard_ai_spend_caps_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiCapRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiCapResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
