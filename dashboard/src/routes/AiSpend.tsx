@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from "react"
+import { useId, useRef, useState, type FormEvent } from "react"
 import { useSearchParams } from "react-router"
 
 import { Block, Choice, Head, Notice, Page, RefreshNote, Sep, SheetSkeleton, Tag, Tiles, type TileSpec } from "@/components/blocks"
@@ -255,7 +255,7 @@ function CapsBlock({ data }: { data: AiSpendReport }) {
   )
 }
 
-function UserLineCells({ line, label, onSave }: { line: UserLine; label: string; onSave: (usd: string | null) => Promise<unknown> }) {
+function UserLineCells({ line, label, onSave }: { line: UserLine; label: string; onSave: SaveCap }) {
   return (
     <>
       <td className={s.num}>
@@ -301,6 +301,9 @@ function SetBy({ cap }: { cap: { cap_set: boolean; updated_by?: string | null; u
   )
 }
 
+/** Saves one cap ("25", or null for the default) and answers with the cap now in force. */
+type SaveCap = (usd: string | null) => Promise<{ data: { cap_micros?: number | null } }>
+
 /** The cap in force, editable: Save writes it, Default clears a cap set here. */
 export function CapEditor({
   label,
@@ -309,7 +312,7 @@ export function CapEditor({
 }: {
   label: string
   cap: { cap_micros?: number | null; default_cap_micros?: number | null; cap_set: boolean }
-  onSave: (usd: string | null) => Promise<unknown>
+  onSave: SaveCap
 }) {
   const shown = capInput(cap.cap_micros)
   const [text, setText] = useState(shown)
@@ -318,6 +321,8 @@ export function CapEditor({
   // The report value the field last followed, and whether this field's own save just landed
   const [base, setBase] = useState(shown)
   const [saved, setSaved] = useState(false)
+  // Counts keystrokes, so a save that lands after more typing leaves that typing be
+  const edits = useRef(0)
   const inputId = useId()
 
   // A fresh report (after a save here or elsewhere, or on the minute) moves an
@@ -333,13 +338,18 @@ export function CapEditor({
   }
 
   async function run(usd: string | null) {
+    const before = edits.current
     setBusy(true)
     try {
-      await onSave(usd)
-      // Written as the report will show it ("12.50" comes back "12.5"), and the
-      // report's next value is this field's to take
-      if (usd != null) setText(String(Number(usd)))
-      setSaved(true)
+      const answer = await onSave(usd)
+      if (edits.current === before) {
+        // Nothing typed since: the field shows the cap as the backend now has it
+        // ("12.50" comes back "12.5", Default the cap it went back to), and the
+        // report's next value is this field's to take
+        setText(capInput(answer.data.cap_micros))
+        setError(null)
+        setSaved(true)
+      }
     } catch {
       // the toast says why; the field keeps what was typed
     } finally {
@@ -372,6 +382,7 @@ export function CapEditor({
         value={text}
         aria-invalid={error ? true : undefined}
         onChange={(event) => {
+          edits.current += 1
           setText(event.target.value)
           setSaved(false)
         }}

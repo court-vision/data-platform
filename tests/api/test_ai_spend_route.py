@@ -42,17 +42,20 @@ class FakeClient:
     def __init__(self):
         self.calls = []
         self.fail = None
+        self.answer = None
 
     def report(self, days, correlation_id=None):
         self.calls.append(("report", days))
         if self.fail:
             raise self.fail
-        return REPORT
+        return REPORT if self.answer is None else self.answer
 
     def set_cap(self, body, correlation_id=None):
         self.calls.append(("set_cap", body))
         if self.fail:
             raise self.fail
+        if self.answer is not None:
+            return self.answer
         return {"line": body["line"], "user_id": body["user_id"], "cap_micros": 25_000_000,
                 "default_cap_micros": 50_000_000, "cap_set": True, "updated_at": "2026-11-20T12:00:00Z",
                 "updated_by": body["author"]}
@@ -137,3 +140,22 @@ def test_the_backend_s_refusal_comes_back_in_its_words(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "No user 999"
+
+
+def test_a_backend_answer_that_is_not_a_report_is_a_502(client):
+    client.fake.answer = {}
+
+    response = client.get("/v1/dashboard/ai-spend", headers=_AUTH)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The backend could not be asked (malformed_response)"
+
+
+def test_a_backend_answer_that_is_not_a_cap_is_a_502_and_is_not_sent_again(client):
+    client.fake.answer = {"line": "everything"}
+
+    response = client.put("/v1/dashboard/ai-spend/caps", headers=_AUTH, json={"line": "desk", "monthly_usd": 5})
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The backend could not be asked (malformed_response)"
+    assert len(client.fake.calls) == 1

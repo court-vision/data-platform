@@ -17,11 +17,18 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Query, Security
+from pydantic import ValidationError
 
 from core.logging import get_correlation_id
 from core.pipeline_auth import verify_pipeline_token
 from core.settings import settings
-from schemas.ai_spend import AiCapData, AiCapRequest, AiCapResponse, AiSpendReport, AiSpendResponse
+from schemas.ai_spend import (
+    AiCapData,
+    AiCapRequest,
+    AiCapResponse,
+    AiSpendReport,
+    AiSpendResponse,
+)
 from services.ai_spend_client import AiSpendClient, BackendRefused, BackendUnavailable
 
 router = APIRouter(
@@ -41,6 +48,12 @@ def _unavailable(exc: BackendUnavailable) -> HTTPException:
     return HTTPException(status_code=502, detail=f"The backend could not be asked ({exc.reason})")
 
 
+def _malformed() -> HTTPException:
+    # A 200 whose data is not the report (or the cap) is the backend's fault, not
+    # this server's: a 502, like any other answer that can't be read
+    return _unavailable(BackendUnavailable("malformed_response"))
+
+
 @router.get("", response_model=AiSpendResponse)
 async def get_ai_spend(
     days: int = Query(30, ge=1, le=MAX_DAYS, description="How many UTC days back, today included"),
@@ -57,7 +70,10 @@ async def get_ai_spend(
         raise _unavailable(exc) from exc
     except BackendRefused as exc:
         raise HTTPException(status_code=502, detail=exc.message) from exc
-    report = AiSpendReport.model_validate(data)
+    try:
+        report = AiSpendReport.model_validate(data)
+    except ValidationError as exc:
+        raise _malformed() from exc
     return AiSpendResponse(status="success", message=f"AI spend over {days} days", data=report)
 
 
@@ -80,7 +96,11 @@ async def put_ai_cap(req: AiCapRequest) -> AiCapResponse:
         raise _unavailable(exc) from exc
     except BackendRefused as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    cap = AiCapData.model_validate(data)
+    try:
+        cap = AiCapData.model_validate(data)
+    except ValidationError as exc:
+        # The cap may well be saved: the page re-reads the report either way
+        raise _malformed() from exc
     what = f"{req.line} cap" + (f" for user {req.user_id}" if req.user_id is not None else "")
     message = f"Cleared the {what}" if req.monthly_usd is None else f"Set the {what} to ${req.monthly_usd}"
     return AiCapResponse(status="success", message=message, data=cap)
