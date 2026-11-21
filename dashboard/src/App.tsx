@@ -4,6 +4,7 @@ import { AppShell } from "@/components/shell/AppShell"
 import { TokenGate } from "@/components/shell/TokenGate"
 import { DeskFrame } from "@/desk/DeskFrame"
 import { useToken } from "@/lib/token"
+import { AiSpend } from "@/routes/AiSpend"
 import { Availability } from "@/routes/Availability"
 import { Freshness } from "@/routes/Freshness"
 import { Latency } from "@/routes/Latency"
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
       { path: "latency", element: <Latency /> },
       { path: "latency/route", element: <LatencyRoute /> },
       { path: "availability", element: <Availability /> },
+      { path: "ai-spend", element: <AiSpend /> },
       { path: "*", element: <NotFound /> },
     ],
   },

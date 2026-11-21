@@ -69,6 +69,8 @@ class TestDashboardRoutesHaveConcreteSchemas:
         ("/v1/dashboard/quality", "get", "QualityOverviewResponse"),
         ("/v1/dashboard/quality/runs/{run_id}", "get", "QualityRunDetailResponse"),
         ("/v1/dashboard/availability", "get", "AvailabilityResponse"),
+        ("/v1/dashboard/ai-spend", "get", "AiSpendResponse"),
+        ("/v1/dashboard/ai-spend/caps", "put", "AiCapResponse"),
         ("/v1/internal/quality/run", "post", "DataQualityRunResponse"),
         ("/v1/internal/quality/runs", "get", "DataQualityRunListResponse"),
         ("/v1/internal/quality/runs/{run_id}", "get", "DataQualityRunResponse"),
