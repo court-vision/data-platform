@@ -13,6 +13,7 @@ import {
   niceMs,
   parseSort,
   parseWindow,
+  partRows,
   routeHref,
   segments,
   sortRoutes,
@@ -69,6 +70,15 @@ describe("latency", () => {
       "/latency/route?method=GET&route=%2Fv1%2Fplayers%2F%7Bplayer_id%7D%2Fstats&window=7d",
     )
     expect(routeHref({ method: "POST", route: "/v1/x" }, "24h")).toBe("/latency/route?method=POST&route=%2Fv1%2Fx")
+  })
+
+  test("a bar's tooltip lists its groups in the bar's order, with the buckets a folded group holds", () => {
+    const rows = partRows({ app: 40, espn: 150, clerk: 6, redis: 4, sqlmate: 0 })
+    expect(rows.map((r) => [r.group.key, r.ms, Math.round(r.share * 100)])).toEqual([["espn", 150, 75], ["app", 40, 20], ["other", 10, 5]])
+    // A group of one bucket needs no lines under it; Other names what it folded, biggest first.
+    expect(rows[0].buckets).toEqual([])
+    expect(rows[2].buckets.map((b) => [b.label, b.ms, Math.round(b.share * 100)])).toEqual([["Clerk", 6, 3], ["Redis", 4, 2]])
+    expect(partRows({})).toEqual([])
   })
 
   test("the bucket table is biggest first, with each bucket's calls", () => {

@@ -92,6 +92,34 @@ export function segments(parts: Record<string, number>): Segment[] {
   return GROUPS.filter((group) => totals.has(group.key)).map((group) => ({ group, ms: totals.get(group.key) ?? 0 }))
 }
 
+/** One line of a bar's tooltip: a group's time and share, and, for a group that folds several buckets, each one's. */
+export interface PartRow {
+  group: Group
+  ms: number
+  share: number
+  /** Biggest first; empty for a group of one bucket, whose label already names it. */
+  buckets: { bucket: string; label: string; ms: number; share: number }[]
+}
+
+/** What a bar's tooltip lists: its segments in the bar's order, each with its share of the whole. */
+export function partRows(parts: Record<string, number>): PartRow[] {
+  const segs = segments(parts)
+  const total = segs.reduce((sum, segment) => sum + segment.ms, 0)
+  const share = (ms: number) => (total > 0 ? ms / total : 0)
+  return segs.map(({ group, ms }) => ({
+    group,
+    ms,
+    share: share(ms),
+    buckets:
+      group.buckets.length > 1
+        ? Object.entries(parts)
+            .filter(([bucket, bucketMs]) => bucketMs > 0 && groupOf(bucket) === group.key)
+            .map(([bucket, bucketMs]) => ({ bucket, label: bucketLabel(bucket), ms: bucketMs, share: share(bucketMs) }))
+            .sort((a, b) => b.ms - a.ms)
+        : [],
+  }))
+}
+
 /** The groups any of these parts use, in group order: what a key has to name. */
 export function groupsUsed(partsList: Record<string, number>[]): Group[] {
   const used = new Set(partsList.flatMap((parts) => segments(parts).map((segment) => segment.group.key)))
