@@ -114,6 +114,9 @@
   width: max-content;
   min-width: 14rem;
   max-width: calc(100vw - 16px);
+  /* Taller than the screen (a phone on its side): the note at the foot is what gets cut. */
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
   padding: 9px 11px 10px;
   border-radius: 8px;
   background: var(--raised);

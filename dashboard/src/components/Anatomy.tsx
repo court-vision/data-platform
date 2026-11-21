@@ -103,7 +103,7 @@ const OFFSET = 8 // and hangs this far above the bar (below it, with no room abo
 
 /**
  * The bar's tooltip, placed by the pointer: above the bar, or below it with no
- * room above, and never past the viewport's sides. Portalled into the frame
+ * room above, and never past the viewport's edges. Portalled into the frame
  * so the theme's tokens apply; aria-hidden, since the bar's own label already
  * says all of it.
  */
@@ -117,7 +117,10 @@ function AnatomyTip({ parts, total, label, pointed }: { parts: Record<string, nu
     if (!tip) return
     const { offsetWidth: w, offsetHeight: h } = tip
     const left = Math.max(EDGE, Math.min(pointed.x - w / 2, window.innerWidth - EDGE - w))
-    const top = pointed.top - OFFSET - h >= EDGE ? pointed.top - OFFSET - h : pointed.bottom + OFFSET
+    // Above the bar, else below it; on a screen too short for either it slides
+    // up over the bar (it takes no pointer events) rather than off the bottom.
+    const above = pointed.top - OFFSET - h
+    const top = above >= EDGE ? above : Math.max(EDGE, Math.min(pointed.bottom + OFFSET, window.innerHeight - EDGE - h))
     tip.style.left = `${left}px`
     tip.style.top = `${top}px`
   })
