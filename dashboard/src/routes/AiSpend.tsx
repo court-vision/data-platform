@@ -16,7 +16,6 @@ import {
   capShare,
   checkinKindLabel,
   FEATURES,
-  followReport,
   formatShare,
   formatTokens,
   formatUsd,
@@ -318,23 +317,22 @@ export function CapEditor({
   const [text, setText] = useState(shown)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  // The report value the field last followed, and whether this field's own save just landed
+  // The report value the field last followed, and whether it holds typing of its own
   const [base, setBase] = useState(shown)
-  const [saved, setSaved] = useState(false)
+  const [draft, setDraft] = useState(false)
   // Counts keystrokes, so a save that lands after more typing leaves that typing be
   const edits = useRef(0)
   const inputId = useId()
 
-  // A fresh report (after a save here or elsewhere, or on the minute) moves an
-  // untouched field; a cap being typed keeps what was typed
+  // A fresh report (after a save here or elsewhere, or on the minute) moves a field
+  // with nothing typed in it; typing is never overwritten, even typing that happens
+  // to match the cap the report had
   if (shown !== base) {
-    const next = followReport(text, base, shown, saved)
-    if (next !== text) {
-      setText(next)
+    setBase(shown)
+    if (!draft) {
+      setText(shown)
       setError(null)
     }
-    setBase(shown)
-    setSaved(false)
   }
 
   async function run(usd: string | null) {
@@ -344,11 +342,11 @@ export function CapEditor({
       const answer = await onSave(usd)
       if (edits.current === before) {
         // Nothing typed since: the field shows the cap as the backend now has it
-        // ("12.50" comes back "12.5", Default the cap it went back to), and the
-        // report's next value is this field's to take
+        // ("12.50" comes back "12.5", Default the cap it went back to), and follows
+        // the report from here
         setText(capInput(answer.data.cap_micros))
         setError(null)
-        setSaved(true)
+        setDraft(false)
       }
     } catch {
       // the toast says why; the field keeps what was typed
@@ -384,7 +382,7 @@ export function CapEditor({
         onChange={(event) => {
           edits.current += 1
           setText(event.target.value)
-          setSaved(false)
+          setDraft(true)
         }}
       />
       <button type="submit" className={`${dk.btn} ${dk.btnSmall} ${dirty ? dk.btnPrimary : ""}`} disabled={busy || !dirty}>

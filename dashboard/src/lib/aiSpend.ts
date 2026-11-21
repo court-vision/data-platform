@@ -92,15 +92,6 @@ export function parseCap(text: string): { usd: string } | { error: string } {
   return { usd: trimmed }
 }
 
-/**
- * What a cap editor holds once the report under it changes from `before` to `after`:
- * a field nobody touched, or one whose save just went through, follows the report;
- * a draft being typed stays as typed.
- */
-export function followReport(text: string, before: string, after: string, justSaved: boolean): string {
-  return justSaved || text.trim() === before ? after : text
-}
-
 /** How full a month is against its cap, and the tone that says it. */
 export function capShare(spent: number, cap: number | null | undefined): { share: number | null; tone?: Tone } {
   if (cap == null) return { share: null }
