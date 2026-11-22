@@ -142,7 +142,7 @@ function RoutesBlock({
       title="Routes"
       count={routes.length}
       right={<WindowChoice window={window} onChange={onWindow} />}
-      text="The bar splits the route's average request into where its time went, as shares of it: the times are in the columns before it. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
+      text="The bar splits the route's average request into where its time went, as shares of it: point at it for each part's time and share. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
     >
       <div className={l.controls}>
         <Choice label="Order by" options={SORTS} value={sort} onChange={onSort} />
