@@ -60,6 +60,13 @@ COUNTING_STATS: tuple[str, ...] = (
     "fgm", "fga", "fg3m", "fg3a", "ftm", "fta",
 )
 
+# An ownership snapshot may miss this many of the players the one before it had
+# (a player or two leaves ESPN's pool or stops matching on a normal night).
+OWNERSHIP_LOSS_LIMIT = 10
+# Snapshots further apart than this are not compared: across the offseason the
+# player pool itself turns over.
+OWNERSHIP_GAP_DAYS = 14
+
 # Rolling averages are rounded to 2 places in Python and compared to
 # Postgres's own average: half a cent of slack covers the two rounding rules.
 ROUNDING_SLACK = "0.006"
@@ -541,6 +548,62 @@ def build_consistency_checks(
             failure_message=(
                 "players were tracked live on a night that is already due but have"
                 " no game row for it: the app showed points that never settled"
+            ),
+        ),
+        # --- one table against its own night before -----------------------------
+        # The Nov 14, 2026 run wrote 594 rows where every other night wrote about
+        # 620, and Scout's 7-day Adds read the missing stars as 0% owned a week
+        # later. A night's snapshot normally loses a player or two; this flags
+        # one that loses more than OWNERSHIP_LOSS_LIMIT. A snapshot more than
+        # OWNERSHIP_GAP_DAYS after the one before (the first of a season) is
+        # not compared.
+        _check(
+            name="player_ownership_snapshot_keeps_last_nights_players",
+            table="nba.player_ownership",
+            against=(),
+            fragments=fragments,
+            rows=f"""
+                WITH {{win}},
+                nights AS (
+                    SELECT DISTINCT o.snapshot_date AS night
+                    FROM nba.player_ownership o
+                    CROSS JOIN win
+                    WHERE o.snapshot_date BETWEEN win.since AND win.through
+                ),
+                paired AS (
+                    SELECT n.night,
+                           (SELECT MAX(o.snapshot_date) FROM nba.player_ownership o
+                            WHERE o.snapshot_date < n.night) AS night_before
+                    FROM nights n
+                )
+                SELECT p.night, p.night_before,
+                       (SELECT COUNT(*) FROM nba.player_ownership o
+                        WHERE o.snapshot_date = p.night_before) AS players_night_before,
+                       (SELECT COUNT(*) FROM nba.player_ownership o
+                        WHERE o.snapshot_date = p.night) AS players_on_night,
+                       COUNT(*) AS players_missing,
+                       ARRAY_TO_STRING((ARRAY_AGG(
+                           pl.name || ' ' || TO_CHAR(b.rost_pct, 'FM990.0')
+                           ORDER BY b.rost_pct DESC, pl.name
+                       ))[1:{SAMPLE_LIMIT}], ', ') AS most_owned_missing
+                FROM paired p
+                JOIN nba.player_ownership b ON b.snapshot_date = p.night_before
+                JOIN nba.players pl ON pl.id = b.player_id
+                LEFT JOIN nba.player_ownership o
+                  ON o.snapshot_date = p.night
+                 AND o.player_id = b.player_id
+                WHERE o.player_id IS NULL
+                  AND p.night_before >= p.night - {OWNERSHIP_GAP_DAYS}
+                GROUP BY p.night, p.night_before
+                HAVING COUNT(*) > {OWNERSHIP_LOSS_LIMIT}
+                ORDER BY p.night DESC
+            """,
+            failure_message=(
+                f"an ownership snapshot is missing more than {OWNERSHIP_LOSS_LIMIT} players"
+                " the snapshot before it had: the Scout market lists fall back to"
+                " those players' older readings, and their ownership history has a"
+                " hole that night. Running Player Ownership again with that date fills"
+                " it with ESPN's numbers as they are now, so only do that the morning after"
             ),
         ),
     )

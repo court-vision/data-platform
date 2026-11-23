@@ -21,6 +21,7 @@ from db.models.data_quality_run import DataQualityRun
 from db.models.nba.games import Game
 from db.models.nba.live_player_stats import LivePlayerStats
 from db.models.nba.player_game_stats import PlayerGameStats
+from db.models.nba.player_ownership import PlayerOwnership
 from db.models.nba.player_rolling_stats import PlayerRollingStats
 from db.models.nba.player_season_stats import PlayerSeasonStats
 from db.models.nba.players import Player
@@ -116,6 +117,7 @@ FINAL = "games_final_after_game_night"
 FINAL_OTHER = "games_outside_regular_season_final_after_game_night"
 TEAM = "team_stats_record_matches_schedule"
 LIVE = "live_players_have_game_log"
+OWNERSHIP = "player_ownership_snapshot_keeps_last_nights_players"
 
 
 class TestAWorldThatHoldsTogether:
@@ -438,6 +440,64 @@ class TestLiveAgainstSettled:
         LivePlayerStats.create(
             player_id=ROOKIE, game_id="0042500101", game_date=NIGHT, game_status=3, min=20, pts=9,
         )
+        assert failing() == {}
+
+
+class TestOwnershipAgainstTheNightBefore:
+    """A night's ownership snapshot that lost a block of last night's players."""
+
+    POOL = 30  # players in every snapshot of this world, 1000..1029
+
+    @pytest.fixture
+    def snapshots(self, integration_db):
+        """The whole pool on NIGHT - 2, NIGHT - 1 and NIGHT, most owned first."""
+        for i in range(self.POOL):
+            Player.create(id=1000 + i, name=f"Player {i:02d}", name_normalized=f"player {i:02d}")
+            for back in (2, 1, 0):
+                PlayerOwnership.create(
+                    player=1000 + i, snapshot_date=NIGHT - timedelta(days=back), rost_pct=99 - i,
+                )
+
+    def _drop(self, count: int, night: date = NIGHT) -> None:
+        PlayerOwnership.delete().where(
+            PlayerOwnership.snapshot_date == night,
+            PlayerOwnership.player_id < 1000 + count,
+        ).execute()
+
+    def test_whole_snapshots_pass(self, snapshots):
+        assert failing() == {}
+
+    def test_a_snapshot_missing_a_block_of_players(self, snapshots):
+        self._drop(12)
+
+        assert failing() == {OWNERSHIP: 1}
+        row, = sample(OWNERSHIP)
+        assert (row["night"], row["night_before"]) == (NIGHT, NIGHT - timedelta(days=1))
+        assert (row["players_night_before"], row["players_on_night"], row["players_missing"]) == (30, 18, 12)
+        assert row["most_owned_missing"] == (
+            "Player 00 99.0, Player 01 98.0, Player 02 97.0, Player 03 96.0, Player 04 95.0"
+        )
+
+    def test_up_to_the_limit_passes(self, snapshots):
+        # A player or two leaves ESPN's pool or stops matching on a normal night.
+        self._drop(10)
+        assert failing() == {}
+
+    def test_it_stays_failing_while_the_night_is_in_the_window(self, snapshots):
+        self._drop(12, NIGHT - timedelta(days=1))
+
+        assert failing() == {OWNERSHIP: 1}
+        row, = sample(OWNERSHIP)
+        # The night that lost them, and not the night after, which has them back.
+        assert row["night"] == NIGHT - timedelta(days=1)
+        assert OWNERSHIP not in failing(NIGHT + timedelta(days=7))
+
+    def test_a_snapshot_after_the_offseason_is_not_compared(self, integration_db):
+        for i in range(self.POOL):
+            Player.create(id=1000 + i, name=f"Player {i:02d}", name_normalized=f"player {i:02d}")
+            PlayerOwnership.create(player=1000 + i, snapshot_date=NIGHT - timedelta(days=120), rost_pct=50)
+        PlayerOwnership.create(player=1000, snapshot_date=NIGHT, rost_pct=50)
+
         assert failing() == {}
 
 
