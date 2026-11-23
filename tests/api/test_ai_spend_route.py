@@ -25,6 +25,7 @@ REPORT = {
     "as_of": "2026-11-20T12:00:00Z", "month_start": "2026-11-01", "since": "2026-10-22", "days": 30,
     "turn_max_micros": 1_000_000, "read_max_micros": 300_000,
     "lines": [{"line": "desk", "spent_micros": 12_340_000, "open_micros": 1_000_000, **CAP}],
+    "app": {"spent_micros": 12_410_000, "open_micros": 1_000_000, **CAP},
     "rows": [{"day": "2026-11-20", "line": "autopilot", "feature": "checkin", "detail": "morning", "user_id": 1,
               "team_id": 22, "cost_micros": 70_000, "open_micros": 0, "entries": 1}],
     "usage": [{"day": "2026-11-20", "feature": "chat", "model": "claude-opus-5-5", "records": 3, "model_calls": 5,
@@ -86,7 +87,16 @@ def test_the_report_passes_through_over_thirty_days_by_default(client):
     assert data["lines"][0]["spent_micros"] == 12_340_000
     assert data["rows"][0]["detail"] == "morning"
     assert data["users"][0]["autopilot"]["cap_micros"] is None
+    assert data["app"]["spent_micros"] == 12_410_000
     assert client.fake.calls == [("report", 30)]
+
+
+def test_a_backend_with_no_whole_app_cap_still_reports(client):
+    client.fake.answer = {k: v for k, v in REPORT.items() if k != "app"}
+
+    response = client.get("/v1/dashboard/ai-spend", headers=_AUTH)
+
+    assert response.status_code == 200 and response.json()["data"]["app"] is None
 
 
 @pytest.mark.parametrize("days", [0, 91])
@@ -112,6 +122,15 @@ def test_a_cap_change_goes_to_the_backend_as_dollars_in_a_string(client):
     assert response.json()["message"] == "Set the desk cap for user 1 to $25"
     assert response.json()["data"]["updated_by"] == "James"
     assert client.fake.calls == [("set_cap", {"line": "desk", "user_id": 1, "monthly_usd": "25", "author": "James"})]
+
+
+def test_the_whole_app_s_cap_goes_to_the_backend_on_line_app(client):
+    response = client.put("/v1/dashboard/ai-spend/caps", headers=_AUTH,
+                          json={"line": "app", "monthly_usd": 100, "author": "James"})
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Set the whole app's cap to $100"
+    assert client.fake.calls == [("set_cap", {"line": "app", "user_id": None, "monthly_usd": "100", "author": "James"})]
 
 
 def test_clearing_a_cap_sends_null(client):

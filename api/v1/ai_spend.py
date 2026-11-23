@@ -9,7 +9,7 @@ answer through. Everything takes the pipeline bearer token.
 
 Routes:
     GET /v1/dashboard/ai-spend       — this month against each cap, and the last N UTC days
-    PUT /v1/dashboard/ai-spend/caps  — set or clear one line's cap, or one user's on a line
+    PUT /v1/dashboard/ai-spend/caps  — set or clear one line's cap, the whole app's, or one user's on a line
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ async def get_ai_spend(
 ) -> AiSpendResponse:
     """
     This month's spend on each line (Dime's desk, its check-ins, the analyst)
-    against its cap, the ledger over the window by day, feature, user and team,
+    against its cap and against the whole app's, the ledger over the window by day, feature, user and team,
     what each call's record says it used (model and tokens), and every user with
     spend or a cap.
     """
@@ -80,8 +80,8 @@ async def get_ai_spend(
 @router.put("/caps", response_model=AiCapResponse)
 async def put_ai_cap(req: AiCapRequest) -> AiCapResponse:
     """
-    Set a line's monthly cap, or one user's on the desk or autopilot line, from the
-    next turn, check-in or read on. `monthly_usd` null clears it, and the backend's
+    Set a line's monthly cap, the whole app's (`line` app), or one user's on the desk
+    or autopilot line, from the next turn, check-in or read on. `monthly_usd` null clears it, and the backend's
     default applies again. `author` is the name typed on the page.
     """
     body = {
@@ -101,6 +101,7 @@ async def put_ai_cap(req: AiCapRequest) -> AiCapResponse:
     except ValidationError as exc:
         # The cap may well be saved: the page re-reads the report either way
         raise _malformed() from exc
-    what = f"{req.line} cap" + (f" for user {req.user_id}" if req.user_id is not None else "")
+    what = ("whole app's cap" if req.line == "app" else f"{req.line} cap") + (
+        f" for user {req.user_id}" if req.user_id is not None else "")
     message = f"Cleared the {what}" if req.monthly_usd is None else f"Set the {what} to ${req.monthly_usd}"
     return AiCapResponse(status="success", message=message, data=cap)

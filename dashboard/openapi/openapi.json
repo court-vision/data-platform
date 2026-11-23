@@ -584,7 +584,8 @@
             "enum": [
               "desk",
               "autopilot",
-              "analyst"
+              "analyst",
+              "app"
             ],
             "title": "Line",
             "type": "string"
@@ -637,7 +638,7 @@
         "type": "object"
       },
       "AiCapRequest": {
-        "description": "Set a line's monthly cap (no `user_id`) or one user's on the desk or autopilot\nline. `monthly_usd` null clears it: the backend's default applies again.",
+        "description": "Set a line's monthly cap (no `user_id`), the whole app's (`line` app), or one\nuser's on the desk or autopilot line. `monthly_usd` null clears it: the backend's\ndefault applies again.",
         "properties": {
           "author": {
             "anyOf": [
@@ -655,7 +656,8 @@
             "enum": [
               "desk",
               "autopilot",
-              "analyst"
+              "analyst",
+              "app"
             ],
             "title": "Line",
             "type": "string"
@@ -717,6 +719,85 @@
           "data"
         ],
         "title": "AiCapResponse",
+        "type": "object"
+      },
+      "AiSpendApp": {
+        "description": "The whole app's month so far against its cap: every line together.",
+        "properties": {
+          "cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In force; null: no cap of the user's own on this line",
+            "title": "Cap Micros"
+          },
+          "cap_set": {
+            "default": false,
+            "description": "Set from this page",
+            "title": "Cap Set",
+            "type": "boolean"
+          },
+          "default_cap_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What applies with no cap set; null: none",
+            "title": "Default Cap Micros"
+          },
+          "open_micros": {
+            "description": "This month on every line, reserved and not settled",
+            "title": "Open Micros",
+            "type": "integer"
+          },
+          "spent_micros": {
+            "description": "This month on every line, settled",
+            "title": "Spent Micros",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "required": [
+          "cap_micros",
+          "default_cap_micros",
+          "cap_set",
+          "updated_at",
+          "updated_by",
+          "spent_micros",
+          "open_micros"
+        ],
+        "title": "AiSpendApp",
         "type": "object"
       },
       "AiSpendLine": {
@@ -810,6 +891,17 @@
       },
       "AiSpendReport": {
         "properties": {
+          "app": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AiSpendApp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The whole app's cap; null from a backend that has none"
+          },
           "as_of": {
             "format": "date-time",
             "title": "As Of",
@@ -884,6 +976,7 @@
           "turn_max_micros",
           "read_max_micros",
           "lines",
+          "app",
           "rows",
           "usage",
           "users",
@@ -6513,7 +6606,7 @@
     },
     "/v1/dashboard/ai-spend": {
       "get": {
-        "description": "This month's spend on each line (Dime's desk, its check-ins, the analyst)\nagainst its cap, the ledger over the window by day, feature, user and team,\nwhat each call's record says it used (model and tokens), and every user with\nspend or a cap.",
+        "description": "This month's spend on each line (Dime's desk, its check-ins, the analyst)\nagainst its cap and against the whole app's, the ledger over the window by day, feature, user and team,\nwhat each call's record says it used (model and tokens), and every user with\nspend or a cap.",
         "operationId": "get_ai_spend_v1_dashboard_ai_spend_get",
         "parameters": [
           {
@@ -6566,7 +6659,7 @@
     },
     "/v1/dashboard/ai-spend/caps": {
       "put": {
-        "description": "Set a line's monthly cap, or one user's on the desk or autopilot line, from the\nnext turn, check-in or read on. `monthly_usd` null clears it, and the backend's\ndefault applies again. `author` is the name typed on the page.",
+        "description": "Set a line's monthly cap, the whole app's (`line` app), or one user's on the desk\nor autopilot line, from the next turn, check-in or read on. `monthly_usd` null clears it, and the backend's\ndefault applies again. `author` is the name typed on the page.",
         "operationId": "put_ai_cap_v1_dashboard_ai_spend_caps_put",
         "requestBody": {
           "content": {
