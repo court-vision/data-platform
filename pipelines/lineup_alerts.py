@@ -6,7 +6,9 @@ it to the user or — for users who turned on auto-lineup — lets the backend
 apply it to ESPN and emails what changed. The backend
 (`POST /v1/internal/jobs/lineup/evaluate`) owns the ESPN roster read, slot
 eligibility, game locks and the planner; this pipeline keeps the schedule
-gating, opt-in, per-team overrides, daily dedup, emails and logging.
+gating, opt-in, per-team overrides, daily dedup, emails and logging. A team's
+own lineup email setting wins over the account's either way, so a team that
+switched its own on runs while the account's is off.
 
 Self-gates in two stages:
   1. Broad gate: only enters the user loop when within the configured outer window
@@ -447,26 +449,33 @@ class LineupAlertsPipeline(BasePipeline):
 
     def _get_eligible_users(self) -> list[tuple]:
         """
-        Get users eligible for lineup alerts.
+        Get users eligible for lineup alerts: (User, account NotificationPreference).
 
-        Opt-in model: only processes users who have an explicit
-        NotificationPreference row with lineup_alerts_enabled=True.
-        Users without a row are not processed until they opt in via the UI.
-        Auto-lineup is a sub-feature of alerts, so the same list covers it.
-
-        Returns list of (User, NotificationPreference) tuples.
+        Opt-in model, team by team: a user is processed when the account's own
+        lineup email is on, or when any of the user's teams turned its own on
+        (a team override with lineup_alerts_enabled=True). A team's own setting
+        wins over the account's both ways (`_process_team` skips a team whose
+        effective setting is off), so an account whose email is off still runs
+        the teams that switched theirs on. A user with no account row runs only
+        such teams; the row's other fields (minutes before, email) take their
+        defaults. Auto-lineup is a sub-feature of alerts, so the same list covers it.
         """
-        enabled_prefs = list(
-            NotificationPreference.select()
-            .where(NotificationPreference.lineup_alerts_enabled == True)
-        )
+        account = {int(p.user_id): p for p in NotificationPreference.select()}
+        user_ids = {user_id for user_id, p in account.items() if p.lineup_alerts_enabled}
+        user_ids |= {
+            int(o.user_id)
+            for o in NotificationTeamPreference.select().where(NotificationTeamPreference.lineup_alerts_enabled == True)
+        }
+        if not user_ids:
+            return []
 
         result = []
-        for pref in enabled_prefs:
-            user = User.select().where(User.user_id == pref.user_id).first()
-            if user:
-                result.append((user, pref))
-
+        for user in User.select().where(User.user_id.in_(sorted(user_ids))).order_by(User.user_id):
+            prefs = account.get(int(user.user_id))
+            if prefs is None:
+                # Never saved: the account's email stays off, so only a team's own setting runs
+                prefs = NotificationPreference(user=user.user_id, lineup_alerts_enabled=False)
+            result.append((user, prefs))
         return result
 
     # ---- notification_log ---------------------------------------------------------
