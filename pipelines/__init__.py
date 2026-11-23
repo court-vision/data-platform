@@ -36,6 +36,7 @@ from pipelines.cv_projection import CVProjectionPipeline
 from pipelines.scheduled_pickups import ScheduledPickupsPipeline
 from pipelines.availability import AvailabilityPipeline
 from pipelines.dime_checkins import DimeCheckinsPipeline
+from pipelines.dime_asks import DimeAsksPipeline
 from pipelines.news_feed import NewsFeedPipeline
 from pipelines.daily_rankings import DailyRankingsPipeline
 from pipelines.live_projection import LiveProjectionPipeline
@@ -85,6 +86,8 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     "availability": AvailabilityPipeline,
     # Dime's check-ins, in shadow (every 15 minutes; its route gates on a switched-on team).
     "dime_checkins": DimeCheckinsPipeline,
+    # What users asked Dime to do at a time (every minute; its route gates on a due ask).
+    "dime_asks": DimeAsksPipeline,
     # Player news from ESPN, Rotowire and RealGM (every 5 minutes; no gate).
     "news_feed": NewsFeedPipeline,
     # Every player's line for each game left, repriced each morning of the season:

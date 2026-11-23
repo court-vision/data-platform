@@ -29,6 +29,7 @@ CRON_RUNNER_JOBS = {
     "scheduled-pickups",
     "availability",
     "dime-checkins",
+    "dime-asks",
     "news",
     "daily-rankings",
 }
@@ -180,5 +181,5 @@ class TestForceOnRun:
         # daily-rankings skips once the day is stored; its forced Run rebuilds the day,
         # and so does live-projection's, the first link of the same morning.
         assert [name for name, _ in FORCED] == [
-            "availability", "daily_rankings", "dime_checkins", "live_projection", "scheduled_pickups",
+            "availability", "daily_rankings", "dime_asks", "dime_checkins", "live_projection", "scheduled_pickups",
         ]

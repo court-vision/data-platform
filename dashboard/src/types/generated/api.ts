@@ -869,6 +869,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/dime-asks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Dime Asks
+         * @description Trigger the dime-asks pipeline: what users asked Dime to do at a time (the
+         *     Dime desk redesign, step 2). Each ask runs once, as a check-in of its own:
+         *     one Dime turn on the check-ins budget.
+         *
+         *     Called every minute by the 'dime-asks' cron job, so an ask starts in the
+         *     minute it was saved for. Gates on whether any ask is due, or an ask's
+         *     check-in was left running by a process that died (one query, no run row);
+         *     when one is, asks the backend to start the due asks. The backend owns the
+         *     asks and takes each one once.
+         */
+        post: operations["trigger_dime_asks_v1_internal_pipelines_dime_asks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/dime-checkins": {
         parameters: {
             query?: never;
@@ -5336,6 +5364,38 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_dime_asks_v1_internal_pipelines_dime_asks_post: {
+        parameters: {
+            query?: {
+                /** @description Run even when no ask is due (the dashboard's Run button). */
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
                 };
             };
             /** @description Validation Error */

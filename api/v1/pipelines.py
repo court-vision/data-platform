@@ -76,7 +76,7 @@ from services.schedule_service import get_season_phase
 
 # The gate routes here (pre-game, post-game, live-stats) are `async def`, so
 # they run on the private process's one event loop, which they share with
-# /health, the scheduled-pickups, dime-checkins and availability ticks and cron-run ingestion. Every blocking
+# /health, the scheduled-pickups, dime-checkins, dime-asks and availability ticks and cron-run ingestion. Every blocking
 # call in them goes to a worker thread: run_in_db_thread for Peewee,
 # asyncio.to_thread for the NBA scoreboard, whose sync tenacity retry sleeps
 # 2-30 s between attempts. Run inline, the live-stats gate stalled the loop
@@ -1319,6 +1319,53 @@ def _has_autopilot_on() -> bool:
 
 async def _autopilot_on() -> bool:
     return await run_in_db_thread(_has_autopilot_on)
+
+
+@router.post("/dime-asks", response_model=PipelineResponse)
+async def trigger_dime_asks(
+    _: str = Security(verify_pipeline_token),
+    force: bool = Query(False, description="Run even when no ask is due (the dashboard's Run button)."),
+) -> PipelineResponse:
+    """
+    Trigger the dime-asks pipeline: what users asked Dime to do at a time (the
+    Dime desk redesign, step 2). Each ask runs once, as a check-in of its own:
+    one Dime turn on the check-ins budget.
+
+    Called every minute by the 'dime-asks' cron job, so an ask starts in the
+    minute it was saved for. Gates on whether any ask is due, or an ask's
+    check-in was left running by a process that died (one query, no run row);
+    when one is, asks the backend to start the due asks. The backend owns the
+    asks and takes each one once.
+    """
+    if not force and not await _asks_due():
+        return PipelineResponse(status=ApiStatus.SKIPPED, message="No ask is due")
+    result = await run_pipeline("dime_asks")
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
+# The table is the backend's (migration 0055); until that has run, nothing is due
+ASKS_TABLE_SQL = "SELECT to_regclass('usr.ai_asks') IS NOT NULL"
+# A pending ask at or past its time (missed ones too: the backend closes those), or an ask's check-in
+# still running past the backend's turn timeout and its margin (6 + 10 minutes): its process died, and
+# the backend's sweep frees it. Both read partial indexes (ai_asks_pending_due, ai_checkins_one_running_uq).
+DUE_ASKS_SQL = (
+    "SELECT EXISTS (SELECT 1 FROM usr.ai_asks WHERE state = 'pending' AND due_at <= now()) "
+    "OR EXISTS (SELECT 1 FROM usr.ai_checkins WHERE state = 'running' AND kind = 'ask' "
+    "AND started_at < now() - interval '16 minutes')"
+)
+
+
+def _has_due_asks() -> bool:
+    from db.base import db
+    table = db.execute_sql(ASKS_TABLE_SQL).fetchone()
+    if not (table and table[0]):
+        return False
+    row = db.execute_sql(DUE_ASKS_SQL).fetchone()
+    return bool(row and row[0])
+
+
+async def _asks_due() -> bool:
+    return await run_in_db_thread(_has_due_asks)
 
 
 @router.post("/news", response_model=PipelineResponse)

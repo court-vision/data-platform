@@ -9,6 +9,7 @@ from .scheduled_pickups import ScheduledPickup
 from .lineup_snapshots import LineupSnapshot, LineupSnapshotPlayer
 from .move_outcomes import MoveOutcome
 from .ai_checkins import AiCheckin
+from .ai_asks import AiAsk
 
 __all__ = [
     'User',
@@ -22,4 +23,5 @@ __all__ = [
     'LineupSnapshotPlayer',
     'MoveOutcome',
     'AiCheckin',
+    'AiAsk',
 ]
