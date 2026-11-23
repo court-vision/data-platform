@@ -459,12 +459,13 @@ class LineupSnapshotsPipeline(BasePipeline):
     def _tipped_off(self, game_date: date) -> bool:
         """Whether the night's first game has started, by the schedule (nba.games, Eastern).
 
-        A day with no tip-off time on the schedule has no night to wait for.
+        Games with no tip-off time fall back on their status: one under way or
+        over says the night began. A day with no games has no night to wait for.
         """
         first_tip = Game.get_earliest_game_time_on_date(game_date)
-        if first_tip is None:
-            return False
-        return datetime.now(EASTERN) >= EASTERN.localize(datetime.combine(game_date, first_tip))
+        if first_tip is not None:
+            return datetime.now(EASTERN) >= EASTERN.localize(datetime.combine(game_date, first_tip))
+        return any(game.status != "scheduled" for game in Game.get_games_on_date(game_date))
 
     def _missing_periods(self, key: LeagueKey, latest: int, final: Optional[int]) -> list[int]:
         """Finished days not yet stored, ascending: every day in

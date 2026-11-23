@@ -245,9 +245,12 @@ class TestTippedOff:
     @pytest.fixture
     def first_tip(self, monkeypatch):
         tips = {GAME_DATE: time(19, 30)}
+        games = {}     # date -> statuses of games with no tip-off time
         monkeypatch.setattr(module.Game, "get_earliest_game_time_on_date",
                             classmethod(lambda cls, d: tips.get(d)))
-        return tips
+        monkeypatch.setattr(module.Game, "get_games_on_date",
+                            classmethod(lambda cls, d: [SimpleNamespace(status=s) for s in games.get(d, [])]))
+        return SimpleNamespace(tips=tips, games=games)
 
     def test_before_the_first_tip(self, first_tip):
         with freeze_time("2025-12-20T00:29:00Z"):   # 7:29 PM ET on GAME_DATE (Dec 19, EST)
@@ -260,6 +263,13 @@ class TestTippedOff:
     def test_a_day_without_games_has_nothing_to_wait_for(self, first_tip):
         with freeze_time("2026-03-20T03:00:00Z"):
             assert LineupSnapshotsPipeline()._tipped_off(date(2026, 3, 19)) is False
+
+    def test_games_without_a_tip_off_time_go_by_their_status(self, first_tip):
+        night = date(2026, 3, 19)
+        first_tip.games[night] = ["scheduled", "scheduled"]
+        assert LineupSnapshotsPipeline()._tipped_off(night) is False
+        first_tip.games[night] = ["final", "in_progress"]
+        assert LineupSnapshotsPipeline()._tipped_off(night) is True
 
 
 # ---- backfill ---------------------------------------------------------------------------
