@@ -728,6 +728,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/internal/pipelines/daily-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Daily Actions
+         * @description Trigger the daily actions pipeline (the Daily actions row's Act level).
+         *
+         *     Asks the backend to make each Act team's IR moves and fill its open roster
+         *     spots with the day's best free agents, never a drop, and emails what was made.
+         *     Self-gates: does nothing on a day without games or after the first tip.
+         *
+         *     Safe to call frequently (every 15 min); the day's log row settles each team
+         *     once, and a failed run is retried by the next call.
+         */
+        post: operations["trigger_daily_actions_v1_internal_pipelines_daily_actions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/internal/pipelines/daily-matchup-scores": {
         parameters: {
             query?: never;
@@ -5241,6 +5268,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_daily_actions_v1_internal_pipelines_daily_actions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineResponse"];
                 };
             };
         };

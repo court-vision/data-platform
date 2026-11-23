@@ -10,7 +10,7 @@ client and the notification service are fakes.
 """
 
 import json
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 import pytest
 import pytz
@@ -144,10 +144,10 @@ def test_nobody_at_act_asks_nothing(pipeline):
 # ---- the day's gate ----------------------------------------------------------------
 
 
-def execute_at(pipeline, monkeypatch, et_clock, first_game=FIRST_GAME):
+def execute_at(pipeline, monkeypatch, et_clock, first_game=FIRST_GAME, date_override=None):
     monkeypatch.setattr(module.Game, "get_earliest_game_time_on_date", staticmethod(lambda d: first_game))
     at = pytz.timezone("US/Eastern").localize(datetime.combine(TODAY, et_clock))
-    ctx = PipelineContext("daily_actions")
+    ctx = PipelineContext("daily_actions", date_override=date_override)
     with freeze_time(at):
         pipeline.execute(ctx)
     return ctx
@@ -169,6 +169,17 @@ def test_after_the_tip_or_without_games_nothing_is_asked(pipeline, monkeypatch, 
     make_team(user)
     execute_at(pipeline, monkeypatch, clock, first_game)
     assert pipeline.backend_client.calls == []
+
+
+@pytest.mark.unit
+def test_a_backfill_for_another_day_is_not_asked_but_one_for_today_is(pipeline, monkeypatch):
+    """A pre-game ?date= backfill runs every pre-game pipeline; the moves are today's ESPN writes."""
+    user, _ = make_user(daily_actions_level="act")
+    make_team(user)
+    execute_at(pipeline, monkeypatch, time(17, 30), date_override=TODAY - timedelta(days=3))
+    assert pipeline.backend_client.calls == []
+    execute_at(pipeline, monkeypatch, time(17, 30), date_override=TODAY)
+    assert len(pipeline.backend_client.calls) == 1
 
 
 # ---- outcome branches --------------------------------------------------------------

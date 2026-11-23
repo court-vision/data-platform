@@ -71,6 +71,11 @@ class DailyActionsPipeline(BasePipeline):
         now_et = datetime.now(pytz.timezone("US/Eastern"))
         today = now_et.date()
 
+        if ctx.date_override and ctx.date_override != today:
+            # A pre-game backfill for another day: the moves are today's ESPN writes, never that day's
+            ctx.log.info("backfill_skipped", date_override=str(ctx.date_override), today=str(today))
+            return
+
         first_tip = Game.get_earliest_game_time_on_date(today)
         if not first_tip:
             ctx.log.info("no_games_today", date=str(today))
