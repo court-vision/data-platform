@@ -1246,6 +1246,24 @@ async def trigger_lineup_alerts(
     )
 
 
+@router.post("/daily-actions", response_model=PipelineResponse)
+async def trigger_daily_actions(
+    _: str = Security(verify_pipeline_token),
+) -> PipelineResponse:
+    """
+    Trigger the daily actions pipeline (the Daily actions row's Act level).
+
+    Asks the backend to make each Act team's IR moves and fill its open roster
+    spots with the day's best free agents, never a drop, and emails what was made.
+    Self-gates: does nothing on a day without games or after the first tip.
+
+    Safe to call frequently (every 15 min); the day's log row settles each team
+    once, and a failed run is retried by the next call.
+    """
+    result = await run_pipeline("daily_actions")
+    return PipelineResponse(status=result.status, message=result.message, data=result)
+
+
 @router.post("/scheduled-pickups", response_model=PipelineResponse)
 async def trigger_scheduled_pickups(
     _: str = Security(verify_pipeline_token),

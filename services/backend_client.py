@@ -1,5 +1,5 @@
 """
-Backend internal API client — the lineup-alerts pipeline's one call per team, the
+Backend internal API client — the lineup-alerts and daily-actions pipelines' one call per team, the
 scheduled-pickups pipeline's one call per tick, the move-ledger pipeline's one
 call per night, the dime-checkins and dime-asks pipelines' one call per tick, and
 the events the availability and news pipelines hand to Dime.
@@ -55,6 +55,13 @@ runs that rosters the player, and starts a check-in about it. One request, no
 retry: an event is recorded once per verdict change or item, so a repeat is
 harmless, and a lost one is still read by the next scheduled check-in's tools.
 
+`run_daily_actions` is the seventh, POST /v1/internal/jobs/daily-actions/run with
+`{"team_id", "user_id", "nba_date"}`: one team's Daily actions at Act (the Week desk's
+IR moves and open-spot pickups, never a drop). It reads the board and the free-agent
+pool again after every write, so it gets the pickups read timeout. One request, no
+retry: the backend re-reads the list before every write, so a call repeated after a
+lost answer finds what went already done and answers `noop`.
+
 `run_asks` is the sixth, POST /v1/internal/jobs/asks/run with `{}`: the backend
 starts the asks that are due (what users asked Dime to do at a time; the Dime desk
 redesign, step 2), closes the ones an hour past their time, and answers what it
@@ -82,12 +89,15 @@ RUN_CHECKINS_PATH = "/v1/internal/jobs/checkins/run"
 RUN_ASKS_PATH = "/v1/internal/jobs/asks/run"
 POST_EVENTS_PATH = "/v1/internal/jobs/checkins/events"
 REACT_LINEUP_PATH = "/v1/internal/jobs/lineup/react"
+RUN_DAILY_ACTIONS_PATH = "/v1/internal/jobs/daily-actions/run"
 CONNECT_TIMEOUT_SECONDS = 5.0
 
 # Outcomes the backend returns for a 200.
 BACKEND_OUTCOMES = frozenset({"planned", "applied", "noop", "rejected", "failed", "skipped"})
 # Client-side outcome: the backend could not be asked (or did not answer usably).
 OUTCOME_UNAVAILABLE = "unavailable"
+# Outcomes the backend returns for one team's daily actions.
+DAILY_ACTIONS_OUTCOMES = frozenset({"applied", "noop", "skipped", "rejected", "failed"})
 # Outcomes the backend returns per scheduled pickup.
 PICKUP_OUTCOMES = frozenset({"executed", "skipped", "failed", "expired", "deferred"})
 
@@ -128,6 +138,50 @@ class LineupEvaluation:
             unfilled=[u for u in (data.get("unfilled") or []) if isinstance(u, dict)],
             verified=data.get("verified"),
             scoring_period_id=data.get("scoring_period_id"),
+            nba_date=data.get("nba_date"),
+            first_game_time_et=data.get("first_game_time_et"),
+            team_name=data.get("team_name") or "",
+        )
+
+
+@dataclass(frozen=True)
+class DailyActionsRun:
+    """The backend's answer for one team's daily actions at Act (or why there is none)."""
+
+    outcome: str
+    reason: Optional[str]
+    ir_moves: list[dict] = field(default_factory=list)
+    adds: list[dict] = field(default_factory=list)
+    held: Optional[str] = None
+    open_spots: int = 0
+    nba_date: Optional[str] = None
+    first_game_time_et: Optional[str] = None
+    team_name: str = ""
+    error: Optional[str] = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def unavailable(cls, reason: str, error: Optional[str] = None) -> "DailyActionsRun":
+        return cls(outcome=OUTCOME_UNAVAILABLE, reason=reason, error=error)
+
+    @classmethod
+    def from_payload(cls, data: Any) -> "DailyActionsRun":
+        """Build from the envelope's `data`; anything malformed is `unavailable`."""
+        if not isinstance(data, dict) or data.get("outcome") not in DAILY_ACTIONS_OUTCOMES:
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        try:
+            open_spots = int(data.get("open_spots") or 0)
+        except (TypeError, ValueError):
+            open_spots = 0
+        return cls(
+            outcome=data["outcome"],
+            reason=data.get("reason"),
+            ir_moves=[m for m in (data.get("ir_moves") or []) if isinstance(m, dict)],
+            adds=[a for a in (data.get("adds") or []) if isinstance(a, dict)],
+            held=data.get("held"),
+            open_spots=open_spots,
             nba_date=data.get("nba_date"),
             first_game_time_et=data.get("first_game_time_et"),
             team_name=data.get("team_name") or "",
@@ -971,6 +1025,89 @@ class BackendClient:
             error=reaction.error,
         )
         return reaction
+
+    def run_daily_actions(
+        self,
+        *,
+        team_id: int,
+        user_id: int,
+        nba_date: date,
+        correlation_id: Optional[str] = None,
+    ) -> DailyActionsRun:
+        """Ask the backend to make `team_id`'s daily actions at Act for `nba_date`.
+
+        Never raises: transport and protocol failures come back as `unavailable`.
+        """
+        if not self.enabled:
+            return DailyActionsRun.unavailable(reason="backend_not_configured")
+        body = {"team_id": int(team_id), "user_id": int(user_id), "nba_date": nba_date.isoformat()}
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+
+        started = time.monotonic()
+        status_code: Optional[int] = None
+        try:
+            response = requests.post(
+                f"{self._base_url}{RUN_DAILY_ACTIONS_PATH}",
+                json=body,
+                headers=headers,
+                # Up to five board and free-agent reads and four writes, each verified: a pickups tick's timeout
+                timeout=self._pickups_timeout,
+            )
+            status_code = response.status_code
+            run = self._parse_daily_actions_response(response)
+        except requests.Timeout as exc:
+            run = DailyActionsRun.unavailable(reason="timeout", error=_excerpt(str(exc)))
+        except requests.RequestException as exc:
+            run = DailyActionsRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+        except Exception as exc:  # a client bug must degrade the team, not the run
+            run = DailyActionsRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        log = self._log.warning if run.outcome == OUTCOME_UNAVAILABLE else self._log.info
+        log(
+            "backend_run_daily_actions",
+            team_id=team_id,
+            user_id=user_id,
+            nba_date=body["nba_date"],
+            outcome=run.outcome,
+            reason=run.reason,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            ir_moves=len(run.ir_moves),
+            adds=len(run.adds),
+            error=run.error,
+        )
+        return run
+
+    @staticmethod
+    def _parse_daily_actions_response(response: requests.Response) -> DailyActionsRun:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if status == 200:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            return DailyActionsRun.from_payload(data)
+
+        if status == 404 and isinstance(payload, dict) and payload.get("error_code") == "TEAM_NOT_FOUND":
+            return DailyActionsRun(outcome="skipped", reason="team_not_found",
+                                   error=_excerpt(str(payload.get("message") or "")) or None)
+
+        if status == 401:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            return DailyActionsRun.unavailable(reason="unauthorized", error=_excerpt(str(detail or response.text)))
+
+        detail: Optional[str] = None
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
+        return DailyActionsRun.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
 
     @staticmethod
     def _parse_react_response(response: requests.Response) -> LineupReaction:
