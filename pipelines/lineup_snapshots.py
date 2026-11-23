@@ -20,7 +20,11 @@ the post-game window before 02:00 CT, an outage, the All-Star break) heals
 itself on the next run. A league ESPN has not rolled past the game date yet
 makes the run raise `DataNotReady` once the other leagues are stored, and the
 post-game batch retries at its next poll (a success would be deduped for the
-rest of the night).
+rest of the night). That wait is only for a night that has begun: a run with
+no date takes the 6 AM ET rule's date, which is the coming night all day, and
+ESPN being on a day nobody has played yet is no reason to wait, so such a run
+catches up every finished day instead (2026-11-17: a dashboard Run at 6:15 AM
+ET aimed at the coming night, waited, and stored nothing).
 
 Timing: POST_GAME with `depends_on=("daily_matchup_scores",)` — that
 pipeline's ESPN gate is what waits for ESPN's nightly flip, and an unmet
@@ -45,15 +49,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Optional
 
 from peewee import fn
 
 from core.crypto import CredentialDecryptionError
+from core.nba_calendar import EASTERN
 from core.settings import settings
 from db.base import db
 from db.models.lineup_snapshots import LineupSnapshot, LineupSnapshotPlayer
+from db.models.nba.games import Game
 from db.models.teams import Team
 from pipelines.base import BasePipeline, DataNotReady
 from pipelines.config import PipelineCategory, PipelineConfig
@@ -310,6 +316,10 @@ class LineupSnapshotsPipeline(BasePipeline):
             ctx.increment_skipped(len(leagues), "outside_regular_season")
             return
 
+        # ESPN still on the target day means "not rolled yet" only once that
+        # day's games have begun; before the first tip it is just today.
+        wait_for_target = not backfill and self._tipped_off(ctx.game_date())
+
         waiting = 0
         processed_leagues = 0
         observed_totals = False
@@ -333,7 +343,7 @@ class LineupSnapshotsPipeline(BasePipeline):
                         ctx.increment_skipped(1, "day_not_finished")
                         continue
                     periods = [target]
-                elif latest <= target:
+                elif latest <= target and wait_for_target:
                     ctx.log.info("lineup_snapshots_waiting_for_espn", league_id=league.key.league_id,
                                  target=target, latest=latest)
                     waiting += 1
@@ -445,6 +455,17 @@ class LineupSnapshotsPipeline(BasePipeline):
         return parse_league_discovery(payload)
 
     # ---- which days ----
+
+    def _tipped_off(self, game_date: date) -> bool:
+        """Whether the night's first game has started, by the schedule (nba.games, Eastern).
+
+        Games with no tip-off time fall back on their status: one under way or
+        over says the night began. A day with no games has no night to wait for.
+        """
+        first_tip = Game.get_earliest_game_time_on_date(game_date)
+        if first_tip is not None:
+            return datetime.now(EASTERN) >= EASTERN.localize(datetime.combine(game_date, first_tip))
+        return any(game.status != "scheduled" for game in Game.get_games_on_date(game_date))
 
     def _missing_periods(self, key: LeagueKey, latest: int, final: Optional[int]) -> list[int]:
         """Finished days not yet stored, ascending: every day in
