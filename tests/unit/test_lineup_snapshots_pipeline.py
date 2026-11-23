@@ -12,11 +12,12 @@ per test to put ESPN on the day each case needs.
 
 import copy
 import json
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from freezegun import freeze_time
 
 from core.crypto import CredentialDecryptionError
 from pipelines import lineup_snapshots as module
@@ -101,6 +102,8 @@ def pipeline(monkeypatch):
     p = LineupSnapshotsPipeline()
     p.espn_extractor = FakeExtractor()
     p.store = FakeStore()
+    # The post-game batch runs once the night is over: its games have tipped.
+    p._tipped_off = lambda game_date: True
     return p
 
 
@@ -191,6 +194,35 @@ class TestNightlyCapture:
         assert [w[:2] for w in pipeline.store.writes] == [(KEY, 60), (OTHER, 60)]
         assert c.records_processed == 3 and c.records_failed == 0
 
+    def test_a_night_not_yet_begun_is_not_waited_for(self, pipeline, monkeypatch):
+        # ESPN on day 60 before day 60's first tip is just today: catch up what is finished
+        teams(monkeypatch, team_row(1))
+        pipeline.store = FakeStore(stored_periods=range(46, 59))   # through day 58
+        pipeline.espn_extractor = FakeExtractor(latest=60)
+        pipeline._tipped_off = lambda game_date: False
+        c = ctx()
+        pipeline.execute(c)
+        assert [w[1] for w in pipeline.store.writes] == [59]
+        assert c.records_processed == 3 and c.records_failed == 0
+
+    def test_a_dashboard_run_after_6am_et_catches_up_instead_of_waiting(self, pipeline, monkeypatch):
+        """2026-11-17: Run with no date at 6:15 AM ET aimed at the coming night and stored nothing.
+
+        No date and no batch date: the 6 AM ET rule makes the target today (day 60),
+        which ESPN is on and nobody has played. The night before (day 59) is captured.
+        """
+        teams(monkeypatch, team_row(1))
+        pipeline.store = FakeStore(stored_periods=range(46, 59))   # through day 58
+        pipeline.espn_extractor = FakeExtractor(latest=60)
+        del pipeline._tipped_off                                   # the real schedule check
+        monkeypatch.setattr(module.Game, "get_earliest_game_time_on_date",
+                            classmethod(lambda cls, d: time(19, 0) if d == GAME_DATE else None))
+        with freeze_time(f"{GAME_DATE.isoformat()}T11:15:00Z"):   # 6:15 AM ET
+            c = PipelineContext(pipeline_name="lineup_snapshots")
+            assert schedule_service.season_day(c.game_date()) == 60
+            pipeline.execute(c)
+        assert [w[1] for w in pipeline.store.writes] == [59]
+
     def test_preseason_is_skipped_not_waited_for(self, pipeline, monkeypatch, alerts):
         teams(monkeypatch, team_row(1))
         pipeline.espn_extractor = FakeExtractor(latest=0)
@@ -204,6 +236,30 @@ class TestNightlyCapture:
         pipeline.execute(c)
         assert c.skip_reasons == {"outside_regular_season": 1}
         assert pipeline.espn_extractor.calls == []
+
+
+@pytest.mark.unit
+class TestTippedOff:
+    """The schedule check that decides whether ESPN still on the target day is worth waiting for."""
+
+    @pytest.fixture
+    def first_tip(self, monkeypatch):
+        tips = {GAME_DATE: time(19, 30)}
+        monkeypatch.setattr(module.Game, "get_earliest_game_time_on_date",
+                            classmethod(lambda cls, d: tips.get(d)))
+        return tips
+
+    def test_before_the_first_tip(self, first_tip):
+        with freeze_time("2025-12-20T00:29:00Z"):   # 7:29 PM ET on GAME_DATE (Dec 19, EST)
+            assert LineupSnapshotsPipeline()._tipped_off(GAME_DATE) is False
+
+    def test_from_the_first_tip_on(self, first_tip):
+        with freeze_time("2025-12-20T00:30:00Z"):   # the first tip, 7:30 PM ET
+            assert LineupSnapshotsPipeline()._tipped_off(GAME_DATE) is True
+
+    def test_a_day_without_games_has_nothing_to_wait_for(self, first_tip):
+        with freeze_time("2026-03-20T03:00:00Z"):
+            assert LineupSnapshotsPipeline()._tipped_off(date(2026, 3, 19)) is False
 
 
 # ---- backfill ---------------------------------------------------------------------------
