@@ -1,8 +1,8 @@
 """
 Backend internal API client — the lineup-alerts pipeline's one call per team, the
 scheduled-pickups pipeline's one call per tick, the move-ledger pipeline's one
-call per night, the dime-checkins pipeline's one call per tick, and the events
-the availability and news pipelines hand to Dime.
+call per night, the dime-checkins and dime-asks pipelines' one call per tick, and
+the events the availability and news pipelines hand to Dime.
 
     POST {BACKEND_INTERNAL_URL}/v1/internal/jobs/lineup/evaluate
     Authorization: Bearer <PIPELINE_API_TOKEN>      (the token both services share)
@@ -54,6 +54,13 @@ backend reads the verdicts and items itself, records an event on each team Dime
 runs that rosters the player, and starts a check-in about it. One request, no
 retry: an event is recorded once per verdict change or item, so a repeat is
 harmless, and a lost one is still read by the next scheduled check-in's tools.
+
+`run_asks` is the sixth, POST /v1/internal/jobs/asks/run with `{}`: the backend
+starts the asks that are due (what users asked Dime to do at a time; the Dime desk
+redesign, step 2), closes the ones an hour past their time, and answers what it
+started. Each runs on as a check-in in the backend after the answer, so the call is
+quick; one request, no retry (an ask is taken once, by a conditional write, and the
+next tick a minute later is the retry).
 """
 
 from __future__ import annotations
@@ -72,6 +79,7 @@ EVALUATE_PATH = "/v1/internal/jobs/lineup/evaluate"
 EXECUTE_PICKUPS_PATH = "/v1/internal/jobs/pickups/execute"
 RUN_LEDGER_PATH = "/v1/internal/jobs/ledger/run"
 RUN_CHECKINS_PATH = "/v1/internal/jobs/checkins/run"
+RUN_ASKS_PATH = "/v1/internal/jobs/asks/run"
 POST_EVENTS_PATH = "/v1/internal/jobs/checkins/events"
 REACT_LINEUP_PATH = "/v1/internal/jobs/lineup/react"
 CONNECT_TIMEOUT_SECONDS = 5.0
@@ -394,6 +402,60 @@ class CheckinsRun:
             return cls(ok=True, off=bool(data.get("off")), teams=int(data.get("teams") or 0), started=started,
                        missed=int(data.get("missed") or 0), skipped=int(data.get("skipped") or 0),
                        stale=int(data.get("stale") or 0))
+        except (TypeError, ValueError):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+
+
+@dataclass(frozen=True)
+class AskStarted:
+    ask_id: int
+    team_id: int
+    checkin_id: int
+
+    @classmethod
+    def from_payload(cls, item: Any) -> Optional["AskStarted"]:
+        if not isinstance(item, dict):
+            return None
+        try:
+            return cls(ask_id=int(item["ask_id"]), team_id=int(item["team_id"]), checkin_id=int(item["checkin_id"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
+@dataclass(frozen=True)
+class AsksRun:
+    """The backend's answer to one asks tick, or why there is none (`ok` False).
+
+    `waiting`: due asks left for the next tick (their team had a check-in running). `closed`: due asks
+    closed without running (missed an hour past their time, or refused by the budget). `stale`:
+    check-ins failed because their process died."""
+
+    ok: bool
+    off: bool = False
+    started: list[AskStarted] = field(default_factory=list)
+    waiting: int = 0
+    closed: int = 0
+    stale: int = 0
+    reason: Optional[str] = None
+    error: Optional[str] = None
+
+    @classmethod
+    def unavailable(cls, reason: str, error: Optional[str] = None) -> "AsksRun":
+        return cls(ok=False, reason=reason, error=error)
+
+    @classmethod
+    def from_payload(cls, data: Any) -> "AsksRun":
+        if not isinstance(data, dict) or not isinstance(data.get("started"), list):
+            return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
+        started: list[AskStarted] = []
+        for item in data["started"]:
+            one = AskStarted.from_payload(item)
+            if one is None:
+                return cls.unavailable(reason="malformed_response", error=f"unexpected ask: {_excerpt(repr(item))}")
+            started.append(one)
+        try:
+            return cls(ok=True, off=bool(data.get("off")), started=started, waiting=int(data.get("waiting") or 0),
+                       closed=int(data.get("closed") or 0), stale=int(data.get("stale") or 0))
         except (TypeError, ValueError):
             return cls.unavailable(reason="malformed_response", error=f"unexpected data: {_excerpt(repr(data))}")
 
@@ -730,6 +792,56 @@ class BackendClient:
         )
         return run
 
+    def run_asks(self, *, correlation_id: Optional[str] = None) -> AsksRun:
+        """Ask the backend to start the asks that are due (and close the ones past their grace).
+
+        Never raises: transport and protocol failures come back as a run that is not `ok`.
+        """
+        if not self.enabled:
+            return AsksRun.unavailable(reason="backend_not_configured")
+
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Accept": "application/json",
+        }
+        if correlation_id:
+            headers["X-Correlation-ID"] = correlation_id
+
+        started = time.monotonic()
+        status_code: Optional[int] = None
+        try:
+            response = requests.post(
+                f"{self._base_url}{RUN_ASKS_PATH}",
+                json={},
+                headers=headers,
+                timeout=self._timeout,
+            )
+            status_code = response.status_code
+            run = self._parse_asks_response(response)
+        except requests.Timeout as exc:
+            run = AsksRun.unavailable(reason="timeout", error=_excerpt(str(exc)))
+        except requests.RequestException as exc:
+            run = AsksRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+        except Exception as exc:  # a client bug must degrade the run, not raise
+            run = AsksRun.unavailable(reason=type(exc).__name__, error=_excerpt(str(exc)))
+
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        log = self._log.info if run.ok else self._log.warning
+        log(
+            "backend_run_asks",
+            ok=run.ok,
+            off=run.off,
+            started=len(run.started),
+            waiting=run.waiting,
+            closed=run.closed,
+            stale=run.stale,
+            reason=run.reason,
+            status_code=status_code,
+            elapsed_ms=elapsed_ms,
+            error=run.error,
+        )
+        return run
+
     def post_events(
         self,
         *,
@@ -922,6 +1034,27 @@ class BackendClient:
         if isinstance(payload, dict):
             detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
         return CheckinsRun.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
+
+    @staticmethod
+    def _parse_asks_response(response: requests.Response) -> AsksRun:
+        status = response.status_code
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if status == 200:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            return AsksRun.from_payload(data)
+
+        if status == 401:
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            return AsksRun.unavailable(reason="unauthorized", error=_excerpt(str(detail or response.text)))
+
+        detail: Optional[str] = None
+        if isinstance(payload, dict):
+            detail = str(payload.get("message") or payload.get("detail") or payload.get("error_code") or "")
+        return AsksRun.unavailable(reason=f"http_{status}", error=_excerpt(detail or response.text) or None)
 
     @staticmethod
     def _parse_ledger_response(response: requests.Response) -> LedgerRun:

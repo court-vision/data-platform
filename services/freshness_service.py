@@ -67,10 +67,10 @@ WRITE_COLUMNS = ("updated_at", "last_updated", "captured_at", "created_at", "sen
 # without a row). move_ledger: its rows are dated by the move, so a night when
 # no team moved leaves the table's last date where it was. dime_checkins: only
 # when a switched-on team has a check-in due, so the off-season (or every team
-# paused) leaves it as it was. news_feed: only when a source wrote something new,
-# and its items have no game date.
+# paused) leaves it as it was. dime_asks: only when a user's ask falls due. news_feed:
+# only when a source wrote something new, and its items have no game date.
 CONDITIONAL_WRITERS = frozenset({"lineup_alerts", "breakout_detection", "move_ledger", "dime_checkins",
-                                 "news_feed"})
+                                 "dime_asks", "news_feed"})
 
 # Tables dated by the run, not by the game night, and how far ahead that is.
 # daily_matchup_scores stamps its rows with the Central calendar date it ran
