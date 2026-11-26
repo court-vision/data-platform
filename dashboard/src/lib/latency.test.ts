@@ -6,11 +6,13 @@ import {
   formatCalls,
   formatMs,
   formatShare,
+  formatTotal,
   formatSlice,
   groupOf,
   groupsUsed,
   msTick,
   niceMs,
+  parseDirection,
   parseSort,
   parseWindow,
   partRows,
@@ -52,10 +54,32 @@ describe("latency", () => {
     expect(sortRoutes([busy, many, slow], "p95")[0].route).toBe("/v1/matchups")
   })
 
+  test("any column orders either way; routes go A to Z first, numbers biggest first", () => {
+    const busy = route({ route: "/v1/rankings", requests: 1000, mean_ms: 20, p50_ms: 15, errors: 0, parts: { app: 20 } })
+    const slow = route({ route: "/v1/matchups", requests: 50, mean_ms: 900, p50_ms: 700, errors: 3, parts: { espn: 800, app: 100 } })
+    const quiet = route({ route: "/v1/health", requests: 5, mean_ms: 2, p50_ms: null, errors: 0, parts: {} })
+    const names = (sort: Parameters<typeof sortRoutes>[1], direction?: "asc" | "desc") =>
+      sortRoutes([busy, slow, quiet], sort, direction).map((r) => r.route)
+
+    expect(names("route")).toEqual(["/v1/health", "/v1/matchups", "/v1/rankings"])
+    expect(names("route", "desc")).toEqual(["/v1/rankings", "/v1/matchups", "/v1/health"])
+    expect(names("time", "asc")).toEqual(["/v1/health", "/v1/rankings", "/v1/matchups"])
+    // No p50 and no split: last, whichever way.
+    expect(names("p50")).toEqual(["/v1/matchups", "/v1/rankings", "/v1/health"])
+    expect(names("p50", "asc")).toEqual(["/v1/rankings", "/v1/matchups", "/v1/health"])
+    expect(names("outside")).toEqual(["/v1/matchups", "/v1/rankings", "/v1/health"])
+    // A tie goes A to Z in both directions.
+    expect(names("errors")).toEqual(["/v1/matchups", "/v1/health", "/v1/rankings"])
+    expect(names("errors", "asc")).toEqual(["/v1/health", "/v1/rankings", "/v1/matchups"])
+  })
+
   test("formats milliseconds, shares and calls for reading", () => {
     expect([formatMs(4.25), formatMs(86.4), formatMs(1240), formatMs(12400), formatMs(null)]).toEqual(["4.3 ms", "86 ms", "1.24 s", "12.4 s", "—"])
     expect([formatShare(0.004), formatShare(0.42), formatShare(null)]).toEqual(["<1%", "42%", "—"])
     expect([formatCalls(1), formatCalls(2.25), formatCalls(0)]).toEqual(["1 call", "2.3 calls", "—"])
+    expect([formatTotal(10_400), formatTotal(252_000), formatTotal(11_160_000), formatTotal(511_200_000), formatTotal(null)]).toEqual([
+      "10.4 s", "4.2 min", "3.1 h", "142 h", "—",
+    ])
   })
 
   test("an axis tops out at a round number whose half is round", () => {
@@ -65,7 +89,13 @@ describe("latency", () => {
 
   test("the window and order come from the URL, unknown values fall back", () => {
     expect([parseWindow("7d"), parseWindow("2d"), parseWindow(null)]).toEqual(["7d", "24h", "24h"])
-    expect([parseSort("p95"), parseSort("vibes")]).toEqual(["p95", "time"])
+    // "time", "p95" and "requests" were the picker's: their addresses still work.
+    expect([parseSort("p95"), parseSort("requests"), parseSort("outside"), parseSort("vibes"), parseSort(null)]).toEqual([
+      "p95", "requests", "outside", "time", "time",
+    ])
+    expect([parseDirection(null, "time"), parseDirection(null, "route"), parseDirection("asc", "p95"), parseDirection("up", "p95")]).toEqual([
+      "desc", "asc", "asc", "desc",
+    ])
     expect(routeHref({ method: "GET", route: "/v1/players/{player_id}/stats" }, "7d")).toBe(
       "/latency/route?method=GET&route=%2Fv1%2Fplayers%2F%7Bplayer_id%7D%2Fstats&window=7d",
     )

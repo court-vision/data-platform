@@ -1,5 +1,5 @@
 import * as Popover from "@radix-ui/react-popover"
-import { ArrowLeft, TriangleAlert } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowUp, TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
 import { Link } from "react-router"
 
@@ -225,6 +225,50 @@ export function Choice<T extends string>(props: {
       <span className={dk.label}>{props.label}</span>
       <Rail {...props} />
     </span>
+  )
+}
+
+/**
+ * A table column's head that orders the table by it: a click orders by the
+ * column, a second click turns the order round. The arrow shows the order;
+ * on a column not in use it shows on hover, pointing the way a click would.
+ * A number column's arrow sits before its label, so the label stays flush
+ * with the numbers under it.
+ */
+export function SortHead<T extends string>({
+  column,
+  label,
+  sort,
+  direction,
+  firstDirection,
+  onSort,
+  num,
+  title,
+}: {
+  column: T
+  label: ReactNode
+  sort: T
+  direction: "asc" | "desc"
+  /** The order a first click gives. */
+  firstDirection: "asc" | "desc"
+  onSort: (column: T) => void
+  num?: boolean
+  title?: string
+}) {
+  const active = sort === column
+  const shown = active ? direction : firstDirection
+  const Arrow = shown === "asc" ? ArrowUp : ArrowDown
+  return (
+    <th
+      scope="col"
+      className={num ? s.num : undefined}
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : undefined}
+    >
+      <button type="button" className={s.sortHead} data-active={active} data-end={num || undefined} title={title} onClick={() => onSort(column)}>
+        <span>{label}</span>
+        <Arrow size={11} strokeWidth={2.25} className={s.sortArrow} aria-hidden />
+      </button>
+    </th>
   )
 }
 

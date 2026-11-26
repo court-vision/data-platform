@@ -1,21 +1,25 @@
 import { Link, useSearchParams } from "react-router"
 
 import { AnatomyBar, AnatomyKey } from "@/components/Anatomy"
-import { Block, Choice, Head, Notice, Page, RefreshNote, Sep, SheetSkeleton, Tiles, type Tone } from "@/components/blocks"
+import { Block, Choice, Head, Notice, Page, RefreshNote, Sep, SheetSkeleton, SortHead, Tiles, type Tone } from "@/components/blocks"
 import { usePageContext } from "@/components/shell/pageContext"
 import { useNow } from "@/hooks/useNow"
 import { LATENCY_REFETCH_MS, useLatency } from "@/hooks/useLatency"
 import {
+  defaultDirection,
   externalShare,
   formatMs,
   formatShare,
+  formatTotal,
   groupsUsed,
+  parseDirection,
   parseSort,
   parseWindow,
   routeHref,
-  SORTS,
   sortRoutes,
+  totalTime,
   WINDOWS,
+  type Direction,
   type LatencyOverview,
   type LatencyStats,
   type LatencyWindow,
@@ -27,15 +31,16 @@ import l from "@/components/latency.module.css"
 
 /**
  * Every backend route's response times, and where its time goes: ESPN, the
- * NBA, Postgres, our own code. The window and the order live in the URL; the
- * text names the window of the data on screen, which lags the URL while
- * another window loads.
+ * NBA, Postgres, our own code. The window and the order (the column and its
+ * direction, set from the table's heads) live in the URL; the text names the
+ * window of the data on screen, which lags the URL while another window loads.
  */
 export function Latency() {
   usePageContext("Latency")
   const [params, setParams] = useSearchParams()
   const window = parseWindow(params.get("window"))
   const sort = parseSort(params.get("sort"))
+  const direction = parseDirection(params.get("dir"), sort)
   const query = useLatency(window)
   const now = useNow()
   const data = query.data
@@ -46,6 +51,23 @@ export function Latency() {
         const next = new URLSearchParams(current)
         if (value === fallback) next.delete(name)
         else next.set(name, value)
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  /** A head's click: its column, biggest first (routes A to Z); the column in use turns round. */
+  function orderBy(column: Sort) {
+    const nextDirection: Direction =
+      column === sort ? (direction === "asc" ? "desc" : "asc") : defaultDirection(column)
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (column === "time") next.delete("sort")
+        else next.set("sort", column)
+        if (nextDirection === defaultDirection(column)) next.delete("dir")
+        else next.set("dir", nextDirection)
         return next
       },
       { replace: true },
@@ -85,7 +107,14 @@ export function Latency() {
       ) : (
         <>
           <TotalsTiles totals={data.totals} window={data.window} />
-          <RoutesBlock data={data} window={window} sort={sort} onWindow={(value) => update("window", value, "24h")} onSort={(value) => update("sort", value, "time")} />
+          <RoutesBlock
+            data={data}
+            window={window}
+            sort={sort}
+            direction={direction}
+            onWindow={(value) => update("window", value, "24h")}
+            onSort={orderBy}
+          />
         </>
       )}
     </Page>
@@ -127,42 +156,56 @@ function RoutesBlock({
   data,
   window,
   sort,
+  direction,
   onWindow,
   onSort,
 }: {
   data: LatencyOverview
   window: LatencyWindow
   sort: Sort
+  direction: Direction
   onWindow: (value: LatencyWindow) => void
-  onSort: (value: Sort) => void
+  onSort: (column: Sort) => void
 }) {
-  const routes = sortRoutes(data.routes, sort)
+  const routes = sortRoutes(data.routes, sort, direction)
+  const head = (column: Sort, label: string, num = true, title?: string) => (
+    <SortHead
+      column={column}
+      label={label}
+      sort={sort}
+      direction={direction}
+      firstDirection={defaultDirection(column)}
+      onSort={onSort}
+      num={num}
+      title={title}
+    />
+  )
   return (
     <Block
       title="Routes"
       count={routes.length}
       right={<WindowChoice window={window} onChange={onWindow} />}
-      text="The bar splits the route's average request into where its time went, as shares of it: point at it for each part's time and share. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
+      text="Press a column's head to order the routes by it, and again to turn the order round. Total time is every request's time added up: what the route cost the service over the window. The bar splits the route's average request into where its time went, as shares of it: point at it for each part's time and share. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
     >
       <div className={l.controls}>
-        <Choice label="Order by" options={SORTS} value={sort} onChange={onSort} />
         <AnatomyKey groups={groupsUsed(routes.map((route) => route.parts))} />
       </div>
       {routes.length === 0 ? (
         <p className={s.empty}>No requests in the last {data.window}.</p>
       ) : (
         <div className={s.bleed}>
-          <table className={s.table} style={{ minWidth: "60rem" }}>
+          <table className={s.table} style={{ minWidth: "66rem" }}>
             <thead>
               <tr>
-                <th scope="col">Route</th>
-                <th scope="col" className={s.num}>Requests</th>
-                <th scope="col" className={s.num}>p50</th>
-                <th scope="col" className={s.num}>p95</th>
-                <th scope="col" className={s.num}>p99</th>
-                <th scope="col" className={s.num}>5xx</th>
+                {head("route", "Route", false)}
+                {head("requests", "Requests")}
+                {head("time", "Total time", true, "Every request's time added up: requests × the average request")}
+                {head("p50", "p50")}
+                {head("p95", "p95")}
+                {head("p99", "p99")}
+                {head("errors", "5xx")}
                 <th scope="col">Where the time goes</th>
-                <th scope="col" className={s.num}>Outside our code</th>
+                {head("outside", "Outside our code")}
               </tr>
             </thead>
             <tbody>
@@ -177,6 +220,7 @@ function RoutesBlock({
                     </span>
                   </th>
                   <td className={s.num}>{route.requests.toLocaleString()}</td>
+                  <td className={s.num}>{formatTotal(totalTime(route))}</td>
                   <td className={s.num}>{formatMs(route.p50_ms)}</td>
                   <td className={s.num}>{formatMs(route.p95_ms)}</td>
                   <td className={s.num}>{formatMs(route.p99_ms)}</td>

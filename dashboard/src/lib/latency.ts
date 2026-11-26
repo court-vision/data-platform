@@ -21,27 +21,62 @@ export function parseWindow(raw: string | null): LatencyWindow {
   return WINDOWS.some((option) => option.key === raw) ? (raw as LatencyWindow) : "24h"
 }
 
-export type Sort = "time" | "p95" | "requests"
+/** A column the route table can be ordered by: its head is the control. */
+export type Sort = "route" | "requests" | "time" | "p50" | "p95" | "p99" | "errors" | "outside"
+export type Direction = "asc" | "desc"
 
-export const SORTS: readonly { key: Sort; label: string }[] = [
-  { key: "time", label: "Total time" },
-  { key: "p95", label: "p95" },
-  { key: "requests", label: "Requests" },
-]
+const SORT_KEYS: readonly Sort[] = ["route", "requests", "time", "p50", "p95", "p99", "errors", "outside"]
 
+/** The order "time" (the default) and "p95"/"requests" (from before the heads) addresses keep working. */
 export function parseSort(raw: string | null): Sort {
-  return SORTS.some((option) => option.key === raw) ? (raw as Sort) : "time"
+  return SORT_KEYS.includes(raw as Sort) ? (raw as Sort) : "time"
 }
 
-/** The time a route cost the service over the window. */
-export function totalTime(route: RouteLatency): number {
-  return route.requests * (route.mean_ms ?? 0)
+/** A column's first order when its head is clicked: routes A to Z, numbers biggest first. */
+export function defaultDirection(sort: Sort): Direction {
+  return sort === "route" ? "asc" : "desc"
 }
 
-export function sortRoutes(routes: RouteLatency[], sort: Sort): RouteLatency[] {
-  const value = (route: RouteLatency) =>
-    sort === "p95" ? route.p95_ms ?? 0 : sort === "requests" ? route.requests : totalTime(route)
-  return [...routes].sort((a, b) => value(b) - value(a) || a.route.localeCompare(b.route))
+export function parseDirection(raw: string | null, sort: Sort): Direction {
+  return raw === "asc" || raw === "desc" ? raw : defaultDirection(sort)
+}
+
+/** The time a route cost the service over the window: every request's time, added up. */
+export function totalTime(route: RouteLatency): number | null {
+  return route.mean_ms == null ? null : route.requests * route.mean_ms
+}
+
+function sortValue(route: RouteLatency, sort: Exclude<Sort, "route">): number | null {
+  switch (sort) {
+    case "requests":
+      return route.requests
+    case "time":
+      return totalTime(route)
+    case "p50":
+      return route.p50_ms
+    case "p95":
+      return route.p95_ms
+    case "p99":
+      return route.p99_ms
+    case "errors":
+      return route.errors
+    case "outside":
+      return externalShare(route.parts)
+  }
+}
+
+const byName = (a: RouteLatency, b: RouteLatency) => a.route.localeCompare(b.route) || a.method.localeCompare(b.method)
+
+/** Routes in a column's order. A route with no value there goes last either way; ties go A to Z. */
+export function sortRoutes(routes: RouteLatency[], sort: Sort, direction: Direction = defaultDirection(sort)): RouteLatency[] {
+  const sign = direction === "asc" ? 1 : -1
+  if (sort === "route") return [...routes].sort((a, b) => sign * byName(a, b))
+  return [...routes].sort((a, b) => {
+    const x = sortValue(a, sort)
+    const y = sortValue(b, sort)
+    if (x == null || y == null) return x == null && y == null ? byName(a, b) : x == null ? 1 : -1
+    return sign * (x - y) || byName(a, b)
+  })
 }
 
 /**
@@ -141,6 +176,13 @@ export function formatMs(ms: number | null | undefined): string {
   if (ms < 1000) return `${Math.round(ms)} ms`
   if (ms < 10_000) return `${(ms / 1000).toFixed(2)} s`
   return `${(ms / 1000).toFixed(1)} s`
+}
+
+/** A route's total time: as formatMs under a minute, then "4.2 min", "3.1 h", "142 h". */
+export function formatTotal(ms: number | null | undefined): string {
+  if (ms == null || ms < 60_000) return formatMs(ms)
+  const [value, unit] = ms < 3_600_000 ? [ms / 60_000, "min"] : [ms / 3_600_000, "h"]
+  return `${value < 100 ? value.toFixed(1) : Math.round(value)} ${unit}`
 }
 
 export function formatShare(share: number | null | undefined): string {
