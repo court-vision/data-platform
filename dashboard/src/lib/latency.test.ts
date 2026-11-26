@@ -92,8 +92,10 @@ describe("latency", () => {
     expect(tag({ postgres: 6, redis: 1, clerk: 80, wait: 3, app: 4 })).toBe("DB")
     expect(tag({ clerk: 80, sqlmate: 5 })).toBe("SVC")
     expect(tag({})).toBe("DB")
-    // A bucket with no time is not a call.
-    expect(tag({ claude: 0, sqlmate: 0, postgres: 3 })).toBe("DB")
+    // A key is a call even when its mean rounds to 0.0 ms (one ESPN call among 10,000 requests).
+    expect(tag({ espn: 0, postgres: 3, app: 4 })).toBe("ESPN")
+    expect(tag({ sqlmate: 0, postgres: 3 })).toBe("SVC")
+    expect(routeTagTitle({ postgres: 3, espn: 0, app: 4 })).toBe("ESPN: calls ESPN. Waits on Postgres, ESPN.")
 
     expect(routeTagTitle({ espn: 200, postgres: 20, app: 35, wait: 6 })).toBe("ESPN: calls ESPN. Waits on ESPN, Postgres.")
     expect(routeTagTitle({ app: 4 })).toBe("DB: only Postgres and Redis. Only our own code.")

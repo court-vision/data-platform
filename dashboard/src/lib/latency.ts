@@ -119,8 +119,13 @@ const TAG_OF = new Map(ROUTE_TAGS.map((tag) => [tag.key, tag]))
 const OURS = new Set(["app", "wait", "postgres", "redis", "features", "sqlmate", "fantasy_writer", "clerk"])
 const SERVICES = new Set(["features", "sqlmate", "fantasy_writer"])
 
+/**
+ * A bucket's key is the evidence of a call, not its value: the backend keeps a
+ * key whenever the window's total for it is above zero, then rounds the mean
+ * per request to 0.1 ms, so one ESPN call among 10,000 requests reads 0.0.
+ */
 export function routeTag(parts: Record<string, number>): RouteTag {
-  const touched = Object.keys(parts).filter((bucket) => parts[bucket] > 0)
+  const touched = Object.keys(parts)
   const key: RouteTag["key"] = touched.includes("claude")
     ? "ai"
     : touched.includes("espn")
@@ -139,7 +144,7 @@ export function routeTag(parts: Record<string, number>): RouteTag {
 export function routeTagTitle(parts: Record<string, number>): string {
   const tag = routeTag(parts)
   const waits = Object.entries(parts)
-    .filter(([bucket, ms]) => ms > 0 && bucket !== "app" && bucket !== "wait")
+    .filter(([bucket]) => bucket !== "app" && bucket !== "wait")
     .sort((a, b) => b[1] - a[1])
     .map(([bucket]) => bucketLabel(bucket))
   return `${tag.label}: ${tag.note}. ${waits.length ? `Waits on ${waits.join(", ")}.` : "Only our own code."}`
