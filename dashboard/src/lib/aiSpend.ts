@@ -8,6 +8,9 @@ export type UsageRow = Schemas["AiUsageRow"]
 export type SpendUser = Schemas["AiSpendUser"]
 export type UserLine = Schemas["AiUserLine"]
 export type LineKey = SpendLine["line"]
+export type SpendApp = Schemas["AiSpendApp"]
+/** What a cap can be set on: a line, or "app", the whole app's spend on every line together. */
+export type CapLineKey = Schemas["AiCapRequest"]["line"]
 export type FeatureKey = SpendRow["feature"]
 
 export type SpendWindow = "7" | "30" | "90"
@@ -25,6 +28,32 @@ export const LINES: Record<LineKey, { label: string; note: string }> = {
   desk: { label: "Dime desk", note: "Chat, the draft room, and replies in a check-in" },
   autopilot: { label: "Check-ins", note: "The check-ins Dime starts itself" },
   analyst: { label: "Analyst", note: "The live rankings' morning reads" },
+}
+
+export const APP_LINE = { label: "Whole app", note: "Every line together: none can spend past it" }
+
+export interface MonthTotal {
+  /** Settled and open together, as the caps count it. */
+  spent: number
+  open: number
+  cap: number | null
+  /** The cap is the whole app's; false: the lines' caps summed (a backend with no whole-app cap). */
+  whole: boolean
+}
+
+/** The month across every line, against the whole app's cap when the backend has one. */
+export function monthTotal(report: Pick<AiSpendReport, "lines" | "app">): MonthTotal {
+  const app = report.app
+  if (app) {
+    return { spent: app.spent_micros + app.open_micros, open: app.open_micros, cap: app.cap_micros ?? null, whole: true }
+  }
+  const open = report.lines.reduce((sum, line) => sum + line.open_micros, 0)
+  return {
+    spent: report.lines.reduce((sum, line) => sum + line.spent_micros, 0) + open,
+    open,
+    cap: report.lines.reduce((sum, line) => sum + (line.cap_micros ?? 0), 0),
+    whole: false,
+  }
 }
 
 export interface Feature {

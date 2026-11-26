@@ -48,7 +48,7 @@ export interface paths {
         /**
          * Get Ai Spend
          * @description This month's spend on each line (Dime's desk, its check-ins, the analyst)
-         *     against its cap, the ledger over the window by day, feature, user and team,
+         *     against its cap and against the whole app's, the ledger over the window by day, feature, user and team,
          *     what each call's record says it used (model and tokens), and every user with
          *     spend or a cap.
          */
@@ -71,8 +71,8 @@ export interface paths {
         get?: never;
         /**
          * Put Ai Cap
-         * @description Set a line's monthly cap, or one user's on the desk or autopilot line, from the
-         *     next turn, check-in or read on. `monthly_usd` null clears it, and the backend's
+         * @description Set a line's monthly cap, the whole app's (`line` app), or one user's on the desk
+         *     or autopilot line, from the next turn, check-in or read on. `monthly_usd` null clears it, and the backend's
          *     default applies again. `author` is the name typed on the page.
          */
         put: operations["put_ai_cap_v1_dashboard_ai_spend_caps_put"];
@@ -1825,7 +1825,7 @@ export interface components {
              * Line
              * @enum {string}
              */
-            line: "desk" | "autopilot" | "analyst";
+            line: "desk" | "autopilot" | "analyst" | "app";
             /** Updated At */
             updated_at: string | null;
             /** Updated By */
@@ -1835,8 +1835,9 @@ export interface components {
         };
         /**
          * AiCapRequest
-         * @description Set a line's monthly cap (no `user_id`) or one user's on the desk or autopilot
-         *     line. `monthly_usd` null clears it: the backend's default applies again.
+         * @description Set a line's monthly cap (no `user_id`), the whole app's (`line` app), or one
+         *     user's on the desk or autopilot line. `monthly_usd` null clears it: the backend's
+         *     default applies again.
          */
         AiCapRequest: {
             /** Author */
@@ -1845,7 +1846,7 @@ export interface components {
              * Line
              * @enum {string}
              */
-            line: "desk" | "autopilot" | "analyst";
+            line: "desk" | "autopilot" | "analyst" | "app";
             /** Monthly Usd */
             monthly_usd?: number | string | null;
             /** User Id */
@@ -1861,6 +1862,42 @@ export interface components {
             message: string;
             /** Status */
             status: string;
+        };
+        /**
+         * AiSpendApp
+         * @description The whole app's month so far against its cap: every line together.
+         */
+        AiSpendApp: {
+            /**
+             * Cap Micros
+             * @description In force; null: no cap of the user's own on this line
+             */
+            cap_micros: number | null;
+            /**
+             * Cap Set
+             * @description Set from this page
+             * @default false
+             */
+            cap_set: boolean;
+            /**
+             * Default Cap Micros
+             * @description What applies with no cap set; null: none
+             */
+            default_cap_micros: number | null;
+            /**
+             * Open Micros
+             * @description This month on every line, reserved and not settled
+             */
+            open_micros: number;
+            /**
+             * Spent Micros
+             * @description This month on every line, settled
+             */
+            spent_micros: number;
+            /** Updated At */
+            updated_at: string | null;
+            /** Updated By */
+            updated_by: string | null;
         };
         /**
          * AiSpendLine
@@ -1905,6 +1942,8 @@ export interface components {
         };
         /** AiSpendReport */
         AiSpendReport: {
+            /** @description The whole app's cap; null from a backend that has none */
+            app: components["schemas"]["AiSpendApp"] | null;
             /**
              * As Of
              * Format: date-time

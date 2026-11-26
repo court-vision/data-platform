@@ -7,6 +7,7 @@ import { usePageContext } from "@/components/shell/pageContext"
 import { AI_SPEND_REFETCH_MS, useAiSpend, useSetCap, type CapChange } from "@/hooks/useAiSpend"
 import { useNow } from "@/hooks/useNow"
 import {
+  APP_LINE,
   byDay,
   byFeature,
   byModel,
@@ -20,12 +21,12 @@ import {
   formatTokens,
   formatUsd,
   LINES,
+  monthTotal,
   parseCap,
   parseWindow,
   WINDOWS,
   type AiSpendReport,
-  type LineKey,
-  type SpendLine,
+  type CapLineKey,
   type SpendWindow,
   type UserLine,
 } from "@/lib/aiSpend"
@@ -88,7 +89,7 @@ export function AiSpend() {
         query.error ? null : <SheetSkeleton label="Loading AI spend" />
       ) : (
         <>
-          <MonthTiles lines={data.lines} />
+          <MonthTiles data={data} />
           <CapsBlock data={data} />
           <DaysBlock data={data} window={window} onWindow={setWindow} />
           <FeaturesBlock data={data} />
@@ -102,12 +103,19 @@ export function AiSpend() {
 
 // ---------------------------------------------------------------- this month
 
-function MonthTiles({ lines }: { lines: SpendLine[] }) {
-  const spent = lines.reduce((sum, line) => sum + line.spent_micros + line.open_micros, 0)
-  const cap = lines.reduce((sum, line) => sum + (line.cap_micros ?? 0), 0)
+function MonthTiles({ data }: { data: AiSpendReport }) {
+  const total = monthTotal(data)
+  const whole = capShare(total.spent, total.cap)
   const tiles: TileSpec[] = [
-    { label: "This month", value: formatUsd(spent), note: `of ${formatUsd(cap)} across every cap` },
-    ...lines.map((line) => {
+    total.whole
+      ? {
+          label: "This month",
+          value: formatUsd(total.spent),
+          tone: whole.tone,
+          note: `${formatShare(whole.share)} of ${formatUsd(total.cap)} in all`,
+        }
+      : { label: "This month", value: formatUsd(total.spent), note: `of ${formatUsd(total.cap)} across every cap` },
+    ...data.lines.map((line) => {
       const used = line.spent_micros + line.open_micros
       const { share, tone } = capShare(used, line.cap_micros)
       const open = line.open_micros > 0 ? ` · ${formatUsd(line.open_micros)} open` : ""
@@ -140,7 +148,7 @@ function CapsBlock({ data }: { data: AiSpendReport }) {
   const authorId = useId()
   const save = useSetCap()
 
-  function change(line: LineKey, userId: number | null, usd: string | null) {
+  function change(line: CapLineKey, userId: number | null, usd: string | null) {
     rememberAuthor(author)
     return save.mutateAsync({ line, userId, usd, author: author.trim() || DEFAULT_AUTHOR } satisfies CapChange)
   }
@@ -150,8 +158,9 @@ function CapsBlock({ data }: { data: AiSpendReport }) {
       title="Caps"
       text={
         <>
-          A line stops taking new turns once less than one turn's ceiling is left under its cap ({formatUsd(data.turn_max_micros)} a desk turn
-          or check-in, {formatUsd(data.read_max_micros)} an analyst read). A cap set here replaces the backend's default from the next turn on;
+          A line stops taking new turns once less than one turn's ceiling is left under its cap, or under the whole app's, which every line's
+          spend counts against together ({formatUsd(data.turn_max_micros)} a desk turn or check-in, {formatUsd(data.read_max_micros)} an
+          analyst read). A cap set here replaces the backend's default from the next turn on;
           Default hands it back. Open spend is a turn running now, or one that died mid-call, counted at its ceiling.
         </>
       }
@@ -174,30 +183,17 @@ function CapsBlock({ data }: { data: AiSpendReport }) {
             </tr>
           </thead>
           <tbody>
+            {data.app && (
+              <CapRow label={APP_LINE.label} note={APP_LINE.note} cap={data.app} onSave={(usd) => change("app", null, usd)} />
+            )}
             {data.lines.map((line) => (
-              <tr key={line.line}>
-                <th scope="row">
-                  {LINES[line.line].label}
-                  <span className={a.sub}>{LINES[line.line].note}</span>
-                </th>
-                <td className={s.num}>
-                  {formatUsd(line.spent_micros + line.open_micros)}
-                  {line.open_micros > 0 && <span className={a.sub}>{formatUsd(line.open_micros)} open</span>}
-                </td>
-                <td className={a.meterCell}>
-                  <Meter spent={line.spent_micros + line.open_micros} cap={line.cap_micros} />
-                </td>
-                <td>
-                  <CapEditor
-                    label={`${LINES[line.line].label} monthly cap`}
-                    cap={line}
-                    onSave={(usd) => change(line.line, null, usd)}
-                  />
-                </td>
-                <td>
-                  <SetBy cap={line} />
-                </td>
-              </tr>
+              <CapRow
+                key={line.line}
+                label={LINES[line.line].label}
+                note={LINES[line.line].note}
+                cap={line}
+                onSave={(usd) => change(line.line, null, usd)}
+              />
             ))}
           </tbody>
         </table>
@@ -251,6 +247,41 @@ function CapsBlock({ data }: { data: AiSpendReport }) {
         </div>
       )}
     </Block>
+  )
+}
+
+/** One cap's row: a line's, or the whole app's. */
+function CapRow({
+  label,
+  note,
+  cap,
+  onSave,
+}: {
+  label: string
+  note: string
+  cap: { spent_micros: number; open_micros: number; cap_micros?: number | null; default_cap_micros?: number | null; cap_set: boolean; updated_by?: string | null; updated_at?: string | null }
+  onSave: SaveCap
+}) {
+  return (
+    <tr>
+      <th scope="row">
+        {label}
+        <span className={a.sub}>{note}</span>
+      </th>
+      <td className={s.num}>
+        {formatUsd(cap.spent_micros + cap.open_micros)}
+        {cap.open_micros > 0 && <span className={a.sub}>{formatUsd(cap.open_micros)} open</span>}
+      </td>
+      <td className={a.meterCell}>
+        <Meter spent={cap.spent_micros + cap.open_micros} cap={cap.cap_micros} />
+      </td>
+      <td>
+        <CapEditor label={`${label} monthly cap`} cap={cap} onSave={onSave} />
+      </td>
+      <td>
+        <SetBy cap={cap} />
+      </td>
+    </tr>
   )
 }
 

@@ -11,6 +11,7 @@ import {
   featuresUsed,
   formatTokens,
   formatUsd,
+  monthTotal,
   niceTop,
   parseCap,
   parseWindow,
@@ -70,6 +71,18 @@ describe("money", () => {
     expect(capShare(100, 100)).toEqual({ share: 1, tone: "down" })
     expect(capShare(0, 0)).toEqual({ share: 0, tone: "down" })
     expect(capShare(1, 0)).toEqual({ share: 1, tone: "down" })
+  })
+
+  test("the month is counted against the whole app's cap, or the lines' caps summed from a backend with none", () => {
+    const cap = { cap_set: false, updated_at: null, updated_by: null }
+    const lines = [
+      { line: "desk" as const, spent_micros: 3_000_000, open_micros: 1_000_000, cap_micros: 100_000_000, default_cap_micros: 100_000_000, ...cap },
+      { line: "analyst" as const, spent_micros: 2_000_000, open_micros: 0, cap_micros: 40_000_000, default_cap_micros: 40_000_000, ...cap },
+    ]
+    const app = { spent_micros: 5_000_000, open_micros: 1_000_000, cap_micros: 100_000_000, default_cap_micros: 100_000_000, ...cap }
+
+    expect(monthTotal({ lines, app })).toEqual({ spent: 6_000_000, open: 1_000_000, cap: 100_000_000, whole: true })
+    expect(monthTotal({ lines, app: null })).toEqual({ spent: 6_000_000, open: 1_000_000, cap: 140_000_000, whole: false })
   })
 
   test("the window is 7, 30 or 90 days, 30 when the URL says otherwise", () => {

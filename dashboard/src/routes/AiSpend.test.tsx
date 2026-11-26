@@ -49,6 +49,8 @@ function report(overrides: Partial<AiSpendReport> = {}): AiSpendReport {
         autopilot: userLine(),
       },
     ],
+    // A backend with no whole-app cap: the month is against the lines' caps summed
+    app: null,
     teams: [{ team_id: 4, user_id: 1, name: "Dime's Delectable Team" }],
     rows: [
       { day: "2026-11-18", line: "desk", feature: "chat", detail: null, user_id: 1, team_id: 4, cost_micros: 1_200_000, open_micros: 0, entries: 4 },
@@ -112,6 +114,28 @@ describe("AiSpend", () => {
 
     // The ceilings a cap has to leave room for
     expect(html).toContain("$0.50 a desk turn or check-in, $0.20 an analyst read")
+  })
+
+  test("the whole app's cap tops the month and the caps, editable like a line's", () => {
+    const app = {
+      spent_micros: 18_000_000, open_micros: 500_000, cap_micros: 20_000_000, default_cap_micros: 100_000_000,
+      cap_set: true, updated_at: "2026-11-23T05:00:00Z", updated_by: "james",
+    }
+    const html = render("/ai-spend", "30", report({ app }))
+
+    expect(html).toContain("93% of $20.00 in all")
+    expect(html).not.toContain("across every cap")
+
+    const whole = rowOf(html, "Whole app<span")
+    expect(whole).toContain("Every line together")
+    expect(whole).toContain('aria-label="$18.50 of $20.00 (93%)"')
+    expect(whole).toContain('data-tone="warn"')
+    expect(whole).toContain('aria-label="Whole app monthly cap"')
+    expect(whole).toContain('value="20"')
+    expect(whole).toContain('title="Back to $100.00"')
+    expect(whole).toContain("james · ")
+    // It comes before the lines it caps
+    expect(html.indexOf("Whole app<span")).toBeLessThan(html.indexOf("Dime desk<span"))
   })
 
   test("each user's desk share and check-in cap, and who has no access", () => {

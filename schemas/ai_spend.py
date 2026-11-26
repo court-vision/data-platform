@@ -14,6 +14,8 @@ Days are UTC, the calendar the monthly caps reset on.
              rankings' morning reads)
     feature  chat | draft | checkin_reply | checkin | analyst | unlinked (desk
              spend whose chat was deleted, or whose turn was never written)
+    app      the whole app's cap, over every line together (backend migration
+             0056): a cap only, never a ledger row's line
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from pydantic import Field
 from schemas.common import ApiModel
 
 AiLine = Literal["desk", "autopilot", "analyst"]
+AiCapLine = Literal["desk", "autopilot", "analyst", "app"]
 AiFeature = Literal["chat", "draft", "checkin_reply", "checkin", "analyst", "unlinked"]
 
 
@@ -47,6 +50,13 @@ class AiSpendLine(AiCapView):
     spent_micros: int = Field(..., description="This month, settled")
     open_micros: int = Field(..., description="This month, reserved and not settled: running now, or died "
                                               "mid-call and counted at its ceiling")
+
+
+class AiSpendApp(AiCapView):
+    """The whole app's month so far against its cap: every line together."""
+
+    spent_micros: int = Field(..., description="This month on every line, settled")
+    open_micros: int = Field(..., description="This month on every line, reserved and not settled")
 
 
 class AiSpendRow(ApiModel):
@@ -104,6 +114,7 @@ class AiSpendReport(ApiModel):
     turn_max_micros: int = Field(..., description="What one desk turn or check-in reserves before it starts")
     read_max_micros: int = Field(..., description="What one analyst read reserves before it starts")
     lines: list[AiSpendLine]
+    app: Optional[AiSpendApp] = Field(None, description="The whole app's cap; null from a backend that has none")
     rows: list[AiSpendRow]
     usage: list[AiUsageRow]
     users: list[AiSpendUser]
@@ -119,17 +130,18 @@ class AiSpendResponse(ApiModel):
 
 
 class AiCapRequest(ApiModel):
-    """Set a line's monthly cap (no `user_id`) or one user's on the desk or autopilot
-    line. `monthly_usd` null clears it: the backend's default applies again."""
+    """Set a line's monthly cap (no `user_id`), the whole app's (`line` app), or one
+    user's on the desk or autopilot line. `monthly_usd` null clears it: the backend's
+    default applies again."""
 
-    line: AiLine
+    line: AiCapLine
     user_id: Optional[int] = Field(None, ge=1)
     monthly_usd: Optional[Decimal] = Field(None, ge=0, le=1000, max_digits=6, decimal_places=2)
     author: Optional[str] = Field(None, max_length=80)
 
 
 class AiCapData(AiCapView):
-    line: AiLine
+    line: AiCapLine
     user_id: Optional[int] = None
 
 

@@ -2,7 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 import { toast } from "sonner"
 
 import { apiFetch, type Schemas } from "@/lib/api"
-import type { LineKey, SpendWindow } from "@/lib/aiSpend"
+import type { CapLineKey, SpendWindow } from "@/lib/aiSpend"
 import { useToken } from "@/lib/token"
 
 /** Spend lands a turn at a time; a minute is fresh enough for a page read by eye. */
@@ -32,7 +32,7 @@ export function useAiSpend(window: SpendWindow) {
 }
 
 export interface CapChange {
-  line: LineKey
+  line: CapLineKey
   userId: number | null
   /** Dollars as typed ("25", "12.50"), or null to go back to the default. */
   usd: string | null
