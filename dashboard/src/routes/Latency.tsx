@@ -16,6 +16,8 @@ import {
   parseSort,
   parseWindow,
   routeHref,
+  routeTag,
+  routeTagTitle,
   sortRoutes,
   totalTime,
   WINDOWS,
@@ -125,6 +127,16 @@ function WindowChoice({ window, onChange }: { window: LatencyWindow; onChange: (
   return <Choice label="Over" options={WINDOWS} value={window} onChange={onChange} />
 }
 
+/** A route's tag (AI, ESPN, NBA, CV, Other) as a chip in its anatomy colour; the hover text says what it waits on. */
+export function RouteTagChip({ parts }: { parts: Record<string, number> }) {
+  const tag = routeTag(parts)
+  return (
+    <span className={`${l.viz} ${l.tag}`} data-group={tag.group} title={routeTagTitle(parts)}>
+      {tag.label}
+    </span>
+  )
+}
+
 export function errorTone(stats: LatencyStats): Tone | undefined {
   if (stats.requests === 0 || stats.errors === 0) return undefined
   return stats.errors / stats.requests >= 0.01 ? "down" : "warn"
@@ -185,7 +197,7 @@ function RoutesBlock({
       title="Routes"
       count={routes.length}
       right={<WindowChoice window={window} onChange={onWindow} />}
-      text="Press a column's head to order the routes by it, and again to turn the order round. Total time is every request's time added up: what the route cost the service over the window. The bar splits the route's average request into where its time went, as shares of it: point at it for each part's time and share. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
+      text="Press a column's head to order by it, and again to turn it round. A route's tag is what it calls: AI (Claude), ESPN, NBA, Other (Yahoo or another outside service), or CV when it only touches Postgres, Redis and our own services. Total time is every request's time added up: what the route cost the service over the window. The bar splits the route's average request into where its time went, as shares of it: point at it for each part's time and share. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
     >
       <div className={l.controls}>
         <AnatomyKey groups={groupsUsed(routes.map((route) => route.parts))} />
@@ -194,9 +206,10 @@ function RoutesBlock({
         <p className={s.empty}>No requests in the last {data.window}.</p>
       ) : (
         <div className={s.bleed}>
-          <table className={s.table} style={{ minWidth: "66rem" }}>
+          <table className={s.table} style={{ minWidth: "70rem" }}>
             <thead>
               <tr>
+                {head("tag", "Tag", false, "What the route calls: AI, then ESPN, then NBA, then Other; CV when it only touches our own things")}
                 {head("route", "Route", false)}
                 {head("requests", "Requests")}
                 {head("time", "Total time", true, "Every request's time added up: requests × the average request")}
@@ -211,6 +224,9 @@ function RoutesBlock({
             <tbody>
               {routes.map((route) => (
                 <tr key={`${route.method} ${route.route}`}>
+                  <td className={l.tagCell}>
+                    <RouteTagChip parts={route.parts} />
+                  </td>
                   <th scope="row" className={l.routeCell}>
                     <span className={l.routeName}>
                       <span className={l.method}>{route.method}</span>

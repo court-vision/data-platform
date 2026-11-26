@@ -17,6 +17,8 @@ import {
   parseWindow,
   partRows,
   routeHref,
+  routeTag,
+  routeTagTitle,
   segments,
   sortRoutes,
   type RouteLatency,
@@ -73,6 +75,40 @@ describe("latency", () => {
     expect(names("errors", "asc")).toEqual(["/v1/health", "/v1/rankings", "/v1/matchups"])
   })
 
+  test("a route's tag is what it calls: AI, then ESPN, then NBA, then Other, else CV", () => {
+    const tag = (parts: Record<string, number>) => routeTag(parts).label
+    expect(tag({ claude: 4000, espn: 300, postgres: 20, app: 50 })).toBe("AI")
+    expect(tag({ espn: 200, yahoo: 60, nba: 5, app: 30 })).toBe("ESPN")
+    expect(tag({ nba: 30, other_http: 4, postgres: 9 })).toBe("NBA")
+    expect(tag({ yahoo: 120, postgres: 10, app: 20 })).toBe("Other")
+    expect(tag({ other_http: 40, app: 5 })).toBe("Other")
+    expect(tag({ a_bucket_from_next_month: 3, app: 5 })).toBe("Other")
+    // Our own things, and Clerk (any signed-in route can fetch its keys), are CV.
+    expect(tag({ postgres: 6, redis: 1, sqlmate: 40, features: 12, fantasy_writer: 90, clerk: 80, wait: 3, app: 4 })).toBe("CV")
+    expect(tag({})).toBe("CV")
+    // A bucket with no time is not a call.
+    expect(tag({ claude: 0, postgres: 3 })).toBe("CV")
+
+    expect(routeTagTitle({ espn: 200, postgres: 20, app: 35, wait: 6 })).toBe("ESPN: calls ESPN. Waits on ESPN, Postgres.")
+    expect(routeTagTitle({ app: 4 })).toBe("CV: only Postgres, Redis and our own services. Only our own code.")
+  })
+
+  test("ordered by tag, routes group as AI, ESPN, NBA, CV, Other, the costliest first within each", () => {
+    const chat = route({ route: "/v1/ai/chat", requests: 10, mean_ms: 5000, parts: { claude: 4800, app: 200 } })
+    const lineup = route({ route: "/v1/lineup", requests: 100, mean_ms: 300, parts: { espn: 250, app: 50 } })
+    const matchup = route({ route: "/v1/matchup", requests: 1000, mean_ms: 200, parts: { espn: 150, app: 50 } })
+    const games = route({ route: "/v1/games", requests: 50, mean_ms: 40, parts: { nba: 30, app: 10 } })
+    const rankings = route({ route: "/v1/rankings", requests: 900, mean_ms: 8, parts: { postgres: 3, app: 5 } })
+    const yahoo = route({ route: "/v1/yahoo", requests: 3, mean_ms: 400, parts: { yahoo: 380, app: 20 } })
+    const all = [rankings, yahoo, games, matchup, chat, lineup]
+    expect(sortRoutes(all, "tag").map((r) => r.route)).toEqual([
+      "/v1/ai/chat", "/v1/matchup", "/v1/lineup", "/v1/games", "/v1/rankings", "/v1/yahoo",
+    ])
+    expect(sortRoutes(all, "tag", "desc").map((r) => r.route)).toEqual([
+      "/v1/yahoo", "/v1/rankings", "/v1/games", "/v1/matchup", "/v1/lineup", "/v1/ai/chat",
+    ])
+  })
+
   test("formats milliseconds, shares and calls for reading", () => {
     expect([formatMs(4.25), formatMs(86.4), formatMs(1240), formatMs(12400), formatMs(null)]).toEqual(["4.3 ms", "86 ms", "1.24 s", "12.4 s", "—"])
     expect([formatShare(0.004), formatShare(0.42), formatShare(null)]).toEqual(["<1%", "42%", "—"])
@@ -93,8 +129,8 @@ describe("latency", () => {
     expect([parseSort("p95"), parseSort("requests"), parseSort("outside"), parseSort("vibes"), parseSort(null)]).toEqual([
       "p95", "requests", "outside", "time", "time",
     ])
-    expect([parseDirection(null, "time"), parseDirection(null, "route"), parseDirection("asc", "p95"), parseDirection("up", "p95")]).toEqual([
-      "desc", "asc", "asc", "desc",
+    expect([parseDirection(null, "time"), parseDirection(null, "route"), parseDirection(null, "tag"), parseDirection("asc", "p95"), parseDirection("up", "p95")]).toEqual([
+      "desc", "asc", "asc", "asc", "desc",
     ])
     expect(routeHref({ method: "GET", route: "/v1/players/{player_id}/stats" }, "7d")).toBe(
       "/latency/route?method=GET&route=%2Fv1%2Fplayers%2F%7Bplayer_id%7D%2Fstats&window=7d",
