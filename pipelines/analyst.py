@@ -11,7 +11,7 @@ One run, in order:
 
 1. **The screen** (`services.analyst_screen`): fixed rules pick the players
    whose news might say such a thing. A player whose facts are the ones his
-   last completed read saw is not read again, and a morning reads at most
+   last completed read saw is not read again, and a run reads at most
    `ANALYST_MAX_READS` players, the strongest reasons first.
 2. **The reads**: one call to the backend per player
    (`services.analyst_client`), a few at a time. The backend owns the model
