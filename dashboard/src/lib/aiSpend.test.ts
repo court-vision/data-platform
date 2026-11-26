@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  billDayShort,
+  billGap,
+  billProblem,
   byDay,
   byFeature,
   byModel,
@@ -9,12 +12,15 @@ import {
   capInput,
   capShare,
   featuresUsed,
+  formatGap,
   formatTokens,
   formatUsd,
+  monthLabel,
   monthTotal,
   niceTop,
   parseCap,
   parseWindow,
+  recentBillDays,
   type SpendRow,
   type UsageRow,
 } from "@/lib/aiSpend"
@@ -201,3 +207,37 @@ describe("by feature, model and team", () => {
 function line() {
   return { spent_micros: 0, cap_micros: null, default_cap_micros: null, cap_set: false, updated_at: null, updated_by: null }
 }
+
+describe("the bill check", () => {
+  test("the ledger is held to the app's own key, or the whole bill when Anthropic named none", () => {
+    expect(billGap({ billed_micros: 7_710_000, ours_micros: 7_300_000, ledger_micros: 7_000_000 })).toEqual({
+      against: 7_300_000, gap: -300_000, share: -300_000 / 7_300_000,
+    })
+    expect(billGap({ billed_micros: 2_000_000, ours_micros: null, ledger_micros: 2_100_000 }).against).toBe(2_000_000)
+    expect(billGap({ billed_micros: 0, ours_micros: 0, ledger_micros: 0 }).share).toBeNull()
+  })
+
+  test("a gap carries its sign, and a fraction of a cent is none", () => {
+    expect(formatGap(120_000)).toBe("+$0.12")
+    expect(formatGap(-3_350_000)).toBe("−$3.35")
+    expect(formatGap(-4_000)).toBe("$0.00")
+  })
+
+  test("each state that isn't ok says what to do", () => {
+    expect(billProblem({ state: "ok", message: null })).toBeNull()
+    expect(billProblem({ state: "no_key", message: "x" })).toContain("ANTHROPIC_ADMIN_KEY")
+    expect(billProblem({ state: "refused", message: "Anthropic answered 403" })).toContain("(Anthropic answered 403)")
+    expect(billProblem({ state: "something_new", message: null })).toBe("The bill check answered something_new.")
+  })
+
+  test("months by name, days newest first, and a day past the refresh may read short", () => {
+    expect(monthLabel("2026-11-01")).toBe("November 2026")
+    const days = ["2026-11-01", "2026-11-03", "2026-11-02"].map((day) => ({
+      day, billed_micros: 0, ours_micros: null, ledger_micros: 0, open_micros: 0,
+    }))
+    expect(recentBillDays(days, 2).map((d) => d.day)).toEqual(["2026-11-03", "2026-11-02"])
+    expect(billDayShort("2026-11-25", "2026-11-26T08:00:00Z")).toBe(false)
+    expect(billDayShort("2026-11-26", "2026-11-26T08:00:00Z")).toBe(true)
+    expect(billDayShort("2026-11-01", null)).toBe(true)
+  })
+})

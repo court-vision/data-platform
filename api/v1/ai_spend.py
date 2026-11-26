@@ -9,6 +9,7 @@ answer through. Everything takes the pipeline bearer token.
 
 Routes:
     GET /v1/dashboard/ai-spend       — this month against each cap, and the last N UTC days
+    GET /v1/dashboard/ai-spend/bill  — Anthropic's bill beside the ledger, last month and this one
     PUT /v1/dashboard/ai-spend/caps  — set or clear one line's cap, the whole app's, or one user's on a line
 """
 
@@ -23,6 +24,8 @@ from core.logging import get_correlation_id
 from core.pipeline_auth import verify_pipeline_token
 from core.settings import settings
 from schemas.ai_spend import (
+    AiBill,
+    AiBillResponse,
     AiCapData,
     AiCapRequest,
     AiCapResponse,
@@ -75,6 +78,29 @@ async def get_ai_spend(
     except ValidationError as exc:
         raise _malformed() from exc
     return AiSpendResponse(status="success", message=f"AI spend over {days} days", data=report)
+
+
+@router.get("/bill", response_model=AiBillResponse)
+async def get_ai_bill() -> AiBillResponse:
+    """
+    The bill check: what Anthropic bills the organization, last month and this one by
+    UTC day and by API key, beside the ledger. The backend reads Anthropic with its
+    Admin API key; `state` says why when it couldn't (no key, a refused key).
+    """
+    try:
+        data = await asyncio.to_thread(_client().bill, get_correlation_id())
+    except BackendUnavailable as exc:
+        raise _unavailable(exc) from exc
+    except BackendRefused as exc:
+        if exc.status_code == 404:
+            # A backend from before the bill check
+            raise HTTPException(status_code=502, detail="The backend has no bill check yet") from exc
+        raise HTTPException(status_code=502, detail=exc.message) from exc
+    try:
+        bill = AiBill.model_validate(data)
+    except ValidationError as exc:
+        raise _malformed() from exc
+    return AiBillResponse(status="success", message=f"Bill check: {bill.state}", data=bill)
 
 
 @router.put("/caps", response_model=AiCapResponse)

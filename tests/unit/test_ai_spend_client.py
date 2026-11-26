@@ -10,7 +10,7 @@ import pytest
 import requests
 import responses
 
-from services.ai_spend_client import CAPS_PATH, SPEND_PATH, AiSpendClient, BackendRefused, BackendUnavailable
+from services.ai_spend_client import BILL_PATH, CAPS_PATH, SPEND_PATH, AiSpendClient, BackendRefused, BackendUnavailable
 
 pytestmark = pytest.mark.unit
 
@@ -27,6 +27,14 @@ def test_the_report_is_asked_for_over_its_window_with_the_token():
     assert call.request.url == f"{BASE}{SPEND_PATH}?days=7"
     assert call.request.headers["Authorization"] == f"Bearer {TOKEN}"
     assert call.request.headers["X-Correlation-ID"] == "corr-1"
+
+
+@responses.activate
+def test_the_bill_check_is_asked_for_with_the_token():
+    responses.add(responses.GET, BASE + BILL_PATH, json={"status": "success", "data": {"state": "ok"}}, status=200)
+
+    assert AiSpendClient(BASE, TOKEN).bill() == {"state": "ok"}
+    assert responses.calls[0].request.headers["Authorization"] == f"Bearer {TOKEN}"
 
 
 @responses.activate

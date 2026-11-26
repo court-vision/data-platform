@@ -61,6 +61,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/dashboard/ai-spend/bill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ai Bill
+         * @description The bill check: what Anthropic bills the organization, last month and this one by
+         *     UTC day and by API key, beside the ledger. The backend reads Anthropic with its
+         *     Admin API key; `state` says why when it couldn't (no key, a refused key).
+         */
+        get: operations["get_ai_bill_v1_dashboard_ai_spend_bill_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/dashboard/ai-spend/caps": {
         parameters: {
             query?: never;
@@ -1829,6 +1851,131 @@ export interface components {
         /** AdjustmentSavedResponse */
         AdjustmentSavedResponse: {
             data: components["schemas"]["AdjustmentSaved"];
+            /** Message */
+            message: string;
+            /** Status */
+            status: string;
+        };
+        /** AiBill */
+        AiBill: {
+            /**
+             * Days
+             * @description Every UTC day of both months to today
+             */
+            days: components["schemas"]["AiBillDay"][];
+            /**
+             * Keys
+             * @description This month, largest first
+             */
+            keys: components["schemas"]["AiBillKey"][];
+            /**
+             * Message
+             * @description Why the check couldn't run
+             */
+            message: string | null;
+            /**
+             * Months
+             * @description Last month, then this month
+             */
+            months: components["schemas"]["AiBillMonth"][];
+            /**
+             * Read At
+             * Format: date-time
+             * @description When the backend read Anthropic
+             */
+            read_at: string;
+            /**
+             * Refreshed At
+             * @description Anthropic's numbers are complete up to here
+             */
+            refreshed_at: string | null;
+            /**
+             * State
+             * @description ok | no_key | refused | unavailable | unreachable
+             */
+            state: string;
+        };
+        /** AiBillDay */
+        AiBillDay: {
+            /** Billed Micros */
+            billed_micros: number;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Ledger Micros */
+            ledger_micros: number;
+            /**
+             * Open Micros
+             * @default 0
+             */
+            open_micros: number;
+            /** Ours Micros */
+            ours_micros: number | null;
+        };
+        /** AiBillKey */
+        AiBillKey: {
+            /**
+             * Api Key Id
+             * @description Null: usage made without a key (the Console)
+             */
+            api_key_id: string | null;
+            /** Billed Micros */
+            billed_micros: number;
+            /**
+             * Hint
+             * @description Anthropic's partial hint of the key
+             */
+            hint: string | null;
+            /** Name */
+            name: string | null;
+            /**
+             * Ours
+             * @description The key the backend sends its model calls with
+             * @default false
+             */
+            ours: boolean;
+        };
+        /**
+         * AiBillMonth
+         * @description One calendar month (UTC): what Anthropic bills against what the ledger priced.
+         */
+        AiBillMonth: {
+            /**
+             * Billed Micros
+             * @description Anthropic's cost for the whole organization, before credits
+             */
+            billed_micros: number;
+            /**
+             * Ledger Micros
+             * @description The ledger's settled spend
+             */
+            ledger_micros: number;
+            /**
+             * Month
+             * Format: date
+             * @description Its first day
+             */
+            month: string;
+            /**
+             * Open Micros
+             * @description The ledger's reservations still open
+             * @default 0
+             */
+            open_micros: number;
+            /**
+             * Ours Micros
+             * @description Of it, on the backend's own API key; null: not found
+             */
+            ours_micros: number | null;
+        };
+        /**
+         * AiBillResponse
+         * @description Response for GET /v1/dashboard/ai-spend/bill.
+         */
+        AiBillResponse: {
+            data: components["schemas"]["AiBill"];
             /** Message */
             message: string;
             /** Status */
@@ -4422,6 +4569,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ai_bill_v1_dashboard_ai_spend_bill_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiBillResponse"];
                 };
             };
         };

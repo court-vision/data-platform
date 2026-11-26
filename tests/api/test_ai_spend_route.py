@@ -39,6 +39,19 @@ REPORT = {
 }
 
 
+BILL = {
+    "state": "ok", "message": None, "read_at": "2026-11-26T12:30:00Z", "refreshed_at": "2026-11-26T08:00:00Z",
+    "months": [{"month": "2026-10-01", "billed_micros": 10_255_000, "ours_micros": 10_000_000,
+                "ledger_micros": 9_800_000, "open_micros": 0},
+               {"month": "2026-11-01", "billed_micros": 7_710_000, "ours_micros": 7_300_000,
+                "ledger_micros": 3_950_000, "open_micros": 1_000_000}],
+    "days": [{"day": "2026-11-26", "billed_micros": 1_500_000, "ours_micros": 1_500_000,
+              "ledger_micros": 1_200_000, "open_micros": 1_000_000}],
+    "keys": [{"api_key_id": "apikey_app", "name": "court-vision-prod", "hint": "sk-ant-api03-R2D...igAA",
+              "ours": True, "billed_micros": 7_300_000}],
+}
+
+
 class FakeClient:
     def __init__(self):
         self.calls = []
@@ -50,6 +63,12 @@ class FakeClient:
         if self.fail:
             raise self.fail
         return REPORT if self.answer is None else self.answer
+
+    def bill(self, correlation_id=None):
+        self.calls.append(("bill",))
+        if self.fail:
+            raise self.fail
+        return BILL if self.answer is None else self.answer
 
     def set_cap(self, body, correlation_id=None):
         self.calls.append(("set_cap", body))
@@ -178,3 +197,41 @@ def test_a_backend_answer_that_is_not_a_cap_is_a_502_and_is_not_sent_again(clien
     assert response.status_code == 502
     assert response.json()["detail"] == "The backend could not be asked (malformed_response)"
     assert len(client.fake.calls) == 1
+
+
+def test_the_bill_check_passes_through(client):
+    response = client.get("/v1/dashboard/ai-spend/bill", headers=_AUTH)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["message"] == "Bill check: ok"
+    assert body["data"]["months"][1]["ours_micros"] == 7_300_000
+    assert body["data"]["keys"][0]["ours"] is True
+    assert client.fake.calls == [("bill",)]
+    assert client.get("/v1/dashboard/ai-spend/bill").status_code in (401, 403)
+
+
+def test_a_bill_the_backend_could_not_read_says_why(client):
+    client.fake.answer = {"state": "refused", "message": "Anthropic answered 401: invalid x-api-key",
+                          "read_at": "2026-11-26T12:30:00Z"}
+
+    data = client.get("/v1/dashboard/ai-spend/bill", headers=_AUTH).json()["data"]
+
+    assert data["state"] == "refused" and data["months"] == [] and data["refreshed_at"] is None
+
+
+def test_a_backend_with_no_bill_check_is_a_502_that_says_so(client):
+    client.fake.fail = BackendRefused(404, "Not Found")
+
+    response = client.get("/v1/dashboard/ai-spend/bill", headers=_AUTH)
+
+    assert response.status_code == 502 and response.json()["detail"] == "The backend has no bill check yet"
+
+
+def test_a_bill_that_is_not_one_is_a_502(client):
+    client.fake.answer = {"months": "lots"}
+
+    response = client.get("/v1/dashboard/ai-spend/bill", headers=_AUTH)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The backend could not be asked (malformed_response)"

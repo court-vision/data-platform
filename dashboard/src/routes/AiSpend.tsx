@@ -4,10 +4,13 @@ import { useSearchParams } from "react-router"
 import { Block, Choice, Head, Notice, Page, RefreshNote, Sep, SheetSkeleton, Tag, Tiles, type TileSpec } from "@/components/blocks"
 import { SpendChart } from "@/components/SpendChart"
 import { usePageContext } from "@/components/shell/pageContext"
-import { AI_SPEND_REFETCH_MS, useAiSpend, useSetCap, type CapChange } from "@/hooks/useAiSpend"
+import { AI_SPEND_REFETCH_MS, useAiBill, useAiSpend, useSetCap, type CapChange } from "@/hooks/useAiSpend"
 import { useNow } from "@/hooks/useNow"
 import {
   APP_LINE,
+  billDayShort,
+  billGap,
+  billProblem,
   byDay,
   byFeature,
   byModel,
@@ -17,15 +20,21 @@ import {
   capShare,
   checkinKindLabel,
   FEATURES,
+  formatGap,
   formatShare,
   formatTokens,
   formatUsd,
   LINES,
+  monthLabel,
   monthTotal,
   parseCap,
   parseWindow,
+  recentBillDays,
   WINDOWS,
+  type AiBill,
   type AiSpendReport,
+  type BillDay,
+  type BillMonth,
   type CapLineKey,
   type SpendWindow,
   type UserLine,
@@ -91,6 +100,7 @@ export function AiSpend() {
         <>
           <MonthTiles data={data} />
           <CapsBlock data={data} />
+          <BillBlock />
           <DaysBlock data={data} window={window} onWindow={setWindow} />
           <FeaturesBlock data={data} />
           <ModelsBlock data={data} />
@@ -98,6 +108,128 @@ export function AiSpend() {
         </>
       )}
     </Page>
+  )
+}
+
+// ---------------------------------------------------------------- the bill check
+
+const BILL_TEXT =
+  "What Anthropic bills the organization (before credits), read with the Admin API key, beside what the ledger priced. The ledger is held to the app's own key when Anthropic names it; other keys (a laptop's evals) count only in the bill's total. Anthropic's numbers land 4 to 24 hours late, so the latest days read short."
+
+/** Anthropic's bill beside the ledger: its own query, so a slow or refused read never holds up the page. */
+function BillBlock() {
+  const query = useAiBill()
+  const bill = query.data
+  const problem = bill ? billProblem(bill) : null
+  return (
+    <Block
+      title="Against Anthropic's bill"
+      note={bill?.state === "ok" && <BillFreshness bill={bill} />}
+      text={BILL_TEXT}
+    >
+      {query.error ? (
+        <p className={s.empty}>Could not ask for the bill: {query.error.message}</p>
+      ) : !bill ? (
+        <p className={s.empty}>Reading Anthropic's bill…</p>
+      ) : problem ? (
+        <p className={s.empty}>{problem}</p>
+      ) : (
+        <>
+          <BillTable label="By month" first="Month" rows={bill.months.map((m) => ({ key: m.month, name: monthLabel(m.month), row: m }))} />
+          <BillTable
+            label="Last 14 days"
+            first="Day (UTC)"
+            rows={recentBillDays(bill.days).map((d) => ({ key: d.day, name: d.day, row: d, short: billDayShort(d.day, bill.refreshed_at) }))}
+          />
+          <BillKeys bill={bill} />
+        </>
+      )}
+    </Block>
+  )
+}
+
+function BillFreshness({ bill }: { bill: AiBill }) {
+  return (
+    <span>
+      {bill.refreshed_at ? `complete to ${formatCentral(bill.refreshed_at)}` : "no data landed yet"} · read {formatCentral(bill.read_at)}
+    </span>
+  )
+}
+
+interface BillLine {
+  key: string
+  name: string
+  row: BillMonth | BillDay
+  short?: boolean
+}
+
+function BillTable({ label, first, rows }: { label: string; first: string; rows: BillLine[] }) {
+  return (
+    <div className={s.bleed}>
+      <table className={s.table} style={{ minWidth: "40rem" }} aria-label={label}>
+        <thead>
+          <tr>
+            <th scope="col">{first}</th>
+            <th scope="col" className={s.num}>Anthropic billed</th>
+            <th scope="col" className={s.num}>On the app's key</th>
+            <th scope="col" className={s.num}>Our ledger</th>
+            <th scope="col" className={s.num}>Ledger less bill</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ key, name, row, short }) => {
+            const { gap, share } = billGap(row)
+            const open = row.open_micros ?? 0
+            return (
+              <tr key={key}>
+                <th scope="row">
+                  {name}
+                  {short && <span className={a.sub}>may still read short</span>}
+                </th>
+                <td className={s.num}>{formatUsd(row.billed_micros)}</td>
+                <td className={s.num}>{row.ours_micros == null ? "not named" : formatUsd(row.ours_micros)}</td>
+                <td className={s.num}>
+                  {formatUsd(row.ledger_micros)}
+                  {open > 0 && <span className={a.sub}>{formatUsd(open)} open</span>}
+                </td>
+                <td className={s.num}>
+                  {formatGap(gap)}
+                  {share != null && Math.abs(gap) >= 5_000 && <span className={a.sub}>{formatShare(Math.abs(share))}</span>}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function BillKeys({ bill }: { bill: AiBill }) {
+  if (bill.keys.length === 0) return <p className={s.empty}>Anthropic has billed no key this month yet.</p>
+  return (
+    <div className={s.bleed}>
+      <table className={s.table} style={{ minWidth: "32rem" }} aria-label="This month by API key">
+        <thead>
+          <tr>
+            <th scope="col">API key, this month</th>
+            <th scope="col" className={s.num}>Billed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bill.keys.map((key) => (
+            <tr key={key.api_key_id ?? "none"}>
+              <th scope="row">
+                {key.name ?? (key.api_key_id ? key.api_key_id : "No key (the Console)")}
+                {key.ours && <> <Tag>this app</Tag></>}
+                {key.hint && <span className={a.sub}>{key.hint}</span>}
+              </th>
+              <td className={s.num}>{formatUsd(key.billed_micros)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

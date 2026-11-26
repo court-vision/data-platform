@@ -320,3 +320,67 @@ export function niceTop(micros: number): number {
   }
   return 10 * power
 }
+
+// ---------------------------------------------------------------- the bill check
+
+export type AiBill = Schemas["AiBill"]
+export type BillMonth = Schemas["AiBillMonth"]
+export type BillDay = Schemas["AiBillDay"]
+export type BillKey = Schemas["AiBillKey"]
+
+/** Why the bill check couldn't read Anthropic, in a sentence; null when it did. */
+export function billProblem(bill: Pick<AiBill, "state" | "message">): string | null {
+  const said = bill.message ? ` (${bill.message})` : ""
+  switch (bill.state) {
+    case "ok":
+      return null
+    case "no_key":
+      return "ANTHROPIC_ADMIN_KEY isn't set on the backend's api service, so Anthropic's bill can't be read."
+    case "refused":
+      return `Anthropic refused the key${said}. The check needs an Admin API key, made by an admin in the Claude Console; those start sk-ant-admin.`
+    case "unavailable":
+      return `This organization has no Usage and Cost API${said}.`
+    case "unreachable":
+      return `Anthropic couldn't be read just now${said}. The backend asks again after a minute.`
+    default:
+      return `The bill check answered ${bill.state}${said}.`
+  }
+}
+
+export interface BillGap {
+  /** What the ledger is held to: the app's own key when Anthropic named it, else the whole organization. */
+  against: number
+  /** The ledger less that: below zero, Anthropic billed more than we priced. */
+  gap: number
+  share: number | null
+}
+
+export function billGap(row: Pick<BillMonth, "billed_micros" | "ours_micros" | "ledger_micros">): BillGap {
+  const against = row.ours_micros ?? row.billed_micros
+  const gap = row.ledger_micros - against
+  return { against, gap, share: against > 0 ? gap / against : null }
+}
+
+/** A gap with its sign: "+$0.12", "−$0.30", "$0.00". */
+export function formatGap(micros: number): string {
+  if (Math.abs(micros) < 5_000) return "$0.00"
+  return `${micros > 0 ? "+" : "−"}${formatUsd(Math.abs(micros))}`
+}
+
+/** "2026-11-01" as "November 2026". */
+export function monthLabel(month: string): string {
+  const [year, mm] = month.split("-").map(Number)
+  return new Date(Date.UTC(year, mm - 1, 1)).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })
+}
+
+/** The last `count` days, newest first. */
+export function recentBillDays(days: readonly BillDay[], count = 14): BillDay[] {
+  return [...days].sort((x, y) => (x.day < y.day ? 1 : -1)).slice(0, count)
+}
+
+/** Whether a day may still read short: Anthropic's numbers are complete only up to `refreshed_at`. */
+export function billDayShort(day: string, refreshedAt: string | null | undefined): boolean {
+  if (!refreshedAt) return true
+  const end = Date.parse(`${day}T00:00:00Z`) + 86_400_000
+  return end > Date.parse(refreshedAt)
+}

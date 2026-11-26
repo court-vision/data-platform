@@ -1,7 +1,8 @@
 """
-Backend AI spend client: the AI spend page's two calls.
+Backend AI spend client: the AI spend page's three calls.
 
     GET {BACKEND_INTERNAL_URL}/v1/internal/jobs/ai/spend?days=N
+    GET {BACKEND_INTERNAL_URL}/v1/internal/jobs/ai/bill    (Anthropic's bill beside the ledger)
     PUT {BACKEND_INTERNAL_URL}/v1/internal/jobs/ai/caps   {line, user_id, monthly_usd, author}
     Authorization: Bearer <PIPELINE_API_TOKEN>              (the token both services share)
 
@@ -23,6 +24,7 @@ from core.logging import get_logger
 
 SPEND_PATH = "/v1/internal/jobs/ai/spend"
 CAPS_PATH = "/v1/internal/jobs/ai/caps"
+BILL_PATH = "/v1/internal/jobs/ai/bill"
 CONNECT_TIMEOUT_SECONDS = 5.0
 READ_TIMEOUT_SECONDS = 20.0
 
@@ -117,6 +119,11 @@ class AiSpendClient:
     def report(self, days: int, correlation_id: Optional[str] = None) -> dict:
         """The backend's report over the last `days` UTC days."""
         return self._call("GET", SPEND_PATH, correlation_id, params={"days": days})
+
+    def bill(self, correlation_id: Optional[str] = None) -> dict:
+        """The backend's bill check: Anthropic's numbers for last month and this one beside the
+        ledger's. The backend reads Anthropic (and keeps its answer a few minutes)."""
+        return self._call("GET", BILL_PATH, correlation_id)
 
     def set_cap(self, body: Mapping[str, Any], correlation_id: Optional[str] = None) -> dict:
         """Set or clear one cap; returns the cap as it now stands."""
