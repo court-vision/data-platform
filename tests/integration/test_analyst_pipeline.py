@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 import pytz
 
+from core.locks import pipeline_lock
 from core.settings import settings
 from db.base import db
 from db.models.nba import (
@@ -873,6 +874,113 @@ def test_live_boards_that_cannot_be_built_leave_the_days_own_as_they_were(refs, 
     assert DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS) == {
         pid: rank for rank, pid in enumerate(SHADOW_ORDER, start=1)}
     assert DailyRanking.stored(TODAY, PLAIN_BOARDS) == 2 * len(EVERYONE)
+
+
+def _elsewhere(work) -> None:
+    """Run `work` as another session does: on its own thread and connection."""
+    failed: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            work()
+        except BaseException as exc:        # shown on the test's own thread
+            failed.append(exc)
+        finally:
+            if not db.is_closed():
+                db.close()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join(60)
+    assert not thread.is_alive() and not failed, failed
+
+
+def test_live_a_note_saved_by_hand_while_the_reads_are_out_is_not_written_over(refs, monkeypatch):
+    _go_live(monkeypatch)
+    saved: list[int] = []
+
+    def save_in_the_editor() -> None:
+        # James reads the same report as the fourth game from here and saves it: the note,
+        # then the day's projection rebuilt at once (api/v1/projections.py)
+        db.connect(reuse_if_open=True)
+        owner = ProjectionAdjustment.record(
+            STAR, SEASON, scope="season", kind="injury_current", note="read off the report", author="james",
+            return_date=AHEAD[3], review_date=TODAY + timedelta(days=14))
+        saved.append(owner.id)
+        db.close()
+        rebuilt = LiveProjectionPipeline()._run_sync(options={"rebuild": True})
+        assert rebuilt.status == ApiStatus.SUCCESS and rebuilt.records_processed == len(EVERYONE)
+
+    # ... while the analyst, which loaded the morning before he did, is still reading
+    reads = AnalystPipeline._reads
+
+    def reads_then_the_save(self, *args, **kwargs):
+        cut_short = reads(self, *args, **kwargs)
+        _elsewhere(save_in_the_editor)
+        return cut_short
+
+    monkeypatch.setattr(AnalystPipeline, "_reads", reads_then_the_save)
+    result, _, _ = _run({STAR: _later(refs), BENCH: _starts(refs)},
+                        boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+
+    assert result.status == ApiStatus.SUCCESS
+    (owner_id,) = saved
+    notes = _notes()
+    assert notes[STAR].return_date == AHEAD[4]          # the analyst's own, written before his
+    live, second = _rows(SOURCE), _rows(SHADOW_SOURCE)
+    # The projection everybody sees reads his note for the star, on both sides ...
+    for rows in (live, second):
+        known = rows[STAR].raw["parts"]["known"]
+        assert (known["return_date"], known["note"]) == (AHEAD[3].isoformat(), owner_id)
+    # ... and the analyst's for the fill-in, on the live one alone
+    assert live[BENCH].raw["parts"]["note"]["id"] == notes[BENCH].id
+    assert "note" not in second[BENCH].raw["parts"]
+
+
+def test_live_it_waits_its_turn_for_the_days_projection_and_fails_rather_than_write_under_a_rebuild(
+    refs, monkeypatch
+):
+    _go_live(monkeypatch)
+    monkeypatch.setattr(analyst, "PUBLISH_ATTEMPTS", 2)
+    monkeypatch.setattr(analyst, "PUBLISH_WAIT_SECONDS", 0)
+    morning_raw = {pid: r.raw for pid, r in _rows(SOURCE).items()}
+    boards_before = DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS)
+
+    # A run of the live projection that holds its lock through the analyst's whole run
+    held, release = threading.Event(), threading.Event()
+
+    def rebuild_that_never_ends() -> None:
+        db.connect(reuse_if_open=True)
+        try:
+            with pipeline_lock(LiveProjectionPipeline.config.name):
+                held.set()
+                release.wait(60)
+        finally:
+            db.close()
+
+    other = threading.Thread(target=rebuild_that_never_ends)
+    other.start()
+    try:
+        assert held.wait(10)
+        result, backend, valuation = _run({STAR: _later(refs)}, boards=_boards(LIVE_ORDER),
+                                          live_boards=_boards(SHADOW_ORDER))
+    finally:
+        release.set()
+        other.join(10)
+
+    assert result.status == ApiStatus.ERROR and "was being rebuilt by another run" in result.error
+    # Nothing anybody sees was written; the reads were made and their notes are kept
+    assert {pid: r.raw for pid, r in _rows(SOURCE).items()} == morning_raw
+    assert DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS) == boards_before
+    assert valuation.calls == [] and _rows(SHADOW_SOURCE) == {} and DailyRanking.stored(TODAY, PLAIN_BOARDS) == 0
+    assert backend.asked == [STAR, BENCH, CELTIC] and set(_notes()) == {STAR}
+
+    # The next tick, with the projection free, puts them on it without asking again
+    assert due_reason(SEASON, TODAY) is None
+    _read_at()
+    result, backend, _ = _run(boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+    assert result.status == ApiStatus.SUCCESS and backend.bodies == []
+    assert _rows(SOURCE)[STAR].raw["parts"]["known"]["note"] == _notes()[STAR].id
 
 
 def test_it_waits_for_the_mornings_projection_and_boards(refs, monkeypatch):

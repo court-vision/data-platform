@@ -24,7 +24,10 @@ One run, in order:
    picked, what it came to and what it cost.
 4. **The projections**: the morning's projection built again, with the
    analyst's notes as the reads left them and without them. A note written by
-   hand wins over the analyst's wherever a player has both.
+   hand wins over the analyst's wherever a player has both. Live, both are
+   built from what is stored after the reads, and the one everybody sees is
+   written under the live projection's own lock (`_publish`): a note saved in
+   the editor while the reads were out is never written over.
 5. **The boards**: the backend's two standard boards built on each.
 
 Which of the two everybody sees is `settings.analyst_live` (the plan's step 5):
@@ -64,10 +67,12 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from time import sleep
 from typing import Optional
 
 import pytz
 
+from core.locks import LockNotAcquired, pipeline_lock
 from core.logging import get_correlation_id
 from core.settings import settings
 from db.base import db
@@ -79,12 +84,12 @@ from pipelines.base import BasePipeline
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
 from pipelines.daily_rankings import cv_rows, now_eastern, today_et
-from pipelines.live_projection import DAY_TURNS_HOUR_ET, build_rows, store, stored_on
+from pipelines.live_projection import DAY_TURNS_HOUR_ET, LiveProjectionPipeline, build_rows, store, stored_on
 from services import analyst_inputs, analyst_notes
 from services.analyst_client import UNAVAILABLE, ReadResult, analyst_client_from_settings
 from services.analyst_screen import Candidate, screen
 from services.live_projection_inputs import LiveInputs, load_coefficients, load_inputs, with_analyst_notes
-from services.live_projection_model import BoxLine, build_morning, project
+from services.live_projection_model import BoxLine, Coefficients, Morning, build_morning, project
 from services.valuation_client import valuation_client_from_settings
 
 NAME = "analyst"
@@ -100,6 +105,12 @@ SHADOW_KEEP_DAYS = 7
 READ_WORKERS = 4
 # This many reads in a row that could not be asked end the morning's reads
 FAILURES_STOP = 3
+# The day's projection (`cv_live`) has one writer at a time: the analyst stores it under
+# the live projection's own execution lock, and waits this often and this long for a run
+# of that pipeline (a note saved in the editor, a forced run) to finish first
+PROJECTION_LOCK = LiveProjectionPipeline.config.name
+PUBLISH_ATTEMPTS = 30
+PUBLISH_WAIT_SECONDS = 2.0
 EASTERN = pytz.timezone("US/Eastern")
 
 
@@ -207,15 +218,13 @@ class AnalystPipeline(BasePipeline):
         cut_short = self._reads(ctx, inputs, morning, live, room=month.room)
 
         is_live = bool(settings.analyst_live)
-        noted, applied = with_analyst_notes(inputs)
         if is_live:
             # Everybody's projection again, now with the notes as the reads left them;
             # the one nobody is shown is the same morning without them
-            rows = build_rows(noted, morning, coeffs, ctx.run_id)
-            store(rows, season, day)
-            ctx.increment_records(len(rows))
+            inputs, morning, applied = self._publish(ctx, season, day, coeffs)
             second = build_rows(inputs, morning, coeffs, ctx.run_id, SHADOW_SOURCE)
         else:
+            noted, applied = with_analyst_notes(inputs)
             second = build_rows(noted, morning, coeffs, ctx.run_id, SHADOW_SOURCE)
         store(second, season, day, SHADOW_SOURCE)
         pruned = prune_shadow(season, day)
@@ -384,6 +393,47 @@ class AnalystPipeline(BasePipeline):
             )
         ctx.increment_records(1)
         return outcome
+
+    # ---- the projection everybody reads -------------------------------------------------------
+
+    def _publish(self, ctx: PipelineContext, season: str, day: date,
+                 coeffs: Coefficients) -> tuple[LiveInputs, Morning, int]:
+        """Store the day's projection again (`cv_live`), with the notes as the reads left them.
+
+        It is built from what is stored now, not from what the run loaded before its
+        reads, and under the live projection's own execution lock. The reads take
+        minutes, and a note saved or retired in the projections editor meanwhile has
+        already rebuilt the day's snapshot: the morning as it was read before would
+        go back over that edit. With the lock held the two writers take turns. A
+        rebuild that finds this one going is skipped and tried again (the editor's
+        does), and reads these notes when it runs; one already going is waited for.
+
+        Returns what it was built from (the projection without the notes is built
+        from the same) and how many of the analyst's notes it read."""
+        for attempt in range(PUBLISH_ATTEMPTS):
+            if attempt:
+                sleep(PUBLISH_WAIT_SECONDS)
+            try:
+                with pipeline_lock(PROJECTION_LOCK):
+                    inputs = load_inputs(season, day)
+                    morning = build_morning(inputs.lines, inputs.priors, inputs.ahead, day,
+                                            teams=inputs.teams, ages=inputs.ages)
+                    noted, applied = with_analyst_notes(inputs)
+                    rows = build_rows(noted, morning, coeffs, ctx.run_id)
+                    if not rows:
+                        # A morning with a stored projection always projects someone: an
+                        # empty build would replace the day's snapshot with nothing
+                        ctx.increment_failed(1, "empty_projection")
+                        raise AnalystFailed("the day's projection came out empty when it was built again")
+                    store(rows, season, day)
+                    ctx.increment_records(len(rows))
+                    return inputs, morning, applied
+            except LockNotAcquired:
+                continue
+        ctx.increment_failed(1, "projection_busy")
+        raise AnalystFailed(
+            "the day's projection was being rebuilt by another run the whole time, so the notes were not put on it"
+        )
 
     # ---- the boards ----------------------------------------------------------------------------
 
