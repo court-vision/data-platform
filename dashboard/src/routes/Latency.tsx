@@ -127,7 +127,7 @@ function WindowChoice({ window, onChange }: { window: LatencyWindow; onChange: (
   return <Choice label="Over" options={WINDOWS} value={window} onChange={onChange} />
 }
 
-/** A route's tag (AI, ESPN, NBA, CV, Other) as a chip in its anatomy colour; the hover text says what it waits on. */
+/** A route's tag (AI, ESPN, NBA, SVC, DB, Other) as a chip in its anatomy colour; the hover text says what it waits on. */
 export function RouteTagChip({ parts }: { parts: Record<string, number> }) {
   const tag = routeTag(parts)
   return (
@@ -197,7 +197,7 @@ function RoutesBlock({
       title="Routes"
       count={routes.length}
       right={<WindowChoice window={window} onChange={onWindow} />}
-      text="Press a column's head to order by it, and again to turn it round. A route's tag is what it calls: AI (Claude), ESPN, NBA, Other (Yahoo or another outside service), or CV when it only touches Postgres, Redis and our own services. Total time is every request's time added up: what the route cost the service over the window. The bar splits the route's average request into where its time went, as shares of it: point at it for each part's time and share. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
+      text="Press a column's head to order by it, and again to turn it round. A route's tag is what it calls: AI (Claude), ESPN, NBA, Other (Yahoo or another outside service), SVC (our own services: features, sqlmate, fantasy-writer), or DB when it only touches Postgres and Redis. Total time is every request's time added up: what the route cost the service over the window. The bar splits the route's average request into where its time went, as shares of it: point at it for each part's time and share. Outside our code is the share spent waiting on ESPN, Yahoo, the NBA, Claude, Postgres, Redis, Clerk or our other services."
     >
       <div className={l.controls}>
         <AnatomyKey groups={groupsUsed(routes.map((route) => route.parts))} />
@@ -209,7 +209,7 @@ function RoutesBlock({
           <table className={s.table} style={{ minWidth: "70rem" }}>
             <thead>
               <tr>
-                {head("tag", "Tag", false, "What the route calls: AI, then ESPN, then NBA, then Other; CV when it only touches our own things")}
+                {head("tag", "Tag", false, "What the route calls: AI, then ESPN, then NBA, then Other, then SVC (our services); DB when it only touches Postgres and Redis")}
                 {head("route", "Route", false)}
                 {head("requests", "Requests")}
                 {head("time", "Total time", true, "Every request's time added up: requests × the average request")}

@@ -91,13 +91,14 @@ export function sortRoutes(routes: RouteLatency[], sort: Sort, direction: Direct
 /**
  * What a route is, at a glance, from what its requests call: AI when any of
  * them reach Claude, else ESPN, else the NBA, else Other for any other outside
- * call (Yahoo, or plain HTTP), else CV, a route that only touches our own
- * things. Clerk counts as ours: any signed-in route can fetch Clerk's keys
- * when their cache runs out, so it says nothing about the route. `group` is
- * the anatomy colour the tag is drawn in. Keep the order: it is the column's.
+ * call (Yahoo, or plain HTTP), else SVC when one calls our own services
+ * (features, sqlmate, fantasy-writer), else DB, a route that only touches
+ * Postgres and Redis. Clerk counts as ours and says nothing: any signed-in
+ * route can fetch Clerk's keys when their cache runs out. `group` is the
+ * anatomy colour the tag is drawn in. Keep the order: it is the column's.
  */
 export interface RouteTag {
-  key: "ai" | "espn" | "nba" | "cv" | "other"
+  key: "ai" | "espn" | "nba" | "svc" | "db" | "other"
   label: string
   group: string
   note: string
@@ -107,7 +108,8 @@ export const ROUTE_TAGS: readonly RouteTag[] = [
   { key: "ai", label: "AI", group: "claude", note: "calls Claude" },
   { key: "espn", label: "ESPN", group: "espn", note: "calls ESPN" },
   { key: "nba", label: "NBA", group: "nba", note: "calls the NBA" },
-  { key: "cv", label: "CV", group: "app", note: "only Postgres, Redis and our own services" },
+  { key: "svc", label: "SVC", group: "services", note: "calls our own services: features, sqlmate or fantasy-writer" },
+  { key: "db", label: "DB", group: "postgres", note: "only Postgres and Redis" },
   { key: "other", label: "Other", group: "other", note: "calls Yahoo or another outside service" },
 ]
 
@@ -115,6 +117,7 @@ const TAG_OF = new Map(ROUTE_TAGS.map((tag) => [tag.key, tag]))
 
 /** Buckets that are ours, for tagging: our code, its queues, its stores, its services, and sign-in. */
 const OURS = new Set(["app", "wait", "postgres", "redis", "features", "sqlmate", "fantasy_writer", "clerk"])
+const SERVICES = new Set(["features", "sqlmate", "fantasy_writer"])
 
 export function routeTag(parts: Record<string, number>): RouteTag {
   const touched = Object.keys(parts).filter((bucket) => parts[bucket] > 0)
@@ -126,7 +129,9 @@ export function routeTag(parts: Record<string, number>): RouteTag {
         ? "nba"
         : touched.some((bucket) => !OURS.has(bucket))
           ? "other"
-          : "cv"
+          : touched.some((bucket) => SERVICES.has(bucket))
+            ? "svc"
+            : "db"
   return TAG_OF.get(key) as RouteTag
 }
 

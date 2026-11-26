@@ -228,7 +228,7 @@
 
 /*
  * A route's tag: what it calls, in the colour of that part of the bar (AI is
- * Claude's, CV is our code's, Other is grey). The hue is a tint and an edge;
+ * Claude's, SVC our services', DB Postgres's, Other is grey). The hue is a tint and an edge;
  * the label stays in the text colour, so it reads on every theme's ground.
  */
 .tag {

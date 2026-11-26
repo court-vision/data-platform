@@ -75,7 +75,7 @@ describe("latency", () => {
     expect(names("errors", "asc")).toEqual(["/v1/health", "/v1/rankings", "/v1/matchups"])
   })
 
-  test("a route's tag is what it calls: AI, then ESPN, then NBA, then Other, else CV", () => {
+  test("a route's tag is what it calls: AI, then ESPN, then NBA, then Other, then SVC, else DB", () => {
     const tag = (parts: Record<string, number>) => routeTag(parts).label
     expect(tag({ claude: 4000, espn: 300, postgres: 20, app: 50 })).toBe("AI")
     expect(tag({ espn: 200, yahoo: 60, nba: 5, app: 30 })).toBe("ESPN")
@@ -83,29 +83,36 @@ describe("latency", () => {
     expect(tag({ yahoo: 120, postgres: 10, app: 20 })).toBe("Other")
     expect(tag({ other_http: 40, app: 5 })).toBe("Other")
     expect(tag({ a_bucket_from_next_month: 3, app: 5 })).toBe("Other")
-    // Our own things, and Clerk (any signed-in route can fetch its keys), are CV.
-    expect(tag({ postgres: 6, redis: 1, sqlmate: 40, features: 12, fantasy_writer: 90, clerk: 80, wait: 3, app: 4 })).toBe("CV")
-    expect(tag({})).toBe("CV")
+    // An outside call outranks our own services.
+    expect(tag({ yahoo: 50, sqlmate: 300 })).toBe("Other")
+    expect(tag({ sqlmate: 40, postgres: 6, app: 4 })).toBe("SVC")
+    expect(tag({ features: 12 })).toBe("SVC")
+    expect(tag({ fantasy_writer: 90, redis: 1 })).toBe("SVC")
+    // Postgres, Redis and our own code are DB; Clerk (any signed-in route can fetch its keys) changes nothing.
+    expect(tag({ postgres: 6, redis: 1, clerk: 80, wait: 3, app: 4 })).toBe("DB")
+    expect(tag({ clerk: 80, sqlmate: 5 })).toBe("SVC")
+    expect(tag({})).toBe("DB")
     // A bucket with no time is not a call.
-    expect(tag({ claude: 0, postgres: 3 })).toBe("CV")
+    expect(tag({ claude: 0, sqlmate: 0, postgres: 3 })).toBe("DB")
 
     expect(routeTagTitle({ espn: 200, postgres: 20, app: 35, wait: 6 })).toBe("ESPN: calls ESPN. Waits on ESPN, Postgres.")
-    expect(routeTagTitle({ app: 4 })).toBe("CV: only Postgres, Redis and our own services. Only our own code.")
+    expect(routeTagTitle({ app: 4 })).toBe("DB: only Postgres and Redis. Only our own code.")
   })
 
-  test("ordered by tag, routes group as AI, ESPN, NBA, CV, Other, the costliest first within each", () => {
+  test("ordered by tag, routes group as AI, ESPN, NBA, SVC, DB, Other, the costliest first within each", () => {
     const chat = route({ route: "/v1/ai/chat", requests: 10, mean_ms: 5000, parts: { claude: 4800, app: 200 } })
     const lineup = route({ route: "/v1/lineup", requests: 100, mean_ms: 300, parts: { espn: 250, app: 50 } })
     const matchup = route({ route: "/v1/matchup", requests: 1000, mean_ms: 200, parts: { espn: 150, app: 50 } })
     const games = route({ route: "/v1/games", requests: 50, mean_ms: 40, parts: { nba: 30, app: 10 } })
     const rankings = route({ route: "/v1/rankings", requests: 900, mean_ms: 8, parts: { postgres: 3, app: 5 } })
     const yahoo = route({ route: "/v1/yahoo", requests: 3, mean_ms: 400, parts: { yahoo: 380, app: 20 } })
-    const all = [rankings, yahoo, games, matchup, chat, lineup]
+    const query = route({ route: "/v1/query", requests: 20, mean_ms: 90, parts: { sqlmate: 70, postgres: 10, app: 10 } })
+    const all = [rankings, yahoo, query, games, matchup, chat, lineup]
     expect(sortRoutes(all, "tag").map((r) => r.route)).toEqual([
-      "/v1/ai/chat", "/v1/matchup", "/v1/lineup", "/v1/games", "/v1/rankings", "/v1/yahoo",
+      "/v1/ai/chat", "/v1/matchup", "/v1/lineup", "/v1/games", "/v1/query", "/v1/rankings", "/v1/yahoo",
     ])
     expect(sortRoutes(all, "tag", "desc").map((r) => r.route)).toEqual([
-      "/v1/yahoo", "/v1/rankings", "/v1/games", "/v1/matchup", "/v1/lineup", "/v1/ai/chat",
+      "/v1/yahoo", "/v1/rankings", "/v1/query", "/v1/games", "/v1/matchup", "/v1/lineup", "/v1/ai/chat",
     ])
   })
 

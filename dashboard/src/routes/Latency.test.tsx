@@ -74,8 +74,8 @@ describe("Latency", () => {
     // Each route's tag, in its anatomy colour, with what it waits on on hover.
     expect(matchup).toMatch(/data-group="espn" title="ESPN: calls ESPN. Waits on ESPN, Postgres.">ESPN</)
     const rankings = html.split("<tr").find((row) => row.includes("/v1/rankings"))!
-    expect(rankings).toContain('data-group="app"')
-    expect(rankings).toContain(">CV</span>")
+    expect(rankings).toContain('data-group="postgres"')
+    expect(rankings).toContain(">DB</span>")
   })
 
   test("ordered by tag, the routes group by what they call", () => {
