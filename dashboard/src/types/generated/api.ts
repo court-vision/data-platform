@@ -230,14 +230,15 @@ export interface paths {
          * @description The analyst's morning: every read with why the screen picked the player,
          *     what the read came to, the note it left with the stored items it rests on,
          *     and what it says against a note written by hand. Beside each, the player
-         *     on the live projection and boards and on the second ones, which have the
-         *     analyst's notes applied and which nothing else reads. `moved` is the
+         *     without the analyst's notes (`plain`) and with them applied (`noted`).
+         *     `in_shadow` says which of the two everybody saw that morning: the plain
+         *     one in shadow, the noted one once the analyst is live; the other is the
+         *     second projection and boards, which nothing else reads. `moved` is the
          *     widest moves between the two points boards that morning, and `spend` the
          *     month's bill for reads from the backend's ledger.
          *
-         *     In shadow this is the only place the analyst's work shows. To act on a
-         *     read, save a note of your own from it: a note written by hand is the one
-         *     applied wherever a player has both.
+         *     To overrule a read, save a note of your own: a note written by hand is
+         *     the one applied wherever a player has both.
          */
         get: operations["get_analyst_digest_v1_dashboard_projections_analyst_get"];
         put?: never;
@@ -597,16 +598,19 @@ export interface paths {
         put?: never;
         /**
          * Trigger Analyst
-         * @description Trigger the analyst's morning run, in shadow (the Live rankings plan, step 4).
+         * @description Trigger the analyst's morning run (the Live rankings plan, steps 4 and 5).
          *
          *     A fixed screen picks the players whose stored news might say something a
          *     box score cannot; each gets one read from the backend's analyst, whose
          *     proposal is checked here (it must cite a stored item and stay inside its
          *     bounds) before it becomes a note in nba.projection_adjustments' `analyst`
          *     scope. Every read is logged in nba.analyst_reads. Then the morning's
-         *     projection is built again with those notes applied (`cv_live_shadow`) and
-         *     the backend's two boards on it are stored under the source `cv_shadow`.
-         *     Nothing a user sees reads any of it.
+         *     projection is built again with those notes applied and the backend's two
+         *     boards are built on it. Live (`ANALYST_LIVE`, the default), they replace
+         *     the day's own (`cv_live`, `cv`), and the same morning without the notes is
+         *     kept beside them (`cv_live_shadow`, boards `cv_plain`). In shadow they are
+         *     the pair kept beside (`cv_live_shadow`, boards `cv_shadow`) and nothing a
+         *     user sees reads any of it.
          *
          *     It has no cron job of its own: the daily-rankings trigger starts it once
          *     the day's projection and boards are stored, and again on each later tick
@@ -2161,7 +2165,7 @@ export interface components {
         };
         /**
          * AnalystDigest
-         * @description A morning of the analyst in shadow.
+         * @description A morning of the analyst.
          */
         AnalystDigest: {
             /**
@@ -2189,7 +2193,7 @@ export interface components {
             days: string[];
             /**
              * In Shadow
-             * @description Its notes reach only the second projection and boards
+             * @description Whether, on the morning shown, its notes reached only the second projection and boards. False: they were on the projection and boards everybody sees, and the second pair is the same morning without them
              * @default true
              */
             in_shadow: boolean;
@@ -2209,10 +2213,10 @@ export interface components {
             /** Season */
             season: string;
             /**
-             * Shadow As Of
-             * @description The morning of the newest shadow boards
+             * Second As Of
+             * @description The morning of the newest second boards
              */
-            shadow_as_of: string | null;
+            second_as_of: string | null;
             spend: components["schemas"]["DigestSpend"];
         };
         /** AnalystDigestResponse */
@@ -2633,18 +2637,20 @@ export interface components {
          * @description A player whose place on the points board the analyst's notes moved, his own note or a teammate's.
          */
         DigestMove: {
-            live: components["schemas"]["DigestSide"];
             /** Name */
             name: string;
+            /** @description With them */
+            noted: components["schemas"]["DigestSide"];
+            /** @description Without the analyst's notes */
+            plain: components["schemas"]["DigestSide"];
             /** Player Id */
             player_id: number;
-            shadow: components["schemas"]["DigestSide"];
             /** Team */
             team: string | null;
         };
         /**
          * DigestRead
-         * @description One read: why he was picked, what it came to, and what it would have moved.
+         * @description One read: why he was picked, what it came to, and what its notes move.
          */
         DigestRead: {
             /**
@@ -2664,8 +2670,6 @@ export interface components {
             disagrees: string | null;
             /** Id */
             id: number;
-            /** @description The projection and boards everybody sees */
-            live: components["schemas"]["DigestSide"] | null;
             /** Name */
             name: string;
             /** @description The note it left, as stored */
@@ -2676,6 +2680,8 @@ export interface components {
              * @default false
              */
             note_live: boolean;
+            /** @description Him with the analyst's notes applied: the second projection and boards while it is in shadow, what everybody sees once it is live */
+            noted: components["schemas"]["DigestSide"] | null;
             /**
              * Outcome
              * @description note | unchanged | none | retired | refused | declined | failed
@@ -2687,6 +2693,8 @@ export interface components {
              * @default false
              */
             owner_note: boolean;
+            /** @description Him without the analyst's notes: what everybody sees while it is in shadow, the second projection and boards once it is live */
+            plain: components["schemas"]["DigestSide"] | null;
             /** Player Id */
             player_id: number;
             /**
@@ -2696,8 +2704,6 @@ export interface components {
             read_at: string;
             /** Reasons */
             reasons: components["schemas"]["DigestReason"][];
-            /** @description The same with the analyst's notes applied */
-            shadow: components["schemas"]["DigestSide"] | null;
             /** Summary */
             summary: string | null;
             /** Team */

@@ -169,7 +169,7 @@ export function useRetireNote() {
   })
 }
 
-// ---- the analyst, in shadow ------------------------------------------------------------------
+// ---- the analyst ---------------------------------------------------------------------------------
 
 /** `day` null is the newest morning with reads. */
 export function analystDigestQuery(day: string | null) {

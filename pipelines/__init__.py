@@ -100,9 +100,9 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     # Court Vision's two standard boards and ESPN's ranks, stored each morning of the
     # season (hourly through the morning; its route gates on the day being stored).
     "daily_rankings": DailyRankingsPipeline,
-    # The live rankings' analyst, in shadow: the morning's reads, and a second
-    # projection and boards with its notes applied (started in the background by the
-    # daily-rankings trigger once the day's boards are stored).
+    # The live rankings' analyst: the morning's reads, then the day's projection and
+    # boards again with its notes applied, and a second pair without them (started in
+    # the background by the daily-rankings trigger once the day's boards are stored).
     "analyst": AnalystPipeline,
 }
 

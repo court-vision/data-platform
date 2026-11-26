@@ -205,14 +205,14 @@ export function formatSide(column: SideColumn, side: DigestSide | null | undefin
   return value == null ? "—" : value.toFixed(column.digits)
 }
 
-/** Whether the analyst's notes changed this number for him. */
-export function sideDiffers(column: SideColumn, live: DigestSide | null | undefined, shadow: DigestSide | null | undefined): boolean {
-  return live != null && shadow != null && formatSide(column, live) !== formatSide(column, shadow)
+/** Whether the analyst's notes changed this number for him: without them (`plain`) against with them (`noted`). */
+export function sideDiffers(column: SideColumn, plain: DigestSide | null | undefined, noted: DigestSide | null | undefined): boolean {
+  return plain != null && noted != null && formatSide(column, plain) !== formatSide(column, noted)
 }
 
 /** Whether anything about him differs between the two projections and boards. */
-export function sidesDiffer(live: DigestSide | null | undefined, shadow: DigestSide | null | undefined): boolean {
-  return SIDE_COLUMNS.some((column) => sideDiffers(column, live, shadow))
+export function sidesDiffer(plain: DigestSide | null | undefined, noted: DigestSide | null | undefined): boolean {
+  return SIDE_COLUMNS.some((column) => sideDiffers(column, plain, noted))
 }
 
 /** "points rank 14 · 9-cat rank 9 · 58.1 games left": where a player the notes did not move stands. */
@@ -225,18 +225,29 @@ export function describeSide(side: DigestSide): string {
 }
 
 /** "+6" for six places gained on the points board with the analyst's notes applied, "−3" for three lost. */
-export function pointsMove(move: Pick<DigestMove, "live" | "shadow">): string {
-  return rankMove(move.live.points_rank ?? null, move.shadow.points_rank ?? null)
+export function pointsMove(move: Pick<DigestMove, "plain" | "noted">): string {
+  return rankMove(move.plain.points_rank ?? null, move.noted.points_rank ?? null)
+}
+
+/**
+ * What the two sides are called on a morning. In shadow everybody saw the
+ * side without the analyst's notes, and the one with them was the second
+ * projection and boards; live, it is the other way round.
+ */
+export function sideNames(inShadow: boolean): { plain: string; noted: string; plainShort: string; notedShort: string } {
+  return inShadow
+    ? { plain: "Live", noted: "With its notes", plainShort: "Live", notedShort: "Second" }
+    : { plain: "Without its notes", noted: "Live, with its notes", plainShort: "Without", notedShort: "Live" }
 }
 
 /**
  * The day whose two boards a morning's moves are read off: that morning's own.
- * `shadow_as_of` is the newest day with second boards whichever morning is
+ * `second_as_of` is the newest day with second boards whichever morning is
  * shown, so it says only whether this morning's can be stored yet, never
  * which boards are being compared. Null when they cannot be.
  */
-export function movedBoardsDay(digest: Pick<AnalystDigest, "as_of" | "shadow_as_of">): string | null {
-  if (digest.as_of == null || digest.shadow_as_of == null || digest.shadow_as_of < digest.as_of) return null
+export function movedBoardsDay(digest: Pick<AnalystDigest, "as_of" | "second_as_of">): string | null {
+  if (digest.as_of == null || digest.second_as_of == null || digest.second_as_of < digest.as_of) return null
   return digest.as_of
 }
 

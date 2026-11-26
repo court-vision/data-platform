@@ -1,5 +1,5 @@
 """
-The analyst in shadow (the Live rankings plan, step 4): what a read answers,
+The analyst (the Live rankings plan, steps 4 and 5): what a read answers,
 and the morning digest the projections editor shows.
 
 `Proposal` is the backend's answer to one read
@@ -62,7 +62,7 @@ class DigestSide(ApiModel):
 
 
 class DigestRead(ApiModel):
-    """One read: why he was picked, what it came to, and what it would have moved."""
+    """One read: why he was picked, what it came to, and what its notes move."""
 
     id: int
     player_id: int
@@ -79,8 +79,16 @@ class DigestRead(ApiModel):
     note: Optional[AdjustmentEntry] = Field(default=None, description="The note it left, as stored")
     note_live: bool = Field(default=False, description="Whether that note is still the analyst's live one")
     owner_note: bool = Field(default=False, description="Whether a note written by hand stands for him")
-    live: Optional[DigestSide] = Field(default=None, description="The projection and boards everybody sees")
-    shadow: Optional[DigestSide] = Field(default=None, description="The same with the analyst's notes applied")
+    plain: Optional[DigestSide] = Field(
+        default=None,
+        description="Him without the analyst's notes: what everybody sees while it is in shadow, the second "
+                    "projection and boards once it is live",
+    )
+    noted: Optional[DigestSide] = Field(
+        default=None,
+        description="Him with the analyst's notes applied: the second projection and boards while it is in "
+                    "shadow, what everybody sees once it is live",
+    )
     cost_usd: float = 0.0
 
 
@@ -101,22 +109,27 @@ class DigestMove(ApiModel):
     player_id: int
     name: str
     team: Optional[str] = None
-    live: DigestSide
-    shadow: DigestSide
+    plain: DigestSide = Field(description="Without the analyst's notes")
+    noted: DigestSide = Field(description="With them")
 
 
 class AnalystDigest(ApiModel):
-    """A morning of the analyst in shadow."""
+    """A morning of the analyst."""
 
     season: str
     as_of: Optional[date] = Field(default=None, description="The morning shown; None before its first run")
     days: list[date] = Field(default_factory=list, description="The mornings with reads, newest first")
-    in_shadow: bool = Field(default=True, description="Its notes reach only the second projection and boards")
+    in_shadow: bool = Field(
+        default=True,
+        description="Whether, on the morning shown, its notes reached only the second projection and boards. "
+                    "False: they were on the projection and boards everybody sees, and the second pair is the "
+                    "same morning without them",
+    )
     reads: list[DigestRead] = Field(default_factory=list)
     counts: dict[str, int] = Field(default_factory=dict, description="Reads by outcome")
     cost_usd: float = Field(default=0.0, description="What the morning's reads cost")
     notes_live: int = Field(default=0, description="Notes of the analyst's standing today")
-    shadow_as_of: Optional[date] = Field(default=None, description="The morning of the newest shadow boards")
+    second_as_of: Optional[date] = Field(default=None, description="The morning of the newest second boards")
     moved: list[DigestMove] = Field(
         default_factory=list, description="The widest moves between the two points boards that morning"
     )

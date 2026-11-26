@@ -15,6 +15,7 @@ import {
   ruleLabel,
   SIDE_COLUMNS,
   sideDiffers,
+  sideNames,
   sidesDiffer,
   usd,
   visibleReads,
@@ -32,7 +33,7 @@ function read(overrides: Partial<DigestRead> = {}): DigestRead {
   return {
     id: 1, player_id: 1, name: "Nikola Jokić", team: "DEN", as_of: "2026-11-20", read_at: "2026-11-20T11:02:10",
     reasons: [], outcome: "none", summary: null, disagrees: null, note: null, note_live: false, owner_note: false,
-    live: side(), shadow: side(), cost_usd: 0.04,
+    plain: side(), noted: side(), cost_usd: 0.04,
     ...overrides,
   }
 }
@@ -45,7 +46,7 @@ function digest(overrides: Partial<AnalystDigest> = {}): AnalystDigest {
   const reads = overrides.reads ?? [read({ outcome: "note" }), read({ id: 2, outcome: "none" }), read({ id: 3, outcome: "refused" })]
   return {
     season: "2026-27", as_of: "2026-11-20", days: ["2026-11-20"], in_shadow: true, reads,
-    counts: { note: 1, none: 1, refused: 1 }, cost_usd: 0.12, notes_live: 1, shadow_as_of: "2026-11-20", moved: [], spend: spend(),
+    counts: { note: 1, none: 1, refused: 1 }, cost_usd: 0.12, notes_live: 1, second_as_of: "2026-11-20", moved: [], spend: spend(),
     ...overrides,
   }
 }
@@ -161,20 +162,27 @@ describe("the two projections", () => {
   })
 
   test("a move on the points board is places gained or lost with the notes applied", () => {
-    expect(pointsMove({ live: side({ points_rank: 3 }), shadow: side({ points_rank: 9 }) })).toBe("−6")
-    expect(pointsMove({ live: side({ points_rank: 41 }), shadow: side({ points_rank: 37 }) })).toBe("+4")
-    expect(pointsMove({ live: side(), shadow: side() })).toBe("")
-    expect(pointsMove({ live: side({ points_rank: null }), shadow: side() })).toBe("")
+    expect(pointsMove({ plain: side({ points_rank: 3 }), noted: side({ points_rank: 9 }) })).toBe("−6")
+    expect(pointsMove({ plain: side({ points_rank: 41 }), noted: side({ points_rank: 37 }) })).toBe("+4")
+    expect(pointsMove({ plain: side(), noted: side() })).toBe("")
+    expect(pointsMove({ plain: side({ points_rank: null }), noted: side() })).toBe("")
+  })
+
+  test("the side everybody sees is called live: the one without the notes in shadow, the one with them once it is live", () => {
+    expect(sideNames(true)).toEqual({ plain: "Live", noted: "With its notes", plainShort: "Live", notedShort: "Second" })
+    expect(sideNames(false)).toEqual({
+      plain: "Without its notes", noted: "Live, with its notes", plainShort: "Without", notedShort: "Live",
+    })
   })
 
   test("a morning's moves are read off its own two boards, when its second boards can be stored", () => {
-    expect(movedBoardsDay({ as_of: "2026-11-20", shadow_as_of: "2026-11-20" })).toBe("2026-11-20")
+    expect(movedBoardsDay({ as_of: "2026-11-20", second_as_of: "2026-11-20" })).toBe("2026-11-20")
     // An older morning: the newest second boards are a later day's, and are not the ones compared
-    expect(movedBoardsDay({ as_of: "2026-11-19", shadow_as_of: "2026-11-20" })).toBe("2026-11-19")
+    expect(movedBoardsDay({ as_of: "2026-11-19", second_as_of: "2026-11-20" })).toBe("2026-11-19")
     // Read, but its second boards are not stored yet; and no second boards at all
-    expect(movedBoardsDay({ as_of: "2026-11-20", shadow_as_of: "2026-11-19" })).toBeNull()
-    expect(movedBoardsDay({ as_of: "2026-11-20", shadow_as_of: null })).toBeNull()
-    expect(movedBoardsDay({ as_of: null, shadow_as_of: null })).toBeNull()
+    expect(movedBoardsDay({ as_of: "2026-11-20", second_as_of: "2026-11-19" })).toBeNull()
+    expect(movedBoardsDay({ as_of: "2026-11-20", second_as_of: null })).toBeNull()
+    expect(movedBoardsDay({ as_of: null, second_as_of: null })).toBeNull()
   })
 
   test("the newest morning is marked in the picker", () => {

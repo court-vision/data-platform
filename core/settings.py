@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     # which holds the switch (ANALYST_ENABLED, with AI_ENABLED) and the month's budget;
     # 0 here asks for none and still builds the shadow projection and boards.
     analyst_max_reads: int = 20
+    # Whether the analyst's notes reach the projection and boards everybody sees
+    # (the Live rankings plan, step 5; on from 2026-11-26 at the owner's word, ahead of
+    # the three scored weeks its gate asked for). false puts it back in shadow from the
+    # next run: its notes then move only a second projection and second boards.
+    analyst_live: bool = True
     # Read timeout per evaluate call: > backend roster read + 30 s writer call + re-read.
     backend_timeout_seconds: float = 45.0
     # The scheduled-pickups tick (POST /v1/internal/jobs/pickups/execute): up to

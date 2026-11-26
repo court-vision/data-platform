@@ -20,6 +20,10 @@ What the live projection is built from, loaded once (services.live_projection_mo
   nba.projection_adjustments, and how it stands this morning
   (services.live_notes). The games part of a note in force is believed over
   the feed's return date; its role part goes to the model as it is.
+
+`load_inputs` reads the notes written by hand alone. The analyst's own
+(`scope='analyst'`) are laid under them by `with_analyst_notes`, which is what
+the live projection reads once the analyst is live (`settings.analyst_live`).
 """
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ from db.models.nba import (
     PlayerProjection,
     ProjectionAdjustment,
 )
-from db.models.nba.projection_adjustments import SCOPE_SEASON
+from db.models.nba.projection_adjustments import SCOPE_ANALYST, SCOPE_SEASON
 from services.live_notes import Note, RoleNote, Standing, role_note, standing
 from services.live_projection_model import LINE_KEYS, Availability, BoxLine, Coefficients, Prior
 from services.projection_inputs import PROFILE_RUN_SLACK
@@ -313,8 +317,27 @@ def noted_inputs(
     }
 
 
+def with_analyst_notes(inputs: LiveInputs) -> tuple[LiveInputs, int]:
+    """`inputs` with the analyst's live notes laid under the notes written by hand,
+    and how many of the analyst's are read.
+
+    A player with a note written by hand that is in force is read off that
+    one alone: the owner's edits win. Where the owner's note has ended or is
+    past its review date it says nothing this morning, and the analyst's is read.
+    """
+    owners = {pid for pid, found in inputs.standings.items() if found.in_force}
+    analyst = {
+        record.player_id: note_of(record)
+        for record in ProjectionAdjustment.active_for(inputs.season, SCOPE_ANALYST)
+        if record.player_id not in owners
+    }
+    merged = {**inputs.notes, **analyst}
+    return replace(inputs, **noted_inputs(inputs.known_before_notes, merged, inputs.as_of, inputs.last_played)), len(analyst)
+
+
 def load_inputs(season: str, as_of: date) -> LiveInputs:
-    """One trip to the database for everything the live projection reads."""
+    """One trip to the database for everything the live projection reads, with the
+    notes written by hand. The analyst's are not among them: `with_analyst_notes`."""
     lines = box_lines(season, as_of)
     source, prior_as_of, priors = preseason_priors(season)
     tips = last_tips(lines, season, as_of)
