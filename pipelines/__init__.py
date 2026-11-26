@@ -21,6 +21,7 @@ from pipelines.team_stats import TeamStatsPipeline
 from pipelines.game_schedule import GameSchedulePipeline
 from pipelines.espn_injury_status import ESPNInjuryStatusPipeline
 from pipelines.breakout_detection import BreakoutDetectionPipeline
+from pipelines.daily_actions import DailyActionsPipeline
 from pipelines.lineup_alerts import LineupAlertsPipeline
 from pipelines.live_game_stats import LiveGameStatsPipeline
 from pipelines.player_profiles import PlayerProfilesPipeline
@@ -65,6 +66,9 @@ PIPELINE_REGISTRY: dict[str, Type[BasePipeline]] = {
     # PRE_GAME — run before games start (timed relative to first tip-off)
     "espn_injury_status": ESPNInjuryStatusPipeline,
     "breakout_detection": BreakoutDetectionPipeline,
+    # Before lineup_alerts: on the tick both run, the pickups for open spots are on the roster
+    # when auto-lineup fills the slots.
+    "daily_actions": DailyActionsPipeline,
     "lineup_alerts": LineupAlertsPipeline,
     # LIVE — run every 15 s during active game windows
     "live_game_stats": LiveGameStatsPipeline,
@@ -217,6 +221,7 @@ __all__ = [
     "GameSchedulePipeline",
     "ESPNInjuryStatusPipeline",
     "BreakoutDetectionPipeline",
+    "DailyActionsPipeline",
     "LineupAlertsPipeline",
     "LiveGameStatsPipeline",
     "PlayerProfilesPipeline",

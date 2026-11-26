@@ -8151,6 +8151,33 @@
         ]
       }
     },
+    "/v1/internal/pipelines/daily-actions": {
+      "post": {
+        "description": "Trigger the daily actions pipeline (the Daily actions row's Act level).\n\nAsks the backend to make each Act team's IR moves and fill its open roster\nspots with the day's best free agents, never a drop, and emails what was made.\nSelf-gates: does nothing on a day without games or after the first tip.\n\nSafe to call frequently (every 15 min); the day's log row settles each team\nonce, and a failed run is retried by the next call.",
+        "operationId": "trigger_daily_actions_v1_internal_pipelines_daily_actions_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Trigger Daily Actions",
+        "tags": [
+          "pipelines"
+        ]
+      }
+    },
     "/v1/internal/pipelines/daily-matchup-scores": {
       "post": {
         "description": "Trigger the daily matchup scores pipeline.\n\nFetches current matchup scores for all saved teams and records\ndaily snapshots for visualization.\nPass ?date=YYYY-MM-DD to backfill a specific date.\n\nDirect trigger: the ESPN batch gate lives in the post-game endpoint, which\nis what production calls. A `?watch=true` loop mode used to duplicate that\ngate here for a cron-runner job that was never registered; it referenced an\n`ApiStatus` member that does not exist, so it would have raised on its first\nreal request. Removed rather than fixed \u2014 one gate is the point.",
