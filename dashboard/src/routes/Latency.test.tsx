@@ -47,6 +47,12 @@ function routeNames(html: string): string[] {
   return [...html.matchAll(/class="nameLink path"[^>]*>([^<]+)</g)].map((match) => match[1])
 }
 
+/** The head the table is ordered by, and which way: its label and its aria-sort. */
+function sortedBy(html: string): [string, string] | null {
+  const match = html.match(/aria-sort="(ascending|descending)"[^>]*><button[^>]*><span>([^<]+)<\/span>/)
+  return match ? [match[2], match[1]] : null
+}
+
 describe("Latency", () => {
   test("lists the routes costliest first, each with its split and a link to its page", () => {
     const html = render(<Latency />, "/latency", (client) => client.setQueryData(latencyQuery("24h").queryKey, overview()))
@@ -61,7 +67,10 @@ describe("Latency", () => {
     expect(matchup).toContain(">2</td>")
     expect(html).toContain(">1,240</dd>")
     expect(html).toMatch(pressed("24h"))
-    expect(html).toMatch(pressed("Total time"))
+    // Total time is a column of its own, and the one the table is ordered by.
+    expect(matchup).toContain(">10.4 s</td>")
+    expect(sortedBy(html)).toEqual(["Total time", "descending"])
+    expect(html).not.toContain("Order by")
   })
 
   test("the order and the window come from the URL", () => {
@@ -69,7 +78,23 @@ describe("Latency", () => {
       client.setQueryData(latencyQuery("7d").queryKey, overview({ window: "7d" })),
     )
     expect(routeNames(html)).toEqual(["/v1/rankings", "/v1/matchups/live/{team_id}"])
+    expect(sortedBy(html)).toEqual(["Requests", "descending"])
     expect(html).toMatch(pressed("7d"))
+  })
+
+  test("a column's head orders the table either way", () => {
+    const fill = (client: QueryClient) => client.setQueryData(latencyQuery("24h").queryKey, overview())
+    const fewest = render(<Latency />, "/latency?sort=requests&dir=asc", fill)
+    expect(routeNames(fewest)).toEqual(["/v1/matchups/live/{team_id}", "/v1/rankings"])
+    expect(sortedBy(fewest)).toEqual(["Requests", "ascending"])
+
+    const byName = render(<Latency />, "/latency?sort=route", fill)
+    expect(routeNames(byName)).toEqual(["/v1/matchups/live/{team_id}", "/v1/rankings"])
+    expect(sortedBy(byName)).toEqual(["Route", "ascending"])
+
+    // Every column but the bar's is a head that orders.
+    expect(byName.match(/class="sortHead"/g)).toHaveLength(8)
+    expect(byName).toContain('<th scope="col">Where the time goes</th>')
   })
 
   test("while another window loads, the text names the window of the numbers on screen", () => {
