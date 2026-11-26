@@ -16,8 +16,7 @@
   --f-unlinked: #9a958c;
 }
 
-[data-theme="midnight"] .viz,
-[data-theme="ember"] .viz {
+[data-scheme="dark"] .viz {
   --f-chat: #3987e5;
   --f-checkin: #d95926;
   --f-draft: #199e70;
@@ -37,7 +36,7 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  border-radius: 2px;
+  border-radius: calc(2px * var(--round, 1));
   background: var(--f, var(--text-3));
 }
 
@@ -68,7 +67,7 @@
   width: 100%;
   min-width: 6rem;
   height: 6px;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--round, 1));
   background: var(--line);
   overflow: hidden;
 }
@@ -76,7 +75,7 @@
 .meterFill {
   position: absolute;
   inset: 0 auto 0 0;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--round, 1));
   background: var(--text-2);
 }
 

@@ -2,7 +2,10 @@ import { ArrowUpRight, LogOut, RotateCw } from "lucide-react"
 import { Link, useLocation } from "react-router"
 
 import { PAGES, pageFor } from "@/components/shell/nav"
+import { CrustLeaves } from "@/desk/FallLeaves"
 import { ThemePicker } from "@/desk/ThemePicker"
+import { themeLeaves } from "@/desk/themes"
+import { useDeskTheme } from "@/desk/useDeskTheme"
 import { clearToken } from "@/lib/token"
 import dk from "@/desk/desk.module.css"
 import s from "./shell.module.css"
@@ -19,8 +22,10 @@ export const APP_URL = "https://www.courtvision.dev"
 export function DeskBar({ context, onRefresh }: { context: string | null; onRefresh: () => void }) {
   const { pathname } = useLocation()
   const current = pageFor(pathname)
+  const leaves = themeLeaves(useDeskTheme())
   return (
     <header className={dk.bar}>
+      {leaves ? <CrustLeaves /> : null}
       {/* The frontend's wordmark: the full word from md, its initials on phones. */}
       <Link to="/" className={dk.mark} title="Data platform overview" aria-label="Court Vision data platform">
         <span className={dk.markCompact} aria-hidden>

@@ -2,7 +2,8 @@ import { AlertTriangle, CheckCircle2, Info, Loader2, XCircle } from "lucide-reac
 import { createContext, useContext, useEffect, useState } from "react"
 import { Toaster } from "sonner"
 
-import { themeScheme } from "./themes"
+import { LeafFall } from "./FallLeaves"
+import { themeLeaves, themeScheme } from "./themes"
 import { useDeskTheme } from "./useDeskTheme"
 import dk from "./desk.module.css"
 
@@ -29,8 +30,12 @@ export function DeskFrame({ children }: { children: React.ReactNode }) {
   }, [el, theme])
 
   return (
-    <div ref={setEl} className={`${dk.root} ${dk.tokens}`} data-theme={theme}>
+    // data-scheme is the dashboard's own: a page's chart hues step by light or
+    // dark (latency.module.css), so a new theme needs no edit there.
+    <div ref={setEl} className={`${dk.root} ${dk.tokens}`} data-theme={theme} data-scheme={themeScheme(theme)}>
       <PortalContext.Provider value={el}>{children}</PortalContext.Provider>
+      {/* Keyed by theme, so switching to a theme with leaves plays its fall again. */}
+      {themeLeaves(theme) ? <LeafFall key={theme} /> : null}
       <Toaster
         theme={themeScheme(theme)}
         position="bottom-right"

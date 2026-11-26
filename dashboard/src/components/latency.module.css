@@ -6,8 +6,10 @@
  * palette validator against each desk theme's ground: every adjacent pair
  * passes in light and dark). The light steps fall under 3:1 on the ground for
  * a few hues, so every bar's numbers are also in text: its title, and the
- * table under each chart. Dark themes take the same hues stepped for a dark
- * ground, not an automatic flip. The order follows lib/latency.ts GROUPS.
+ * table under each chart. Dark themes (data-scheme="dark" on the frame) take
+ * the same hues stepped for a dark ground, not an automatic flip; Chalk,
+ * Harvest, Blacktop and Hearth's grounds give each step the same contrast as
+ * Paper's or Midnight's, or more. The order follows lib/latency.ts GROUPS.
  */
 
 .viz {
@@ -22,8 +24,7 @@
   --g-other: #9a958c;
 }
 
-[data-theme="midnight"] .viz,
-[data-theme="ember"] .viz {
+[data-scheme="dark"] .viz {
   --g-espn: #3987e5;
   --g-postgres: #d95926;
   --g-app: #199e70;
@@ -79,15 +80,15 @@
 }
 
 .segment:first-child {
-  border-radius: 2px 0 0 2px;
+  border-radius: calc(2px * var(--round, 1)) 0 0 calc(2px * var(--round, 1));
 }
 
 .segment:last-child {
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 calc(4px * var(--round, 1)) calc(4px * var(--round, 1)) 0;
 }
 
 .segment:only-child {
-  border-radius: 2px 4px 4px 2px;
+  border-radius: calc(2px * var(--round, 1)) calc(4px * var(--round, 1)) calc(4px * var(--round, 1)) calc(2px * var(--round, 1));
 }
 
 .anatomyCell {
@@ -99,7 +100,7 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  border-radius: 2px;
+  border-radius: calc(2px * var(--round, 1));
   background: var(--g, var(--text-3));
 }
 
@@ -118,7 +119,7 @@
   max-height: calc(100vh - 16px);
   overflow: hidden;
   padding: 9px 11px 10px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round, 1));
   background: var(--raised);
   box-shadow: var(--shadow);
   color: var(--text);
@@ -269,7 +270,7 @@
   display: inline-block;
   width: 14px;
   height: 2px;
-  border-radius: 1px;
+  border-radius: calc(1px * var(--round, 1));
   background: var(--key);
 }
 

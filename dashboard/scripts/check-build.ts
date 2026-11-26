@@ -36,7 +36,7 @@ for (const theme of DESK_THEMES) {
   }
 }
 if (!/--bg:\s*#/.test(css)) failures.push("no `--bg` token in the built CSS: is desk/desk.module.css still imported?")
-for (const variable of ["--desk-sans", "--desk-mono", "--font-outfit"]) {
+for (const variable of ["--desk-sans", "--desk-mono", "--font-outfit", "--face-grotesk", "--face-condensed", "--face-serif"]) {
   if (!new RegExp(`${variable}:`).test(css)) failures.push(`\`${variable}\` is never defined: index.css must name the desk's fonts`)
 }
 
