@@ -2445,16 +2445,19 @@ async def trigger_analyst(
     ),
 ) -> PipelineResponse:
     """
-    Trigger the analyst's morning run, in shadow (the Live rankings plan, step 4).
+    Trigger the analyst's morning run (the Live rankings plan, steps 4 and 5).
 
     A fixed screen picks the players whose stored news might say something a
     box score cannot; each gets one read from the backend's analyst, whose
     proposal is checked here (it must cite a stored item and stay inside its
     bounds) before it becomes a note in nba.projection_adjustments' `analyst`
     scope. Every read is logged in nba.analyst_reads. Then the morning's
-    projection is built again with those notes applied (`cv_live_shadow`) and
-    the backend's two boards on it are stored under the source `cv_shadow`.
-    Nothing a user sees reads any of it.
+    projection is built again with those notes applied and the backend's two
+    boards are built on it. Live (`ANALYST_LIVE`, the default), they replace
+    the day's own (`cv_live`, `cv`), and the same morning without the notes is
+    kept beside them (`cv_live_shadow`, boards `cv_plain`). In shadow they are
+    the pair kept beside (`cv_live_shadow`, boards `cv_shadow`) and nothing a
+    user sees reads any of it.
 
     It has no cron job of its own: the daily-rankings trigger starts it once
     the day's projection and boards are stored, and again on each later tick

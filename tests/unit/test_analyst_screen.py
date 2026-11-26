@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 
 
 def subject(pid=1, **over) -> Subject:
-    fields = {"player_id": pid, "name": f"P{pid}", "minutes_usual": 30.0, "citable_items": 1}
+    fields = {"player_id": pid, "name": f"P{pid}", "minutes_usual": 30.0, "citable_items": 1, "cv_rank": 100}
     return Subject(**{**fields, **over})
 
 
@@ -85,9 +85,10 @@ def test_every_rule_that_picks_him_is_a_reason_and_the_first_places_him():
 
 
 def test_within_a_rule_the_better_ranked_player_is_read_first_then_the_one_who_plays_more():
+    # The unranked two are read at all only for the notes they carry
     picked = screen([
-        subject(1, new_items=("injury",), minutes_usual=20.0),
-        subject(2, new_items=("injury",), minutes_usual=34.0),
+        subject(1, new_items=("injury",), cv_rank=None, has_note=True, minutes_usual=20.0),
+        subject(2, new_items=("injury",), cv_rank=None, has_note=True, minutes_usual=34.0),
         subject(3, new_items=("injury",), cv_rank=150),
         subject(4, new_items=("injury",), cv_rank=12),
     ])
@@ -102,15 +103,29 @@ def test_without_a_citable_item_there_is_nothing_to_write():
     assert rules(picked) == {1: (STATUS_CHANGED,)}
 
 
-def test_the_screen_is_for_players_a_roster_would_hold():
-    deep = {"minutes_usual": 8.0, "new_items": ("injury",)}
-    assert screen([subject(1, **deep)]) == []
+def test_the_screen_is_for_players_the_board_ranks_in_its_top_200():
+    news = {"new_items": ("injury",)}
     # The board ranks him, so he matters whatever he has played
-    assert rules(screen([subject(1, cv_rank=180, **deep)])) == {1: (NEW_ITEM,)}
-    assert screen([subject(1, cv_rank=260, **deep)]) == []
-    # A note of the analyst's own is read again whoever it is about
-    due = subject(1, minutes_usual=8.0, has_note=True, note_due="His note has ended: he played on 2026-11-14")
+    assert rules(screen([subject(1, cv_rank=200, minutes_usual=8.0, **news)])) == {1: (NEW_ITEM,)}
+    # Past that he waits for the stats-only board to lift him in, however much he plays
+    assert screen([subject(1, cv_rank=201, minutes_usual=34.0, **news)]) == []
+    assert screen([subject(1, cv_rank=None, minutes_usual=34.0, **news)]) == []
+
+
+def test_a_note_of_the_analysts_own_is_read_again_wherever_he_ranks():
+    low = {"cv_rank": 260, "minutes_usual": 8.0, "has_note": True}
+    due = subject(1, note_due="His note has ended: he played on 2026-11-14", **low)
     assert rules(screen([due])) == {1: (NOTE_DUE,)}
+    # ... and so is whatever else changes for him while the note stands
+    back = subject(1, status_change=StatusChange(was="out", now="available"), **low)
+    assert rules(screen([back])) == {1: (STATUS_CHANGED,)}
+    assert screen([subject(1, **low)]) == []
+
+
+def test_a_gap_to_espn_is_no_reason_for_a_player_below_the_floor():
+    # 201 here against 40 at ESPN is among the day's widest, but he is not who the screen is for
+    assert screen([subject(1, cv_rank=201, espn_rank=40)]) == []
+    assert rules(screen([subject(1, cv_rank=200, espn_rank=40)])) == {1: (RANK_GAP,)}
 
 
 def test_a_due_reason_without_a_note_is_not_a_reason():

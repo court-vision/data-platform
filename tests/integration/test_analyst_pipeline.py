@@ -1,5 +1,5 @@
 """
-The analyst in shadow against Postgres (the Live rankings plan, step 4): who a
+The analyst against Postgres, in shadow and live (the Live rankings plan, steps 4 and 5): who a
 morning reads and what each read is shown, what becomes of an answer, the
 second projection and boards its notes make, what a later run does not ask
 again, and where a run stops.
@@ -20,6 +20,7 @@ from types import SimpleNamespace
 import pytest
 import pytz
 
+from core.locks import pipeline_lock
 from core.settings import settings
 from db.base import db
 from db.models.nba import (
@@ -39,7 +40,7 @@ from db.models.nba.player_game_stats import PlayerGameStats
 from db.models.nba.players import Player
 from db.models.nba.projection_adjustments import SCOPE_ANALYST
 from pipelines import analyst, live_projection
-from pipelines.analyst import SHADOW_BOARDS, SHADOW_SOURCE, AnalystPipeline, due_reason
+from pipelines.analyst import PLAIN_BOARDS, SHADOW_BOARDS, SHADOW_SOURCE, AnalystPipeline, due_reason
 from pipelines.live_projection import SOURCE, LiveProjectionPipeline
 from schemas.common import ApiStatus
 from services import analyst_digest, analyst_inputs
@@ -81,6 +82,16 @@ NOTHING = {"decision": "none", "reason": "Nothing a box score cannot say."}
 def analyst_tables(integration_db, adjustments_table):
     db.create_tables(MODELS, safe=True)
     yield
+
+
+@pytest.fixture(autouse=True)
+def in_shadow(monkeypatch):
+    """A morning here is the analyst in shadow, unless its test turns it live (`_go_live`)."""
+    monkeypatch.setattr(settings, "analyst_live", False)
+
+
+def _go_live(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "analyst_live", True)
 
 
 def _game_id(n: int) -> str:
@@ -215,15 +226,18 @@ class Backend:
 
 
 class Boards:
-    """The backend's daily boards, scripted."""
+    """The backend's daily boards, scripted: the ones built on the second projection
+    (`boards`), and the ones built on the projection everybody reads (`live`, the same
+    unless given)."""
 
-    def __init__(self, boards: DailyBoards | None = None):
+    def __init__(self, boards: DailyBoards | None = None, live: DailyBoards | None = None):
         self.boards = boards or _boards()
+        self.live = live or self.boards
         self.calls: list[bool] = []
 
     def daily_boards(self, correlation_id=None, shadow=False) -> DailyBoards:
         self.calls.append(shadow)
-        return self.boards
+        return self.boards if shadow else self.live
 
 
 def _month(*, enabled: bool = True, spent: int = 0) -> Month:
@@ -242,11 +256,12 @@ def _boards(order=SHADOW_ORDER, *, as_of: date = TODAY, live_as_of: date | None 
                        live_as_of=live_as_of, players=players)
 
 
-def _run(answers: dict | None = None, *, month: Month | None = None, boards: DailyBoards | None = None):
+def _run(answers: dict | None = None, *, month: Month | None = None, boards: DailyBoards | None = None,
+         live_boards: DailyBoards | None = None):
     """One run of the analyst against a scripted backend."""
     pipeline = AnalystPipeline()
     pipeline.client = backend = Backend(answers, month)
-    pipeline.valuation_client = valuation = Boards(boards)
+    pipeline.valuation_client = valuation = Boards(boards, live_boards)
     return pipeline._run_sync(), backend, valuation
 
 
@@ -759,6 +774,215 @@ def test_boards_that_are_not_this_mornings_shadow_are_not_stored(refs, boards, w
     assert DailyRanking.stored(TODAY, SHADOW_BOARDS) == 2 * len(EVERYONE)
 
 
+# ---- live: its notes on the projection and boards everybody sees (step 5) -------------------
+
+
+def test_live_its_notes_reach_the_projection_and_boards_everybody_sees(refs, monkeypatch):
+    _go_live(monkeypatch)
+    morning_raw = {pid: r.raw for pid, r in _rows(SOURCE).items()}
+    espn_before = DailyRanking.ranks_on(TODAY - timedelta(days=1), SOURCE_ESPN, BOARD_POINTS)
+
+    # The backend builds the second boards on the projection without the notes, the day's own on the one with them
+    result, _, valuation = _run({STAR: _later(refs), BENCH: _starts(refs)},
+                                boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+
+    assert result.status == ApiStatus.SUCCESS
+    notes = _notes()
+    live, second = _rows(SOURCE), _rows(SHADOW_SOURCE)
+    assert set(live) == set(second) == set(EVERYONE)
+
+    # The star: the note's return date on the projection everybody sees, the feed's on the second
+    assert live[STAR].raw["parts"]["known"] == {"out_next": True, "out_for_season": False,
+                                                "return_date": AHEAD[4].isoformat(), "note": notes[STAR].id}
+    assert second[STAR].raw["parts"]["known"] == {"out_next": True, "out_for_season": False,
+                                                  "return_date": AHEAD[2].isoformat()}
+    assert live[STAR].raw["games"] < second[STAR].raw["games"]
+    # His fill-in starts on the live one, for as long as the star is out
+    role = live[BENCH].raw["parts"]["note"]
+    assert (role["id"], role["minutes"], role["usage"], role["depends_on"]) == (notes[BENCH].id, 28.0, 1.1, STAR)
+    assert "note" not in second[BENCH].raw["parts"]
+    # The second projection is the morning as it was built before the reads: no note stood then
+    assert {pid: r.raw for pid, r in second.items()} == morning_raw
+
+    # The day's boards are built again on the projection with the notes; the ones without are kept beside them
+    assert valuation.calls == [False, True]
+    for board in (BOARD_POINTS, BOARD_CATEGORIES):
+        assert DailyRanking.ranks_on(TODAY, SOURCE_CV, board) == {
+            pid: rank for rank, pid in enumerate(SHADOW_ORDER, start=1)}
+        assert DailyRanking.ranks_on(TODAY, PLAIN_BOARDS, board) == {
+            pid: rank for rank, pid in enumerate(LIVE_ORDER, start=1)}
+    assert DailyRanking.stored(TODAY, SHADOW_BOARDS) == 0
+    assert DailyRanking.ranks_on(TODAY - timedelta(days=1), SOURCE_ESPN, BOARD_POINTS) == espn_before
+    assert result.records_processed == 3 + 2 * len(EVERYONE) + 4 * len(EVERYONE)
+
+    # A second run that morning asks for no read again, and stores the same two pairs
+    _read_at()
+    again, backend, valuation = _run(boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+    assert again.status == ApiStatus.SUCCESS and backend.bodies == [] and valuation.calls == [False, True]
+    assert _rows(SOURCE)[STAR].raw["parts"]["known"]["note"] == notes[STAR].id
+    assert DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS)[STAR] == 3
+
+
+def test_live_the_days_projection_reads_the_notes_standing_whoever_builds_it(refs, monkeypatch):
+    _go_live(monkeypatch)
+    _run({STAR: _later(refs), BENCH: _starts(refs)})
+    noted = {pid: r.raw for pid, r in _rows(SOURCE).items()}
+    note = _notes()[STAR]
+
+    # The projection's own pipeline (tomorrow morning's run, a forced one, a note saved in the editor)
+    _live(force=True)
+    assert {pid: r.raw for pid, r in _rows(SOURCE).items()} == noted
+    assert _rows(SOURCE)[STAR].raw["parts"]["known"]["note"] == note.id
+
+    # A note written by hand still wins over the analyst's for the same player
+    owner = ProjectionAdjustment.record(STAR, SEASON, scope="season", kind="injury_current", note="mine",
+                                        author="james", return_date=AHEAD[3],
+                                        review_date=TODAY + timedelta(days=7))
+    _live(force=True)
+    known = _rows(SOURCE)[STAR].raw["parts"]["known"]
+    assert (known["return_date"], known["note"]) == (AHEAD[3].isoformat(), owner.id)
+    assert _rows(SOURCE)[BENCH].raw["parts"]["note"]["id"] == _notes()[BENCH].id
+
+    # Back in shadow the same build reads the notes written by hand alone
+    monkeypatch.setattr(settings, "analyst_live", False)
+    _live(force=True)
+    assert _rows(SOURCE)[STAR].raw["parts"]["known"]["note"] == owner.id
+    assert "note" not in _rows(SOURCE)[BENCH].raw["parts"]
+
+
+@pytest.mark.parametrize("live_boards, why", [
+    (DailyBoards.unavailable("http_500"), "could not be asked for the live boards (http_500)"),
+    (_boards(live_as_of=TODAY - timedelta(days=1)), "not built on this morning's live projection"),
+    (_boards(live_as_of=None), "not built on this morning's live projection"),
+    (_boards(()), "live boards ranked no players"),
+])
+def test_live_boards_that_cannot_be_built_leave_the_days_own_as_they_were(refs, monkeypatch, live_boards, why):
+    _go_live(monkeypatch)
+    before = DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS)
+
+    result, backend, _ = _run({STAR: _later(refs)}, boards=_boards(LIVE_ORDER), live_boards=live_boards)
+
+    assert result.status == ApiStatus.ERROR and why in result.error
+    assert DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS) == before
+    assert DailyRanking.stored(TODAY, PLAIN_BOARDS) == 0
+    # The reads were made and are kept; the next tick builds the boards without asking again
+    assert backend.asked == [STAR, BENCH, CELTIC] and set(_notes()) == {STAR}
+    assert due_reason(SEASON, TODAY) is None
+    _read_at()
+    result, backend, _ = _run(boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+    assert result.status == ApiStatus.SUCCESS and backend.bodies == []
+    assert DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS) == {
+        pid: rank for rank, pid in enumerate(SHADOW_ORDER, start=1)}
+    assert DailyRanking.stored(TODAY, PLAIN_BOARDS) == 2 * len(EVERYONE)
+
+
+def _elsewhere(work) -> None:
+    """Run `work` as another session does: on its own thread and connection."""
+    failed: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            work()
+        except BaseException as exc:        # shown on the test's own thread
+            failed.append(exc)
+        finally:
+            if not db.is_closed():
+                db.close()
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join(60)
+    assert not thread.is_alive() and not failed, failed
+
+
+def test_live_a_note_saved_by_hand_while_the_reads_are_out_is_not_written_over(refs, monkeypatch):
+    _go_live(monkeypatch)
+    saved: list[int] = []
+
+    def save_in_the_editor() -> None:
+        # James reads the same report as the fourth game from here and saves it: the note,
+        # then the day's projection rebuilt at once (api/v1/projections.py)
+        db.connect(reuse_if_open=True)
+        owner = ProjectionAdjustment.record(
+            STAR, SEASON, scope="season", kind="injury_current", note="read off the report", author="james",
+            return_date=AHEAD[3], review_date=TODAY + timedelta(days=14))
+        saved.append(owner.id)
+        db.close()
+        rebuilt = LiveProjectionPipeline()._run_sync(options={"rebuild": True})
+        assert rebuilt.status == ApiStatus.SUCCESS and rebuilt.records_processed == len(EVERYONE)
+
+    # ... while the analyst, which loaded the morning before he did, is still reading
+    reads = AnalystPipeline._reads
+
+    def reads_then_the_save(self, *args, **kwargs):
+        cut_short = reads(self, *args, **kwargs)
+        _elsewhere(save_in_the_editor)
+        return cut_short
+
+    monkeypatch.setattr(AnalystPipeline, "_reads", reads_then_the_save)
+    result, _, _ = _run({STAR: _later(refs), BENCH: _starts(refs)},
+                        boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+
+    assert result.status == ApiStatus.SUCCESS
+    (owner_id,) = saved
+    notes = _notes()
+    assert notes[STAR].return_date == AHEAD[4]          # the analyst's own, written before his
+    live, second = _rows(SOURCE), _rows(SHADOW_SOURCE)
+    # The projection everybody sees reads his note for the star, on both sides ...
+    for rows in (live, second):
+        known = rows[STAR].raw["parts"]["known"]
+        assert (known["return_date"], known["note"]) == (AHEAD[3].isoformat(), owner_id)
+    # ... and the analyst's for the fill-in, on the live one alone
+    assert live[BENCH].raw["parts"]["note"]["id"] == notes[BENCH].id
+    assert "note" not in second[BENCH].raw["parts"]
+
+
+def test_live_it_waits_its_turn_for_the_days_projection_and_fails_rather_than_write_under_a_rebuild(
+    refs, monkeypatch
+):
+    _go_live(monkeypatch)
+    monkeypatch.setattr(analyst, "PUBLISH_ATTEMPTS", 2)
+    monkeypatch.setattr(analyst, "PUBLISH_WAIT_SECONDS", 0)
+    morning_raw = {pid: r.raw for pid, r in _rows(SOURCE).items()}
+    boards_before = DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS)
+
+    # A run of the live projection that holds its lock through the analyst's whole run
+    held, release = threading.Event(), threading.Event()
+
+    def rebuild_that_never_ends() -> None:
+        db.connect(reuse_if_open=True)
+        try:
+            with pipeline_lock(LiveProjectionPipeline.config.name):
+                held.set()
+                release.wait(60)
+        finally:
+            db.close()
+
+    other = threading.Thread(target=rebuild_that_never_ends)
+    other.start()
+    try:
+        assert held.wait(10)
+        result, backend, valuation = _run({STAR: _later(refs)}, boards=_boards(LIVE_ORDER),
+                                          live_boards=_boards(SHADOW_ORDER))
+    finally:
+        release.set()
+        other.join(10)
+
+    assert result.status == ApiStatus.ERROR and "was being rebuilt by another run" in result.error
+    # Nothing anybody sees was written; the reads were made and their notes are kept
+    assert {pid: r.raw for pid, r in _rows(SOURCE).items()} == morning_raw
+    assert DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS) == boards_before
+    assert valuation.calls == [] and _rows(SHADOW_SOURCE) == {} and DailyRanking.stored(TODAY, PLAIN_BOARDS) == 0
+    assert backend.asked == [STAR, BENCH, CELTIC] and set(_notes()) == {STAR}
+
+    # The next tick, with the projection free, puts them on it without asking again
+    assert due_reason(SEASON, TODAY) is None
+    _read_at()
+    result, backend, _ = _run(boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+    assert result.status == ApiStatus.SUCCESS and backend.bodies == []
+    assert _rows(SOURCE)[STAR].raw["parts"]["known"]["note"] == _notes()[STAR].id
+
+
 def test_it_waits_for_the_mornings_projection_and_boards(refs, monkeypatch):
     PlayerProjection.delete().where(PlayerProjection.source == SOURCE).execute()
     assert due_reason(SEASON, TODAY) == "this morning's live projection is not stored yet"
@@ -828,9 +1052,9 @@ def test_the_feed_before_and_now_and_what_counts_as_new():
 # ---- the digest -----------------------------------------------------------------------------------
 
 
-def test_the_digest_is_the_morning_as_the_editor_shows_it(refs):
+def test_the_digest_is_the_morning_as_the_editor_shows_it(refs, monkeypatch):
     empty = analyst_digest.build(SEASON, None, _month(), TODAY)
-    assert (empty.as_of, empty.days, empty.reads, empty.notes_live, empty.shadow_as_of) == (None, [], [], 0, None)
+    assert (empty.as_of, empty.days, empty.reads, empty.notes_live, empty.second_as_of) == (None, [], [], 0, None)
     assert empty.in_shadow is True and empty.spend.month_cap_usd == 40.0
 
     _run({STAR: _later(refs), BENCH: _starts(refs, minutes=45)})
@@ -839,7 +1063,7 @@ def test_the_digest_is_the_morning_as_the_editor_shows_it(refs):
 
     assert (digest.season, digest.as_of, digest.days) == (SEASON, TODAY, [TODAY])
     assert digest.counts == {"note": 1, "refused": 1, "none": 1} and digest.cost_usd == pytest.approx(0.042)
-    assert (digest.notes_live, digest.shadow_as_of) == (1, TODAY)
+    assert (digest.notes_live, digest.second_as_of, digest.in_shadow) == (1, TODAY, True)
     assert (digest.spend.available, digest.spend.enabled, digest.spend.month_spent_usd) == (True, True, 1.25)
     assert (digest.spend.model, digest.spend.prompt_version) == ("test-model", "analyst-1")
 
@@ -853,9 +1077,9 @@ def test_the_digest_is_the_morning_as_the_editor_shows_it(refs):
     assert [f"news:{e.id}" for e in star.note.evidence] == [refs[STAR]]
     assert star.note.standing.state == "in_force"
     # What the note moved: fewer games on the second projection, and two places on its board
-    assert star.live.games > star.shadow.games and star.live.minutes == star.shadow.minutes
-    assert (star.live.points_rank, star.shadow.points_rank) == (1, 3)
-    assert (star.live.categories_rank, star.shadow.categories_rank) == (1, 3)
+    assert star.plain.games > star.noted.games and star.plain.minutes == star.noted.minutes
+    assert (star.plain.points_rank, star.noted.points_rank) == (1, 3)
+    assert (star.plain.categories_rank, star.noted.categories_rank) == (1, 3)
 
     bench = reads[BENCH]
     assert bench.outcome == "refused" and bench.note is None and bench.note_live is False
@@ -863,7 +1087,7 @@ def test_the_digest_is_the_morning_as_the_editor_shows_it(refs):
     assert reads[CELTIC].outcome == "none" and reads[CELTIC].note is None
 
     # The widest moves between the two points boards, whoever was read
-    assert [(m.player_id, m.live.points_rank, m.shadow.points_rank) for m in digest.moved] == [
+    assert [(m.player_id, m.plain.points_rank, m.noted.points_rank) for m in digest.moved] == [
         (STAR, 1, 3), (CELTIC, 2, 1), (STARTER, 3, 2)]
     assert digest.moved[0].name == "Star" and digest.moved[2].team == "DEN"
 
@@ -871,6 +1095,34 @@ def test_the_digest_is_the_morning_as_the_editor_shows_it(refs):
     assert analyst_digest.build(SEASON, TODAY, _month(), TODAY).counts == digest.counts
     before = analyst_digest.build(SEASON, TODAY - timedelta(days=1), _month(), TODAY)
     assert (before.as_of, before.reads, before.days) == (TODAY - timedelta(days=1), [], [TODAY])
+
+    # The morning was in shadow and stays so once the analyst is live; a morning that stored
+    # no second boards is read by the setting
+    _go_live(monkeypatch)
+    assert analyst_digest.build(SEASON, TODAY, _month(), TODAY).in_shadow is True
+    assert analyst_digest.build(SEASON, TODAY - timedelta(days=1), _month(), TODAY).in_shadow is False
+
+
+def test_the_digest_of_a_live_morning_has_the_notes_on_the_side_everybody_saw(refs, monkeypatch):
+    _go_live(monkeypatch)
+    assert analyst_digest.build(SEASON, None, _month(), TODAY).in_shadow is False
+
+    _run({STAR: _later(refs)}, boards=_boards(LIVE_ORDER), live_boards=_boards(SHADOW_ORDER))
+
+    digest = analyst_digest.build(SEASON, None, _month(), TODAY)
+    assert (digest.as_of, digest.second_as_of, digest.in_shadow, digest.notes_live) == (TODAY, TODAY, False, 1)
+    star = next(r for r in digest.reads if r.player_id == STAR)
+    # Without its note he plays more games and leads the board; with it, as everybody now sees him, he is third
+    assert star.plain.games > star.noted.games and star.plain.minutes == star.noted.minutes
+    assert (star.plain.points_rank, star.noted.points_rank) == (1, 3)
+    assert (star.noted.games, star.noted.points_rank) == (
+        round(_rows(SOURCE)[STAR].raw["games"], 1), DailyRanking.ranks_on(TODAY, SOURCE_CV, BOARD_POINTS)[STAR])
+    assert [(m.player_id, m.plain.points_rank, m.noted.points_rank) for m in digest.moved] == [
+        (STAR, 1, 3), (CELTIC, 2, 1), (STARTER, 3, 2)]
+
+    # The morning says what it was, whatever the setting is now
+    monkeypatch.setattr(settings, "analyst_live", False)
+    assert analyst_digest.build(SEASON, TODAY, _month(), TODAY).in_shadow is False
 
 
 def test_the_digest_says_when_a_note_has_been_replaced_or_stands_under_one_written_by_hand(refs):

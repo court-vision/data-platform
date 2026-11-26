@@ -1,13 +1,20 @@
 """
 The analyst's morning, as the projections editor shows it (the Live rankings
-plan, step 4).
+plan, steps 4 and 5).
 
-In shadow nothing the analyst writes reaches a board anyone sees, so the digest
-is where its work is judged: every read of a morning with why the screen picked
-the player, what the read came to, the note it left and what that note rests
-on, anything it says against a note written by hand, and what the note moved:
-the player on the live projection and boards beside the same player on the
-second ones, which have the analyst's notes applied.
+The digest is where the analyst's work is judged: every read of a morning with
+why the screen picked the player, what the read came to, the note it left and
+what that note rests on, anything it says against a note written by hand, and
+what its notes moved: the player without them (`plain`) beside the same player
+with them applied (`noted`).
+
+Which of the two everybody saw depends on the morning. In shadow the live
+projection and the `cv` boards are the plain side, and the noted side is the
+second projection (`cv_live_shadow`) and the boards built on it (`cv_shadow`).
+Once the analyst is live (`pipelines/analyst.py`) the live projection and the
+`cv` boards carry its notes, and the second projection is the morning without
+them, with its boards stored as `cv_plain`. A morning is read by what it
+stored: plain boards beside it mean it was live, whatever the setting is now.
 
 Reads and boards are kept for good. The second projection is kept a week, so
 an older morning shows its ranks without the lines under them.
@@ -20,6 +27,7 @@ from typing import Mapping, Optional
 
 from peewee import fn
 
+from core.settings import settings
 from db.models.nba import AnalystRead, DailyRanking, Player, PlayerProjection, ProjectionAdjustment
 from db.models.nba.daily_rankings import BOARD_CATEGORIES, BOARD_POINTS, SOURCE_CV
 from db.models.nba.projection_adjustments import SCOPE_ANALYST, SCOPE_SEASON
@@ -30,8 +38,9 @@ from services.live_notes import standing
 from services.projection_notes import note_entry, player_names
 
 LIVE_SOURCE = "cv_live"
-SHADOW_SOURCE = "cv_live_shadow"
-SHADOW_BOARDS = "cv_shadow"
+SECOND_SOURCE = "cv_live_shadow"            # the projection nobody is shown, whichever that is that morning
+SHADOW_BOARDS = "cv_shadow"                 # the second boards of a morning in shadow: with the analyst's notes
+PLAIN_BOARDS = "cv_plain"                   # the second boards of a live morning: without them
 DAYS_LISTED = 30
 MOVES_LISTED = 12
 
@@ -91,40 +100,50 @@ def build(season: str, day: Optional[date], month: Month, today: date) -> Analys
     days = read_days(season)
     as_of = day or (days[0] if days else None)
     notes_live = ProjectionAdjustment.select().where(ProjectionAdjustment._live(season, SCOPE_ANALYST)).count()
-    shadow_as_of = (
+    second_as_of = (
         DailyRanking.select(fn.MAX(DailyRanking.as_of_date))
-        .where((DailyRanking.source == SHADOW_BOARDS) & (DailyRanking.season == season)).scalar()
+        .where(DailyRanking.source.in_([SHADOW_BOARDS, PLAIN_BOARDS]) & (DailyRanking.season == season)).scalar()
     )
-    out = AnalystDigest(season=season, as_of=as_of, days=days, notes_live=notes_live, shadow_as_of=shadow_as_of,
-                        spend=spend_of(month))
+    out = AnalystDigest(season=season, as_of=as_of, days=days, notes_live=notes_live, second_as_of=second_as_of,
+                        in_shadow=not settings.analyst_live, spend=spend_of(month))
     if as_of is None:
         return out
 
     reads = AnalystRead.of_day(season, as_of)
-    live_lines = _projections(season, as_of, LIVE_SOURCE)
-    shadow_lines = _projections(season, as_of, SHADOW_SOURCE)
+    # What the morning stored says which side everybody saw; one that stored no second
+    # boards (its run stopped short of them) is read by the setting
+    if DailyRanking.stored(as_of, PLAIN_BOARDS):
+        out.in_shadow = False
+    elif DailyRanking.stored(as_of, SHADOW_BOARDS):
+        out.in_shadow = True
+    if out.in_shadow:
+        plain_source, noted_source, plain_boards, noted_boards = LIVE_SOURCE, SECOND_SOURCE, SOURCE_CV, SHADOW_BOARDS
+    else:
+        plain_source, noted_source, plain_boards, noted_boards = SECOND_SOURCE, LIVE_SOURCE, PLAIN_BOARDS, SOURCE_CV
+    plain_lines = _projections(season, as_of, plain_source)
+    noted_lines = _projections(season, as_of, noted_source)
     ranks = {
         (source, board): DailyRanking.ranks_on(as_of, source, board)
-        for source in (SOURCE_CV, SHADOW_BOARDS) for board in (BOARD_POINTS, BOARD_CATEGORIES)
+        for source in (plain_boards, noted_boards) for board in (BOARD_POINTS, BOARD_CATEGORIES)
     }
 
     def sides(pid: int) -> tuple[Optional[DigestSide], Optional[DigestSide]]:
         return (
-            _side(pid, live_lines, ranks[(SOURCE_CV, BOARD_POINTS)], ranks[(SOURCE_CV, BOARD_CATEGORIES)]),
-            _side(pid, shadow_lines, ranks[(SHADOW_BOARDS, BOARD_POINTS)], ranks[(SHADOW_BOARDS, BOARD_CATEGORIES)]),
+            _side(pid, plain_lines, ranks[(plain_boards, BOARD_POINTS)], ranks[(plain_boards, BOARD_CATEGORIES)]),
+            _side(pid, noted_lines, ranks[(noted_boards, BOARD_POINTS)], ranks[(noted_boards, BOARD_CATEGORIES)]),
         )
 
     def team_of(pid: int) -> Optional[str]:
-        row = live_lines.get(pid) or shadow_lines.get(pid)
+        row = plain_lines.get(pid) or noted_lines.get(pid)
         raw = row.raw if row is not None and isinstance(row.raw, dict) else {}
         return raw.get("team")
 
     # The widest moves between the two points boards, whoever was read
-    live_points, shadow_points = ranks[(SOURCE_CV, BOARD_POINTS)], ranks[(SHADOW_BOARDS, BOARD_POINTS)]
+    plain_points, noted_points = ranks[(plain_boards, BOARD_POINTS)], ranks[(noted_boards, BOARD_POINTS)]
     moves = sorted(
-        ((abs(shadow_points[pid] - rank), pid) for pid, rank in live_points.items()
-         if pid in shadow_points and shadow_points[pid] != rank),
-        key=lambda pair: (-pair[0], live_points[pair[1]]),
+        ((abs(noted_points[pid] - rank), pid) for pid, rank in plain_points.items()
+         if pid in noted_points and noted_points[pid] != rank),
+        key=lambda pair: (-pair[0], plain_points[pair[1]]),
     )[:MOVES_LISTED]
 
     note_ids = {r.note_id for r in reads if r.note_id is not None}
@@ -144,7 +163,7 @@ def build(season: str, day: Optional[date], month: Month, today: date) -> Analys
         pid = read.player_id
         note = notes.get(read.note_id) if read.note_id is not None else None
         is_live = note is not None and note in live_notes
-        live, shadow = sides(pid)
+        plain, noted = sides(pid)
         out.reads.append(DigestRead(
             id=read.id, player_id=pid, name=names.get(pid, f"player {pid}"), team=team_of(pid),
             as_of=read.as_of_date, read_at=read.created_at,
@@ -154,15 +173,15 @@ def build(season: str, day: Optional[date], month: Month, today: date) -> Analys
             note=note_entry(note, names=names,
                             standing=standing(live_inputs.note_of(note), today, tips) if is_live else None)
             if note is not None else None,
-            note_live=is_live, owner_note=pid in owners, live=live, shadow=shadow,
+            note_live=is_live, owner_note=pid in owners, plain=plain, noted=noted,
             cost_usd=_usd(read.cost_micros),
         ))
         out.counts[read.outcome] = out.counts.get(read.outcome, 0) + 1
     out.cost_usd = round(sum(int(r.cost_micros or 0) for r in reads) / 1_000_000, 4)
 
     for _gap, pid in moves:
-        live, shadow = sides(pid)
-        if live is not None and shadow is not None:
+        plain, noted = sides(pid)
+        if plain is not None and noted is not None:
             out.moved.append(DigestMove(player_id=pid, name=names.get(pid, f"player {pid}"), team=team_of(pid),
-                                        live=live, shadow=shadow))
+                                        plain=plain, noted=noted))
     return out

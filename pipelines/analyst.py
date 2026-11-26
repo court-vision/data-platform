@@ -1,5 +1,5 @@
 """
-Analyst Pipeline: the morning's reads, in shadow (the Live rankings plan, step 4).
+Analyst Pipeline: the morning's reads (the Live rankings plan, steps 4 and 5).
 
 The live projection cannot read. Each morning, once it and the day's boards
 are stored, this asks an AI analyst to read the stored news about a short list
@@ -11,7 +11,7 @@ One run, in order:
 
 1. **The screen** (`services.analyst_screen`): fixed rules pick the players
    whose news might say such a thing. A player whose facts are the ones his
-   last completed read saw is not read again, and a morning reads at most
+   last completed read saw is not read again, and a run reads at most
    `ANALYST_MAX_READS` players, the strongest reasons first.
 2. **The reads**: one call to the backend per player
    (`services.analyst_client`), a few at a time. The backend owns the model
@@ -22,17 +22,32 @@ One run, in order:
    analyst's note for the player (nba.projection_adjustments, scope
    `analyst`). Every read is logged in nba.analyst_reads with why he was
    picked, what it came to and what it cost.
-4. **The shadow projection**: the morning's projection built again with the
-   analyst's notes applied, stored beside the live one under the source
-   `cv_live_shadow`. A note written by hand wins over the analyst's wherever
-   a player has both.
-5. **The shadow boards**: the backend's two standard boards built on that
-   projection, stored in nba.daily_rankings under the source `cv_shadow`.
+4. **The projections**: the morning's projection built again, with the
+   analyst's notes as the reads left them and without them. A note written by
+   hand wins over the analyst's wherever a player has both. Live, both are
+   built from what is stored after the reads, and the one everybody sees is
+   written under the live projection's own lock (`_publish`): a note saved in
+   the editor while the reads were out is never written over.
+5. **The boards**: the backend's two standard boards built on each.
 
-Nothing a user sees reads any of it. The live projection reads the `season`
-scope alone, so in shadow the analyst's notes move only the second projection
-and the second boards, which is what the two are graded on before it goes
-live. The projections editor shows the morning as a digest.
+Which of the two everybody sees is `settings.analyst_live` (the plan's step 5):
+
+- **Live**: the projection with its notes replaces the morning's under
+  `cv_live`, and the boards built on it replace the day's under `cv`, so a
+  note counts from the morning it was written. (The morning's own projection,
+  built before the reads, already had the notes standing from earlier days:
+  `pipelines/live_projection.py`.) The projection without them is stored
+  under `cv_live_shadow`, and its boards under `cv_plain`: what the notes
+  moved is the difference between the two, and the plain boards are what
+  they can be graded against.
+- **In shadow** (`ANALYST_LIVE=false`): nothing a user sees reads any of it.
+  The live projection reads the `season` scope alone, the projection with the
+  analyst's notes is the one stored under `cv_live_shadow`, and its boards
+  under `cv_shadow`.
+
+So `cv_live_shadow` is the projection nobody is shown, whichever that is that
+day, and the board source stored beside `cv` says which it was. The
+projections editor shows the morning as a digest either way.
 
 It has no cron job of its own: the daily-rankings trigger starts it in the
 background once the day's projection and boards are stored, and each later
@@ -41,8 +56,8 @@ not ask for its reads, or could not store its boards, fails, and the next tick
 picks up where it stopped: the reads that came to an answer are not asked
 again.
 
-Counters: a read logged and a shadow row written are processed records; a
-candidate left unread (unchanged, over the cap, out of budget) is a skip; a
+Counters: a read logged and a projection or board row written are processed
+records; a candidate left unread (unchanged, over the cap, out of budget) is a skip; a
 read that did not complete is a failed record.
 """
 
@@ -50,41 +65,52 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from time import sleep
 from typing import Optional
 
 import pytz
 
+from core.locks import LockNotAcquired, pipeline_lock
 from core.logging import get_correlation_id
 from core.settings import settings
 from db.base import db
 from db.models.nba import AnalystRead, PlayerProjection, ProjectionAdjustment
 from db.models.nba.analyst_reads import OUTCOME_DECLINED, OUTCOME_FAILED
 from db.models.nba.daily_rankings import BOARDS, SOURCE_CV, DailyRanking
-from db.models.nba.projection_adjustments import SCOPE_ANALYST
 from db.models.pipeline_run import PipelineRun
 from pipelines.base import BasePipeline
 from pipelines.config import PipelineCategory, PipelineConfig
 from pipelines.context import PipelineContext
 from pipelines.daily_rankings import cv_rows, now_eastern, today_et
-from pipelines.live_projection import DAY_TURNS_HOUR_ET, build_rows, store, stored_on
+from pipelines.live_projection import DAY_TURNS_HOUR_ET, LiveProjectionPipeline, build_rows, store, stored_on
 from services import analyst_inputs, analyst_notes
 from services.analyst_client import UNAVAILABLE, ReadResult, analyst_client_from_settings
 from services.analyst_screen import Candidate, screen
-from services.live_projection_inputs import LiveInputs, load_coefficients, load_inputs, note_of, noted_inputs
-from services.live_projection_model import BoxLine, build_morning, project
+from services.live_projection_inputs import LiveInputs, load_coefficients, load_inputs, with_analyst_notes
+from services.live_projection_model import BoxLine, Coefficients, Morning, build_morning, project
 from services.valuation_client import valuation_client_from_settings
 
 NAME = "analyst"
-SHADOW_SOURCE = "cv_live_shadow"            # nba.player_projections: the live projection with its notes applied
-SHADOW_BOARDS = "cv_shadow"                 # nba.daily_rankings: the boards built on that
-# The shadow projection is read once, by the boards built on it and the digest beside
+# nba.player_projections: the projection nobody is shown. In shadow that is the live
+# one with the analyst's notes applied; live, it is the one without them
+SHADOW_SOURCE = "cv_live_shadow"
+# nba.daily_rankings: the boards built on it, named for what they are that day
+SHADOW_BOARDS = "cv_shadow"                 # with the analyst's notes, while it is in shadow
+PLAIN_BOARDS = "cv_plain"                   # without them, once it is live
+# The second projection is read once, by the boards built on it and the digest beside
 # them; the boards are what is graded and are kept for good
 SHADOW_KEEP_DAYS = 7
 READ_WORKERS = 4
 # This many reads in a row that could not be asked end the morning's reads
 FAILURES_STOP = 3
+# The day's projection (`cv_live`) has one writer at a time: the analyst stores it under
+# the live projection's own execution lock, and waits this often and this long for a run
+# of that pipeline (a note saved in the editor, a forced run) to finish first
+PROJECTION_LOCK = LiveProjectionPipeline.config.name
+PUBLISH_ATTEMPTS = 30
+PUBLISH_WAIT_SECONDS = 2.0
 EASTERN = pytz.timezone("US/Eastern")
 
 
@@ -129,24 +155,6 @@ def due_reason(season: str, day: date) -> Optional[str]:
     return None
 
 
-def shadow_inputs(inputs: LiveInputs) -> tuple[LiveInputs, int]:
-    """`inputs` with the analyst's live notes laid under the notes written by hand,
-    and how many of the analyst's are read.
-
-    A player with a note written by hand that is in force is read off that
-    one alone: the owner's edits win. Where the owner's note has ended or is
-    past its review date it says nothing this morning, and the analyst's is read.
-    """
-    owners = {pid for pid, found in inputs.standings.items() if found.in_force}
-    analyst = {
-        record.player_id: note_of(record)
-        for record in ProjectionAdjustment.active_for(inputs.season, SCOPE_ANALYST)
-        if record.player_id not in owners
-    }
-    merged = {**inputs.notes, **analyst}
-    return replace(inputs, **noted_inputs(inputs.known_before_notes, merged, inputs.as_of, inputs.last_played)), len(analyst)
-
-
 def prune_shadow(season: str, day: date) -> int:
     return (
         PlayerProjection.delete()
@@ -157,13 +165,13 @@ def prune_shadow(season: str, day: date) -> int:
 
 
 class AnalystPipeline(BasePipeline):
-    """Read the morning's short list, and store the projection and boards its notes would make."""
+    """Read the morning's short list, and store the projection and boards its notes make."""
 
     config = PipelineConfig(
         name=NAME,
-        display_name="Analyst (shadow)",
-        description="Reads the news about a short list of players each morning and prices its notes on a second, "
-                    "unseen projection and boards",
+        display_name="Analyst",
+        description="Reads the news about a short list of players each morning and prices its notes on the "
+                    "projection and boards (live, or a second unseen pair while ANALYST_LIVE is false)",
         target_table="nba.analyst_reads",
         category=PipelineCategory.SCHEDULED,
         trigger_slug="analyst",
@@ -209,15 +217,26 @@ class AnalystPipeline(BasePipeline):
 
         cut_short = self._reads(ctx, inputs, morning, live, room=month.room)
 
-        shadow, applied = shadow_inputs(inputs)
-        rows = build_rows(shadow, morning, coeffs, ctx.run_id, SHADOW_SOURCE)
-        store(rows, season, day, SHADOW_SOURCE)
+        is_live = bool(settings.analyst_live)
+        if is_live:
+            # Everybody's projection again, now with the notes as the reads left them;
+            # the one nobody is shown is the same morning without them
+            inputs, morning, applied = self._publish(ctx, season, day, coeffs)
+            second = build_rows(inputs, morning, coeffs, ctx.run_id, SHADOW_SOURCE)
+        else:
+            noted, applied = with_analyst_notes(inputs)
+            second = build_rows(noted, morning, coeffs, ctx.run_id, SHADOW_SOURCE)
+        store(second, season, day, SHADOW_SOURCE)
         pruned = prune_shadow(season, day)
-        ctx.increment_records(len(rows))
-        ctx.log.info("analyst_shadow_projection_stored", as_of=str(day), players=len(rows), notes_applied=applied,
-                     pruned=pruned)
+        ctx.increment_records(len(second))
+        ctx.log.info("analyst_projection_stored", as_of=str(day), live=is_live, players=len(second),
+                     notes_applied=applied, pruned=pruned)
 
-        self._boards(ctx, season, day)
+        if is_live:
+            self._boards(ctx, season, day, shadow=False, source=SOURCE_CV)
+            self._boards(ctx, season, day, shadow=True, source=PLAIN_BOARDS)
+        else:
+            self._boards(ctx, season, day, shadow=True, source=SHADOW_BOARDS)
         if cut_short:
             raise AnalystFailed(cut_short)
 
@@ -375,31 +394,79 @@ class AnalystPipeline(BasePipeline):
         ctx.increment_records(1)
         return outcome
 
-    # ---- the shadow boards ---------------------------------------------------------------------
+    # ---- the projection everybody reads -------------------------------------------------------
 
-    def _boards(self, ctx: PipelineContext, season: str, day: date) -> None:
-        """Store the backend's two boards built on this morning's shadow projection."""
-        boards = self.valuation_client.daily_boards(correlation_id=get_correlation_id(), shadow=True)
+    def _publish(self, ctx: PipelineContext, season: str, day: date,
+                 coeffs: Coefficients) -> tuple[LiveInputs, Morning, int]:
+        """Store the day's projection again (`cv_live`), with the notes as the reads left them.
+
+        It is built from what is stored now, not from what the run loaded before its
+        reads, and under the live projection's own execution lock. The reads take
+        minutes, and a note saved or retired in the projections editor meanwhile has
+        already rebuilt the day's snapshot: the morning as it was read before would
+        go back over that edit. With the lock held the two writers take turns. A
+        rebuild that finds this one going is skipped and tried again (the editor's
+        does), and reads these notes when it runs; one already going is waited for.
+
+        Returns what it was built from (the projection without the notes is built
+        from the same) and how many of the analyst's notes it read."""
+        for attempt in range(PUBLISH_ATTEMPTS):
+            if attempt:
+                sleep(PUBLISH_WAIT_SECONDS)
+            try:
+                with pipeline_lock(PROJECTION_LOCK):
+                    inputs = load_inputs(season, day)
+                    morning = build_morning(inputs.lines, inputs.priors, inputs.ahead, day,
+                                            teams=inputs.teams, ages=inputs.ages)
+                    noted, applied = with_analyst_notes(inputs)
+                    rows = build_rows(noted, morning, coeffs, ctx.run_id)
+                    if not rows:
+                        # A morning with a stored projection always projects someone: an
+                        # empty build would replace the day's snapshot with nothing
+                        ctx.increment_failed(1, "empty_projection")
+                        raise AnalystFailed("the day's projection came out empty when it was built again")
+                    store(rows, season, day)
+                    ctx.increment_records(len(rows))
+                    return inputs, morning, applied
+            except LockNotAcquired:
+                continue
+        ctx.increment_failed(1, "projection_busy")
+        raise AnalystFailed(
+            "the day's projection was being rebuilt by another run the whole time, so the notes were not put on it"
+        )
+
+    # ---- the boards ----------------------------------------------------------------------------
+
+    def _boards(self, ctx: PipelineContext, season: str, day: date, *, shadow: bool, source: str) -> None:
+        """Store, as `source`, the backend's two boards built on one of this morning's
+        projections: the second one (`shadow`), or the one everybody reads."""
+        which = "shadow" if shadow else "live"
+        boards = self.valuation_client.daily_boards(correlation_id=get_correlation_id(), shadow=shadow)
         if not boards.available or boards.as_of is None:
             reason = boards.reason or "backend_unavailable"
             ctx.increment_failed(1, f"backend:{reason}")
-            raise AnalystFailed(f"the backend could not be asked for the shadow boards ({reason})")
+            raise AnalystFailed(f"the backend could not be asked for the {which} boards ({reason})")
         if not boards.in_season:
-            ctx.log.info("analyst_boards_out_of_season", as_of=str(boards.as_of))
+            ctx.log.info("analyst_boards_out_of_season", as_of=str(boards.as_of), source=source)
             return
         if boards.as_of != day or boards.live_as_of != day:
-            # Yesterday's shadow projection, or the blend the backend falls back to: not this morning's notes
-            ctx.increment_failed(1, "boards_not_on_shadow")
+            # Yesterday's projection, or the blend the backend falls back to: not this morning's notes
+            ctx.increment_failed(1, f"boards_not_on_{which}")
             raise AnalystFailed(
-                f"the shadow boards were not built on this morning's shadow projection "
+                f"the {which} boards were not built on this morning's {which} projection "
                 f"(boards for {boards.as_of}, on the projection of {boards.live_as_of}, model {boards.model})"
             )
+        if not boards.players:
+            # An in-season board always ranks someone: an empty one would replace the
+            # day's with nothing (pipelines/daily_rankings.py keeps the day for the same reason)
+            ctx.increment_failed(1, "backend:empty_board")
+            raise AnalystFailed(f"the backend's {which} boards ranked no players")
         with db.atomic():
             written = sum(
-                DailyRanking.replace_day(day, boards.season or season, SHADOW_BOARDS, board, cv_rows(boards, board),
+                DailyRanking.replace_day(day, boards.season or season, source, board, cv_rows(boards, board),
                                          ctx.run_id)
                 for board in BOARDS
             )
         ctx.increment_records(written)
-        ctx.log.info("analyst_shadow_boards_stored", as_of=str(day), players=len(boards.players), rows=written,
-                     model=boards.model)
+        ctx.log.info("analyst_boards_stored", as_of=str(day), source=source, players=len(boards.players),
+                     rows=written, model=boards.model)

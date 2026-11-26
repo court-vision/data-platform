@@ -103,7 +103,9 @@ export function Projections() {
         chips={<Rail label="View" options={VIEWS} value={view} onChange={(value: View) => update("view", value, "players")} />}
         sub={
           onAnalyst
-            ? `The analyst's morning for ${analyst.data?.season ?? "the season"}, in shadow. Each morning it reads the stored news about a short list of players and writes dated notes with their sources, never a rank. Its notes reach only a second projection and second boards that nothing else reads, so this is where its work is judged.`
+            ? analyst.data && !analyst.data.in_shadow
+              ? `The analyst's morning for ${analyst.data.season}, live. Each morning it reads the stored news about a short list of players and writes dated notes with their sources, never a rank. Its notes are on the projection and boards everybody sees, and the same morning without them is kept beside, so this is where its work is judged.`
+              : `The analyst's morning for ${analyst.data?.season ?? "the season"}, in shadow. Each morning it reads the stored news about a short list of players and writes dated notes with their sources, never a rank. Its notes reach only a second projection and second boards that nothing else reads, so this is where its work is judged.`
             : `Court Vision's projection for ${data?.season ?? "the season"}: the lines it is built from, the adjustments on top, and the season's notes. Saving an adjustment republishes the preseason projection; saving a note rebuilds the day's live projection, which the board is priced on in season.`
         }
         meta={!onAnalyst && data && <StatusLines data={data} />}

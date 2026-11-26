@@ -1328,7 +1328,7 @@
         "type": "object"
       },
       "AnalystDigest": {
-        "description": "A morning of the analyst in shadow.",
+        "description": "A morning of the analyst.",
         "properties": {
           "as_of": {
             "anyOf": [
@@ -1368,7 +1368,7 @@
           },
           "in_shadow": {
             "default": true,
-            "description": "Its notes reach only the second projection and boards",
+            "description": "Whether, on the morning shown, its notes reached only the second projection and boards. False: they were on the projection and boards everybody sees, and the second pair is the same morning without them",
             "title": "In Shadow",
             "type": "boolean"
           },
@@ -1397,7 +1397,7 @@
             "title": "Season",
             "type": "string"
           },
-          "shadow_as_of": {
+          "second_as_of": {
             "anyOf": [
               {
                 "format": "date",
@@ -1407,8 +1407,8 @@
                 "type": "null"
               }
             ],
-            "description": "The morning of the newest shadow boards",
-            "title": "Shadow As Of"
+            "description": "The morning of the newest second boards",
+            "title": "Second As Of"
           },
           "spend": {
             "$ref": "#/components/schemas/DigestSpend"
@@ -1423,7 +1423,7 @@
           "counts",
           "cost_usd",
           "notes_live",
-          "shadow_as_of",
+          "second_as_of",
           "moved",
           "spend"
         ],
@@ -2407,19 +2407,21 @@
       "DigestMove": {
         "description": "A player whose place on the points board the analyst's notes moved, his own note or a teammate's.",
         "properties": {
-          "live": {
-            "$ref": "#/components/schemas/DigestSide"
-          },
           "name": {
             "title": "Name",
             "type": "string"
           },
+          "noted": {
+            "$ref": "#/components/schemas/DigestSide",
+            "description": "With them"
+          },
+          "plain": {
+            "$ref": "#/components/schemas/DigestSide",
+            "description": "Without the analyst's notes"
+          },
           "player_id": {
             "title": "Player Id",
             "type": "integer"
-          },
-          "shadow": {
-            "$ref": "#/components/schemas/DigestSide"
           },
           "team": {
             "anyOf": [
@@ -2437,14 +2439,14 @@
           "player_id",
           "name",
           "team",
-          "live",
-          "shadow"
+          "plain",
+          "noted"
         ],
         "title": "DigestMove",
         "type": "object"
       },
       "DigestRead": {
-        "description": "One read: why he was picked, what it came to, and what it would have moved.",
+        "description": "One read: why he was picked, what it came to, and what its notes move.",
         "properties": {
           "as_of": {
             "format": "date",
@@ -2472,17 +2474,6 @@
             "title": "Id",
             "type": "integer"
           },
-          "live": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DigestSide"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The projection and boards everybody sees"
-          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2504,6 +2495,17 @@
             "title": "Note Live",
             "type": "boolean"
           },
+          "noted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DigestSide"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Him with the analyst's notes applied: the second projection and boards while it is in shadow, what everybody sees once it is live"
+          },
           "outcome": {
             "description": "note | unchanged | none | retired | refused | declined | failed",
             "title": "Outcome",
@@ -2514,6 +2516,17 @@
             "description": "Whether a note written by hand stands for him",
             "title": "Owner Note",
             "type": "boolean"
+          },
+          "plain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DigestSide"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Him without the analyst's notes: what everybody sees while it is in shadow, the second projection and boards once it is live"
           },
           "player_id": {
             "title": "Player Id",
@@ -2530,17 +2543,6 @@
             },
             "title": "Reasons",
             "type": "array"
-          },
-          "shadow": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DigestSide"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The same with the analyst's notes applied"
           },
           "summary": {
             "anyOf": [
@@ -2579,8 +2581,8 @@
           "note",
           "note_live",
           "owner_note",
-          "live",
-          "shadow",
+          "plain",
+          "noted",
           "cost_usd"
         ],
         "title": "DigestRead",
@@ -7038,7 +7040,7 @@
     },
     "/v1/dashboard/projections/analyst": {
       "get": {
-        "description": "The analyst's morning: every read with why the screen picked the player,\nwhat the read came to, the note it left with the stored items it rests on,\nand what it says against a note written by hand. Beside each, the player\non the live projection and boards and on the second ones, which have the\nanalyst's notes applied and which nothing else reads. `moved` is the\nwidest moves between the two points boards that morning, and `spend` the\nmonth's bill for reads from the backend's ledger.\n\nIn shadow this is the only place the analyst's work shows. To act on a\nread, save a note of your own from it: a note written by hand is the one\napplied wherever a player has both.",
+        "description": "The analyst's morning: every read with why the screen picked the player,\nwhat the read came to, the note it left with the stored items it rests on,\nand what it says against a note written by hand. Beside each, the player\nwithout the analyst's notes (`plain`) and with them applied (`noted`).\n`in_shadow` says which of the two everybody saw that morning: the plain\none in shadow, the noted one once the analyst is live; the other is the\nsecond projection and boards, which nothing else reads. `moved` is the\nwidest moves between the two points boards that morning, and `spend` the\nmonth's bill for reads from the backend's ledger.\n\nTo overrule a read, save a note of your own: a note written by hand is\nthe one applied wherever a player has both.",
         "operationId": "get_analyst_digest_v1_dashboard_projections_analyst_get",
         "parameters": [
           {
@@ -7865,7 +7867,7 @@
     },
     "/v1/internal/pipelines/analyst": {
       "post": {
-        "description": "Trigger the analyst's morning run, in shadow (the Live rankings plan, step 4).\n\nA fixed screen picks the players whose stored news might say something a\nbox score cannot; each gets one read from the backend's analyst, whose\nproposal is checked here (it must cite a stored item and stay inside its\nbounds) before it becomes a note in nba.projection_adjustments' `analyst`\nscope. Every read is logged in nba.analyst_reads. Then the morning's\nprojection is built again with those notes applied (`cv_live_shadow`) and\nthe backend's two boards on it are stored under the source `cv_shadow`.\nNothing a user sees reads any of it.\n\nIt has no cron job of its own: the daily-rankings trigger starts it once\nthe day's projection and boards are stored, and again on each later tick\nuntil a run has succeeded. This route is the same run on demand, and a run\non demand is never a second bill: a player whose facts are the ones his\nlast completed read saw is not read again. The run takes minutes, so the\nroute answers at once unless `wait` is set; the reads show in the\nprojections editor's digest as they finish.",
+        "description": "Trigger the analyst's morning run (the Live rankings plan, steps 4 and 5).\n\nA fixed screen picks the players whose stored news might say something a\nbox score cannot; each gets one read from the backend's analyst, whose\nproposal is checked here (it must cite a stored item and stay inside its\nbounds) before it becomes a note in nba.projection_adjustments' `analyst`\nscope. Every read is logged in nba.analyst_reads. Then the morning's\nprojection is built again with those notes applied and the backend's two\nboards are built on it. Live (`ANALYST_LIVE`, the default), they replace\nthe day's own (`cv_live`, `cv`), and the same morning without the notes is\nkept beside them (`cv_live_shadow`, boards `cv_plain`). In shadow they are\nthe pair kept beside (`cv_live_shadow`, boards `cv_shadow`) and nothing a\nuser sees reads any of it.\n\nIt has no cron job of its own: the daily-rankings trigger starts it once\nthe day's projection and boards are stored, and again on each later tick\nuntil a run has succeeded. This route is the same run on demand, and a run\non demand is never a second bill: a player whose facts are the ones his\nlast completed read saw is not read again. The run takes minutes, so the\nroute answers at once unless `wait` is set; the reads show in the\nprojections editor's digest as they finish.",
         "operationId": "trigger_analyst_v1_internal_pipelines_analyst_post",
         "parameters": [
           {

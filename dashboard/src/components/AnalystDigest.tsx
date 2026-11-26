@@ -17,6 +17,7 @@ import {
   ruleLabel,
   SIDE_COLUMNS,
   sideDiffers,
+  sideNames,
   sidesDiffer,
   usd,
   visibleReads,
@@ -46,11 +47,15 @@ const TONES: Record<OutcomeTone | "plain", Tone | undefined> = {
 const RUNS = "/pipelines/analyst"
 
 /**
- * A morning of the analyst, in shadow: every player it read with why the
- * screen picked him, what the read came to, the note it left and what that
- * rests on, and him on the live projection beside the second one, which has
- * the analyst's notes applied and which nothing else reads. Then the widest
- * moves between the two points boards, and the month's spend.
+ * A morning of the analyst: every player it read with why the screen picked
+ * him, what the read came to, the note it left and what that rests on, and
+ * him without the analyst's notes beside him with them applied. Then the
+ * widest moves between the two points boards, and the month's spend.
+ *
+ * `in_shadow` says which of the two sides everybody saw that morning. In
+ * shadow it is the one without the notes, and the one with them is a second
+ * projection and second boards nothing else reads; once the analyst is live
+ * it is the one with them, and the second pair is the morning without them.
  */
 export function AnalystDigestView({
   digest,
@@ -74,7 +79,11 @@ export function AnalystDigestView({
   return (
     <>
       <p className={a.status}>
-        <span>{digest.in_shadow ? "in shadow: its notes reach only the second projection and boards" : "live"}</span>
+        <span>
+          {digest.in_shadow
+            ? "in shadow: its notes reach only the second projection and boards"
+            : "live: its notes are on the projection and boards everybody sees"}
+        </span>
         {digest.spend.model && (
           <>
             <Sep />
@@ -108,7 +117,11 @@ export function AnalystDigestView({
             count={reads.length === digest.reads.length ? reads.length : `${reads.length} of ${digest.reads.length}`}
             note={describeCounts(digest.counts)}
             right={<DayPicker digest={digest} onDay={onDay} />}
-            text="Everybody the screen picked that morning: why, what the read came to, the note it left with what it rests on, and him on the live projection beside the second one. Nothing else reads the analyst's notes. To act on a read, write a note of your own from his row: a note written by hand is the one applied wherever a player has both."
+            text={
+              digest.in_shadow
+                ? "Everybody the screen picked that morning: why, what the read came to, the note it left with what it rests on, and him on the live projection beside the second one. Nothing else reads the analyst's notes. To act on a read, write a note of your own from his row: a note written by hand is the one applied wherever a player has both."
+                : "Everybody the screen picked that morning: why, what the read came to, the note it left with what it rests on, and him as everybody sees him, with the analyst's notes applied, beside the same morning without them. To overrule a read, write a note of your own from his row: a note written by hand is the one applied wherever a player has both."
+            }
           >
             <div className={p.controls}>
               <Choice label="Show" options={READ_FILTERS} value={show} onChange={onShow} />
@@ -118,24 +131,28 @@ export function AnalystDigestView({
             ) : (
               <ol className={a.reads}>
                 {reads.map((read) => (
-                  <ReadItem key={read.id} read={read} link={playerLink(read.player_id)} />
+                  <ReadItem key={read.id} read={read} link={playerLink(read.player_id)} inShadow={digest.in_shadow} />
                 ))}
               </ol>
             )}
           </Block>
 
           <Block
-            title="Moved on the second board"
+            title={digest.in_shadow ? "Moved on the second board" : "Moved by its notes"}
             count={digest.moved.length}
             note={boardsDay ? `the two boards of ${formatDay(boardsDay)}` : "no second boards stored for that morning yet"}
-            text="The widest moves between the two standard points boards that morning: the live one, and the one priced on the projection with the analyst's notes applied. A player moves for his own note or for a teammate's."
+            text={
+              digest.in_shadow
+                ? "The widest moves between the two standard points boards that morning: the live one, and the one priced on the projection with the analyst's notes applied. A player moves for his own note or for a teammate's."
+                : "The widest moves between the two standard points boards that morning: the one priced on the projection without the analyst's notes, and the live one, which has them applied. A player moves for his own note or for a teammate's."
+            }
           >
             {digest.moved.length === 0 ? (
               <p className={s.empty}>
                 {boardsDay ? "Nobody's place differs between the two boards." : "The second boards of that morning are not stored yet, so there is nothing to compare."}
               </p>
             ) : (
-              <MovedTable moved={digest.moved} playerLink={playerLink} />
+              <MovedTable moved={digest.moved} playerLink={playerLink} inShadow={digest.in_shadow} />
             )}
           </Block>
         </>
@@ -167,7 +184,7 @@ function DayPicker({ digest, onDay }: { digest: AnalystDigest; onDay: (day: stri
   )
 }
 
-function ReadItem({ read, link }: { read: DigestRead; link: string }) {
+function ReadItem({ read, link, inShadow }: { read: DigestRead; link: string; inShadow: boolean }) {
   const outcome = outcomeOf(read.outcome)
   return (
     <li className={a.read} data-outcome={read.outcome}>
@@ -207,7 +224,7 @@ function ReadItem({ read, link }: { read: DigestRead; link: string }) {
         </p>
       )}
 
-      {(read.live || read.shadow) && <Sides name={read.name} live={read.live} shadow={read.shadow} />}
+      {(read.plain || read.noted) && <Sides name={read.name} plain={read.plain} noted={read.noted} inShadow={inShadow} />}
     </li>
   )
 }
@@ -256,10 +273,25 @@ function NoteLeft({ note, live, said }: { note: AdjustmentEntry; live: boolean; 
  * notes changed is marked; a player they left where he was is one line, so
  * the reads that moved somebody stand out.
  */
-function Sides({ name, live, shadow }: { name: string; live: DigestSide | null | undefined; shadow: DigestSide | null | undefined }) {
-  if (live && shadow && !sidesDiffer(live, shadow)) {
-    return <p className={p.hint}>The same with its notes applied: {describeSide(live)}.</p>
+function Sides({
+  name,
+  plain,
+  noted,
+  inShadow,
+}: {
+  name: string
+  plain: DigestSide | null | undefined
+  noted: DigestSide | null | undefined
+  inShadow: boolean
+}) {
+  if (plain && noted && !sidesDiffer(plain, noted)) {
+    return (
+      <p className={p.hint}>
+        {inShadow ? "The same with its notes applied" : "The same without its notes"}: {describeSide(plain)}.
+      </p>
+    )
   }
+  const names = sideNames(inShadow)
   return (
     <div className={p.miniWrap}>
       <table className={`${p.mini} ${a.sides}`} aria-label={`${name} on the two projections`}>
@@ -275,16 +307,16 @@ function Sides({ name, live, shadow }: { name: string; live: DigestSide | null |
         </thead>
         <tbody>
           <tr>
-            <th scope="row">Live</th>
+            <th scope="row">{names.plain}</th>
             {SIDE_COLUMNS.map((column) => (
-              <td key={column.key}>{formatSide(column, live)}</td>
+              <td key={column.key}>{formatSide(column, plain)}</td>
             ))}
           </tr>
           <tr>
-            <th scope="row">With its notes</th>
+            <th scope="row">{names.noted}</th>
             {SIDE_COLUMNS.map((column) => (
-              <td key={column.key} data-moved={sideDiffers(column, live, shadow) || undefined}>
-                {formatSide(column, shadow)}
+              <td key={column.key} data-moved={sideDiffers(column, plain, noted) || undefined}>
+                {formatSide(column, noted)}
               </td>
             ))}
           </tr>
@@ -294,26 +326,52 @@ function Sides({ name, live, shadow }: { name: string; live: DigestSide | null |
   )
 }
 
-function MovedTable({ moved, playerLink }: { moved: DigestMove[]; playerLink: (playerId: number) => string }) {
+function MovedTable({
+  moved,
+  playerLink,
+  inShadow,
+}: {
+  moved: DigestMove[]
+  playerLink: (playerId: number) => string
+  inShadow: boolean
+}) {
   // Rank on each board and the move, then the three lines' numbers on each side
   const lines = SIDE_COLUMNS.filter((column) => !column.rank)
+  const names = sideNames(inShadow)
   return (
     <div className={s.bleed}>
       <table className={`${s.table} ${a.moved}`}>
         <thead>
           <tr>
             <th scope="col">Player</th>
-            <th scope="col" className={s.num} title="His place on the live points board">
-              Live
+            <th
+              scope="col"
+              className={s.num}
+              title={inShadow ? "His place on the live points board" : "His place on the points board without the analyst's notes"}
+            >
+              {names.plainShort}
             </th>
-            <th scope="col" className={s.num} title="His place on the points board with the analyst's notes applied">
-              Second
+            <th
+              scope="col"
+              className={s.num}
+              title={
+                inShadow
+                  ? "His place on the points board with the analyst's notes applied"
+                  : "His place on the live points board, which has the analyst's notes applied"
+              }
+            >
+              {names.notedShort}
             </th>
             <th scope="col" className={s.num} title="Places gained (+) or lost (−) with the analyst's notes applied">
               Move
             </th>
             {lines.map((column) => (
-              <th key={column.key} scope="col" className={s.num} title={`${column.title}: live, then with the analyst's notes`}>
+              <th
+                key={column.key}
+                scope="col"
+                className={s.num}
+                title={`${column.title}: ${inShadow ? "live, then with the analyst's notes" : "without the analyst's notes, then live"}`}
+              >
                 {column.label}
               </th>
             ))}
@@ -330,14 +388,14 @@ function MovedTable({ moved, playerLink }: { moved: DigestMove[]; playerLink: (p
                   </Link>{" "}
                   {move.team && <Tag>{move.team}</Tag>}
                 </th>
-                <td className={s.num}>{formatSide(SIDE_COLUMNS[0], move.live)}</td>
-                <td className={s.num}>{formatSide(SIDE_COLUMNS[0], move.shadow)}</td>
+                <td className={s.num}>{formatSide(SIDE_COLUMNS[0], move.plain)}</td>
+                <td className={s.num}>{formatSide(SIDE_COLUMNS[0], move.noted)}</td>
                 <td className={`${s.num} ${places.startsWith("+") ? s.good : places ? s.bad : ""}`}>{places || "—"}</td>
                 {lines.map((column) => (
                   <td key={column.key} className={s.num}>
-                    {sideDiffers(column, move.live, move.shadow)
-                      ? `${formatSide(column, move.live)} → ${formatSide(column, move.shadow)}`
-                      : formatSide(column, move.live)}
+                    {sideDiffers(column, move.plain, move.noted)
+                      ? `${formatSide(column, move.plain)} → ${formatSide(column, move.noted)}`
+                      : formatSide(column, move.plain)}
                   </td>
                 ))}
               </tr>

@@ -304,11 +304,15 @@ def _morning() -> live_inputs.LiveInputs:
 @pytest.fixture
 def season(client, monkeypatch):
     """The note routes on the morning above, with nothing stored and every write watched."""
-    client.loaded, client.recorded = [], []
+    client.loaded, client.recorded, client.analyst_notes = [], [], []
 
     def load_inputs(season, day):
         client.loaded.append((season, day))
         return _morning()
+
+    def with_analyst_notes(inputs):
+        client.analyst_notes.append(inputs.as_of)
+        return inputs, 0
 
     def record(cls, player_id, season, **fields):
         client.recorded.append((player_id, season, fields))
@@ -317,6 +321,7 @@ def season(client, monkeypatch):
                        evidence=fields["evidence"], author=fields["author"])
 
     monkeypatch.setattr(live_inputs, "load_inputs", load_inputs)
+    monkeypatch.setattr(live_inputs, "with_analyst_notes", with_analyst_notes)
     monkeypatch.setattr(notes, "today_et", lambda now=None: TODAY)
     monkeypatch.setattr(projections, "_eastern_now", lambda: datetime(2026, 11, 16, 9, 0))
     monkeypatch.setattr(ProjectionAdjustment, "record", classmethod(record))
@@ -350,6 +355,20 @@ def test_a_note_tried_on_runs_the_live_model_twice_and_writes_nothing(season):
     # The morning is read once, for the season and the Eastern day; it is a price, not a rank
     assert season.loaded == [(os.environ["NBA_SEASON"], TODAY)]
     assert season.recorded == [] and season.runs == [] and season.valued == []
+
+
+def test_a_note_is_tried_on_the_projection_the_board_reads(season, monkeypatch):
+    """Live, the day's projection has the analyst's notes under the ones written here, so the
+    preview's "as it stands" reads them too; in shadow neither does."""
+    body = {"player_id": 1, "note": {"return_date": AHEAD[4].isoformat(), "minutes": 28,
+                                     "until_date": AHEAD[5].isoformat()}}
+    assert projections.settings.analyst_live is True
+    assert season.http.post(f"{BASE}/note/preview", headers=_AUTH, json=body).status_code == 200
+    assert season.analyst_notes == [TODAY]
+
+    monkeypatch.setattr(projections.settings, "analyst_live", False)
+    assert season.http.post(f"{BASE}/note/preview", headers=_AUTH, json=body).status_code == 200
+    assert season.analyst_notes == [TODAY] and len(season.loaded) == 2
 
 
 def test_a_note_tried_on_someone_the_live_model_does_not_project_is_a_404(season):
@@ -547,7 +566,7 @@ def digest(client, monkeypatch):
             out.reads.append(DigestRead(
                 id=5, player_id=2, name="Vet", team="PHX", as_of=day, read_at=datetime(2026, 11, 16, 11, 5),
                 outcome="none", summary="Nothing a box score cannot say.",
-                live=DigestSide(games=60.0, minutes=24.0, points=14.4, points_rank=88, categories_rank=91),
+                plain=DigestSide(games=60.0, minutes=24.0, points=14.4, points_rank=88, categories_rank=91),
             ))
             out.counts = {"none": 1}
         return out
@@ -572,9 +591,9 @@ def test_the_digest_is_the_morning_asked_for_with_the_month_from_the_backend(dig
     assert data["spend"] == {"available": True, "enabled": True, "month_spent_usd": 1.25, "month_cap_usd": 40.0,
                              "model": "claude-opus-5-5", "prompt_version": "analyst-1"}
     (read,) = data["reads"]
-    assert (read["name"], read["outcome"], read["note"], read["shadow"]) == ("Vet", "none", None, None)
-    assert read["live"] == {"games": 60.0, "minutes": 24.0, "points": 14.4, "points_rank": 88,
-                            "categories_rank": 91}
+    assert (read["name"], read["outcome"], read["note"], read["noted"]) == ("Vet", "none", None, None)
+    assert read["plain"] == {"games": 60.0, "minutes": 24.0, "points": 14.4, "points_rank": 88,
+                             "categories_rank": 91}
     # Reading the digest runs nothing and values nothing
     assert digest.runs == [] and digest.valued == []
 

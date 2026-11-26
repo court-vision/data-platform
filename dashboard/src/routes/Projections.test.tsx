@@ -320,7 +320,7 @@ function read(overrides: Partial<DigestRead> = {}): DigestRead {
     ],
     outcome: "note", summary: "Re-evaluated in two weeks is not back in two weeks.", disagrees: null,
     note: ANALYST_NOTE, note_live: true, owner_note: false,
-    live: side(), shadow: side({ games: 31, points_rank: 9, categories_rank: 7 }), cost_usd: 0.0431,
+    plain: side(), noted: side({ games: 31, points_rank: 9, categories_rank: 7 }), cost_usd: 0.0431,
     ...overrides,
   }
 }
@@ -328,22 +328,22 @@ function read(overrides: Partial<DigestRead> = {}): DigestRead {
 const QUIET = read({
   id: 2, player_id: 4, name: "Jamal Murray", reasons: [{ rule: "teammate_change", text: "Nikola Jokić went out" }],
   outcome: "none", summary: "His role with Jokić out is already what the last ten games show.", note: null, note_live: false,
-  live: side({ points_rank: 30, categories_rank: 33 }), shadow: side({ points_rank: 30, categories_rank: 33 }), cost_usd: 0.0388,
+  plain: side({ points_rank: 30, categories_rank: 33 }), noted: side({ points_rank: 30, categories_rank: 33 }), cost_usd: 0.0388,
 })
 const REFUSED = read({
   id: 3, player_id: 2, name: "Walker Kessler", team: "LAL", reasons: [{ rule: "minutes_gap", text: "24.1 minutes a game against 30.0 projected" }],
   outcome: "refused", summary: "Refused: it cites no stored item", note: null, note_live: false,
-  live: side({ points_rank: 57, categories_rank: 43 }), shadow: side({ points_rank: 57, categories_rank: 43 }), cost_usd: 0.0402,
+  plain: side({ points_rank: 57, categories_rank: 43 }), noted: side({ points_rank: 57, categories_rank: 43 }), cost_usd: 0.0402,
 })
 
 function digest(overrides: Partial<AnalystDigest> = {}): AnalystDigest {
   return {
     season: "2026-27", as_of: "2026-11-20", days: ["2026-11-20", "2026-11-19"], in_shadow: true,
     reads: [read(), QUIET, REFUSED], counts: { note: 1, none: 1, refused: 1 }, cost_usd: 0.1221, notes_live: 1,
-    shadow_as_of: "2026-11-20",
+    second_as_of: "2026-11-20",
     moved: [
-      { player_id: 1, name: "Nikola Jokić", team: "DEN", live: side(), shadow: side({ games: 31, points_rank: 9, categories_rank: 7 }) },
-      { player_id: 4, name: "Jamal Murray", team: "DEN", live: side({ points_rank: 30 }), shadow: side({ points_rank: 26 }) },
+      { player_id: 1, name: "Nikola Jokić", team: "DEN", plain: side(), noted: side({ games: 31, points_rank: 9, categories_rank: 7 }) },
+      { player_id: 4, name: "Jamal Murray", team: "DEN", plain: side({ points_rank: 30 }), noted: side({ points_rank: 26 }) },
     ],
     spend: { available: true, enabled: true, month_spent_usd: 1.84, month_cap_usd: 40, model: "claude-opus-5-5", prompt_version: "analyst-1" },
     ...overrides,
@@ -405,9 +405,9 @@ describe("Projections: the analyst's morning", () => {
 
   test("he is shown on both projections, and what the note moved is marked", () => {
     const jokic = readOf(render(morning(digest()), "?view=analyst"), "Nikola Jokić")
-    const [, live, shadow] = jokic.split("<tr><th scope=\"row\">")
-    expect(live).toContain("Live</th><td>3</td><td>2</td><td>38.2</td><td>33.5</td><td>27.9</td>")
-    expect(shadow).toContain('With its notes</th><td data-moved="true">9</td><td data-moved="true">7</td><td data-moved="true">31.0</td><td>33.5</td>')
+    const [, plain, noted] = jokic.split("<tr><th scope=\"row\">")
+    expect(plain).toContain("Live</th><td>3</td><td>2</td><td>38.2</td><td>33.5</td><td>27.9</td>")
+    expect(noted).toContain('With its notes</th><td data-moved="true">9</td><td data-moved="true">7</td><td data-moved="true">31.0</td><td>33.5</td>')
     // A read that wrote nothing moved nothing: one line where the table would be
     const murray = readOf(render(morning(digest()), "?view=analyst"), "Jamal Murray")
     expect(murray).toContain("The same with its notes applied: points rank 30 · 9-cat rank 33 · 38.2 games left.")
@@ -469,14 +469,37 @@ describe("Projections: the analyst's morning", () => {
     expect(still).toContain("Nobody&#x27;s place differs between the two boards.")
   })
 
+  test("a live morning says so, and calls the side with the notes the live one", () => {
+    const html = render(morning(digest({ in_shadow: false })), "?view=analyst")
+    expect(html).toContain("The analyst&#x27;s morning for 2026-27, live.")
+    expect(html).toContain("live: its notes are on the projection and boards everybody sees")
+    expect(html).not.toContain("in shadow")
+    // The same numbers in the same order, without the notes and then with them: only the names change
+    const jokic = readOf(html, "Nikola Jokić")
+    const [, plain, noted] = jokic.split("<tr><th scope=\"row\">")
+    expect(plain).toContain("Without its notes</th><td>3</td><td>2</td><td>38.2</td><td>33.5</td><td>27.9</td>")
+    expect(noted).toContain('Live, with its notes</th><td data-moved="true">9</td><td data-moved="true">7</td><td data-moved="true">31.0</td>')
+    expect(readOf(html, "Jamal Murray")).toContain("The same without its notes: points rank 30 · 9-cat rank 33 · 38.2 games left.")
+
+    expect(html).toContain("Moved by its notes")
+    expect(html).not.toContain("Moved on the second board")
+    const moved = html.split('<table class="table moved">')[1]
+    const [without, live] = moved.split("</thead>")[0].split("<th ").slice(2, 4)
+    expect(without).toContain("without the analyst&#x27;s notes")
+    expect(without).toMatch(/>Without<\/th>$/)
+    expect(live).toMatch(/>Live<\/th>$/)
+    const row = moved.split("<tr").find((cells) => cells.includes("Nikola Jokić"))!
+    expect(row).toMatch(/>3<\/td><td[^>]*>9<\/td><td class="num bad">−6<\/td>/)
+  })
+
   test("an older morning's moves are dated by that morning, not by the newest second boards", () => {
-    // shadow_as_of stays the newest day with second boards, whichever morning is shown
+    // second_as_of stays the newest day with second boards, whichever morning is shown
     const yesterday = render(morning(digest({ as_of: "2026-11-19" }), "2026-11-19"), "?view=analyst&day=2026-11-19")
     expect(yesterday).toContain("the two boards of Nov 19")
     expect(yesterday).not.toContain("boards of Nov 20")
 
     // A morning read before its second boards were stored has nothing to compare, and says so
-    const early = render(morning(digest({ shadow_as_of: "2026-11-19", moved: [] })), "?view=analyst")
+    const early = render(morning(digest({ second_as_of: "2026-11-19", moved: [] })), "?view=analyst")
     expect(early).toContain("no second boards stored for that morning yet")
     expect(early).toContain("The second boards of that morning are not stored yet, so there is nothing to compare.")
     expect(early).not.toContain("Nobody&#x27;s place differs")
@@ -502,7 +525,7 @@ describe("Projections: the analyst's morning", () => {
 
   test("before its first run, switched off, or with the backend silent, the page says so", () => {
     const never = render(
-      morning(digest({ as_of: null, days: [], reads: [], counts: {}, cost_usd: 0, notes_live: 0, shadow_as_of: null, moved: [] })),
+      morning(digest({ as_of: null, days: [], reads: [], counts: {}, cost_usd: 0, notes_live: 0, second_as_of: null, moved: [] })),
       "?view=analyst",
     )
     expect(never).toContain("The analyst has not read anybody yet.")

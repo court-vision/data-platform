@@ -13,6 +13,10 @@ in `raw` the timeline that prices any window of days and what each part read.
 The season's notes are read with it (services.live_notes: a return date, or
 minutes and a share of the offense with an end), and a note saved in the
 projections editor rebuilds the day's snapshot at once (`?rebuild`, below).
+So are the analyst's own notes once it is live (`settings.analyst_live`, the
+plan's step 5): the ones standing this morning, under the notes written by
+hand. The analyst's run, which follows the day's boards, then stores the
+snapshot again with what its reads wrote (`pipelines/analyst.py`).
 
 The preseason snapshots (`cv`, `espn`) are untouched: rooms drafted before
 opening night and their recaps still read them, and they are this model's
@@ -61,7 +65,7 @@ from pipelines.daily_rankings import (
     today_et,
 )
 from pipelines.readiness import REGULAR_SEASON_PREFIX
-from services.live_projection_inputs import LiveInputs, load_coefficients, load_inputs
+from services.live_projection_inputs import LiveInputs, load_coefficients, load_inputs, with_analyst_notes
 from services.live_projection_model import Coefficients, LiveProjection, Morning, build_morning, project
 
 SOURCE = "cv_live"
@@ -231,6 +235,10 @@ class LiveProjectionPipeline(BasePipeline):
                 return
             raise DataNotReady(reason)
 
+        analyst_notes = 0
+        if settings.analyst_live:
+            inputs, analyst_notes = with_analyst_notes(inputs)
+
         coeffs = load_coefficients()
         morning = build_morning(inputs.lines, inputs.priors, inputs.ahead, day, teams=inputs.teams, ages=inputs.ages)
         rows = build_rows(inputs, morning, coeffs, ctx.run_id)
@@ -240,6 +248,7 @@ class LiveProjectionPipeline(BasePipeline):
             prior=inputs.prior_source, prior_as_of=str(inputs.prior_as_of) if inputs.prior_as_of else None,
             known_absences=len(inputs.known), newest_line=str(inputs.newest_line), coefficients=coeffs.version,
             notes=len(inputs.notes), notes_in_force=sum(1 for s in inputs.standings.values() if s.in_force),
+            analyst_notes=analyst_notes,
         )
 
         store(rows, season, day)

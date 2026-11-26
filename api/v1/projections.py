@@ -17,7 +17,7 @@ Routes:
     DELETE /v1/dashboard/projections/{player_id}/note         — retire it, then rebuild
     GET    /v1/dashboard/projections/{player_id}/news         — his recent stored news: what a note can cite
 
-    GET    /v1/dashboard/projections/analyst                  — the analyst's morning digest (in shadow)
+    GET    /v1/dashboard/projections/analyst                  — the analyst's morning digest
 
 A save writes one row to nba.projection_adjustments (append-only: it
 supersedes the live row of its scope). A preseason adjustment then runs
@@ -26,9 +26,11 @@ showed in its preview. A season note (the Live rankings plan, step 3) leaves
 the preseason projection alone and rebuilds the day's live projection, which
 is what the board is priced on in season.
 
-The analyst (the Live rankings plan, step 4) writes notes of its own, in a
-scope of its own, which in shadow reach only a second projection and second
-boards. Its digest is read here; nothing on this page writes for it.
+The analyst (the Live rankings plan, steps 4 and 5) writes notes of its own,
+in a scope of its own. Live (`settings.analyst_live`), the day's projection
+reads them under the notes written here; in shadow they reach only a second
+projection and second boards. Its digest is read here; nothing on this page
+writes for it.
 """
 
 from __future__ import annotations
@@ -231,6 +233,14 @@ def _eastern_now() -> datetime:
     return live_inputs.eastern(datetime.utcnow())
 
 
+def _preview_inputs(season: str, today: date) -> live_inputs.LiveInputs:
+    """What the day's live projection reads: the notes written here, and under them
+    the analyst's once it is live, so "as it stands" is what the board shows. A note
+    tried on a player replaces whichever of the two he has, as a saved one would."""
+    inputs = live_inputs.load_inputs(season, today)
+    return live_inputs.with_analyst_notes(inputs)[0] if settings.analyst_live else inputs
+
+
 @router.post("/note/preview", response_model=NotePreviewResponse)
 async def preview_note(req: NotePreviewRequest) -> NotePreviewResponse:
     """
@@ -243,7 +253,7 @@ async def preview_note(req: NotePreviewRequest) -> NotePreviewResponse:
     backend on its next read, under its own league.
     """
     season = settings.nba_season
-    inputs = await run_in_db_thread(live_inputs.load_inputs, season, notes.today_et())
+    inputs = await run_in_db_thread(_preview_inputs, season, notes.today_et())
     preview = await asyncio.to_thread(
         notes.preview, inputs, req.player_id, req.note, written=_eastern_now(), review_date=req.review_date
     )
@@ -378,7 +388,7 @@ async def get_player_news(player_id: int = _PLAYER_ID) -> PlayerNewsResponse:
     )
 
 
-# ---- the analyst, in shadow ----------------------------------------------------------------
+# ---- the analyst ---------------------------------------------------------------------------
 
 
 @router.get("/analyst", response_model=AnalystDigestResponse)
@@ -389,14 +399,15 @@ async def get_analyst_digest(
     The analyst's morning: every read with why the screen picked the player,
     what the read came to, the note it left with the stored items it rests on,
     and what it says against a note written by hand. Beside each, the player
-    on the live projection and boards and on the second ones, which have the
-    analyst's notes applied and which nothing else reads. `moved` is the
+    without the analyst's notes (`plain`) and with them applied (`noted`).
+    `in_shadow` says which of the two everybody saw that morning: the plain
+    one in shadow, the noted one once the analyst is live; the other is the
+    second projection and boards, which nothing else reads. `moved` is the
     widest moves between the two points boards that morning, and `spend` the
     month's bill for reads from the backend's ledger.
 
-    In shadow this is the only place the analyst's work shows. To act on a
-    read, save a note of your own from it: a note written by hand is the one
-    applied wherever a player has both.
+    To overrule a read, save a note of your own: a note written by hand is
+    the one applied wherever a player has both.
     """
     season = settings.nba_season
     month = await asyncio.to_thread(analyst_client_from_settings(settings).month)

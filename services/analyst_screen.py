@@ -16,8 +16,11 @@ money, so the list is short and is built by fixed rules, never by the model:
 last two days for a player never read. A rule alone is not enough: a note
 must cite a stored item, so a player with no citable item on file is skipped
 unless he already carries a note of the analyst's (which may need retiring).
-And the screen is for players who matter to a fantasy roster: a regular, or
-somebody the board ranks.
+And the screen is for players who matter to a fantasy roster: the points
+board ranks him in its top 200. Anybody below that waits until the stats-only
+board lifts him in, however much he plays; only a player the analyst already
+has a note on is read again wherever he ranks, so no note is left standing
+unwatched.
 
 The list comes back in the order it should be read: by the strongest rule that
 picked him, then by how much he matters. The pipeline reads from the top until
@@ -41,8 +44,7 @@ RANK_GAP = "rank_gap"
 # In order of priority: the first rule that picked a player decides his place in the list
 RULES = (NOTE_DUE, STATUS_CHANGED, NEW_ITEM, TEAMMATE_CHANGE, MINUTES_GAP, RANK_GAP)
 
-# Who the screen is for: he plays this much when his team is whole, or the board ranks him this high
-MIN_MINUTES = 14.0
+# Who the screen is for: the points board ranks him this high (or he carries a note of the analyst's)
 RANKED_WITHIN = 200
 # A teammate whose absence moves a rotation
 PROMINENT_MINUTES = 24.0
@@ -115,9 +117,8 @@ def _minutes(value: float) -> str:
 
 
 def matters(subject: Subject) -> bool:
-    return subject.minutes_usual >= MIN_MINUTES or (
-        subject.cv_rank is not None and subject.cv_rank <= RANKED_WITHIN
-    )
+    """The board ranks him high enough for a read, or a note of the analyst's own needs watching."""
+    return subject.has_note or (subject.cv_rank is not None and subject.cv_rank <= RANKED_WITHIN)
 
 
 def status_reason(change: StatusChange) -> str:
@@ -191,8 +192,7 @@ def screen(subjects: Iterable[Subject]) -> list[Candidate]:
         reasons = reasons_for(subject, widest)
         if not reasons:
             continue
-        due = reasons[0].rule == NOTE_DUE
-        if not due and not matters(subject):
+        if not matters(subject):
             continue
         # A note needs a stored item to cite. Without one there is nothing to
         # write, but a note he already carries can still be kept or retired.
