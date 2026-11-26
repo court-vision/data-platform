@@ -548,6 +548,252 @@
         "title": "AdjustmentSavedResponse",
         "type": "object"
       },
+      "AiBill": {
+        "properties": {
+          "days": {
+            "description": "Every UTC day of both months to today",
+            "items": {
+              "$ref": "#/components/schemas/AiBillDay"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "keys": {
+            "description": "This month, largest first",
+            "items": {
+              "$ref": "#/components/schemas/AiBillKey"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the check couldn't run",
+            "title": "Message"
+          },
+          "months": {
+            "description": "Last month, then this month",
+            "items": {
+              "$ref": "#/components/schemas/AiBillMonth"
+            },
+            "title": "Months",
+            "type": "array"
+          },
+          "read_at": {
+            "description": "When the backend read Anthropic",
+            "format": "date-time",
+            "title": "Read At",
+            "type": "string"
+          },
+          "refreshed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anthropic's numbers are complete up to here",
+            "title": "Refreshed At"
+          },
+          "state": {
+            "description": "ok | no_key | refused | unavailable | unreachable",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "message",
+          "read_at",
+          "refreshed_at",
+          "months",
+          "days",
+          "keys"
+        ],
+        "title": "AiBill",
+        "type": "object"
+      },
+      "AiBillDay": {
+        "properties": {
+          "billed_micros": {
+            "title": "Billed Micros",
+            "type": "integer"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "ledger_micros": {
+            "title": "Ledger Micros",
+            "type": "integer"
+          },
+          "open_micros": {
+            "default": 0,
+            "title": "Open Micros",
+            "type": "integer"
+          },
+          "ours_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ours Micros"
+          }
+        },
+        "required": [
+          "day",
+          "billed_micros",
+          "ours_micros",
+          "ledger_micros",
+          "open_micros"
+        ],
+        "title": "AiBillDay",
+        "type": "object"
+      },
+      "AiBillKey": {
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null: usage made without a key (the Console)",
+            "title": "Api Key Id"
+          },
+          "billed_micros": {
+            "title": "Billed Micros",
+            "type": "integer"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anthropic's partial hint of the key",
+            "title": "Hint"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "ours": {
+            "default": false,
+            "description": "The key the backend sends its model calls with",
+            "title": "Ours",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "api_key_id",
+          "name",
+          "hint",
+          "ours",
+          "billed_micros"
+        ],
+        "title": "AiBillKey",
+        "type": "object"
+      },
+      "AiBillMonth": {
+        "description": "One calendar month (UTC): what Anthropic bills against what the ledger priced.",
+        "properties": {
+          "billed_micros": {
+            "description": "Anthropic's cost for the whole organization, before credits",
+            "title": "Billed Micros",
+            "type": "integer"
+          },
+          "ledger_micros": {
+            "description": "The ledger's settled spend",
+            "title": "Ledger Micros",
+            "type": "integer"
+          },
+          "month": {
+            "description": "Its first day",
+            "format": "date",
+            "title": "Month",
+            "type": "string"
+          },
+          "open_micros": {
+            "default": 0,
+            "description": "The ledger's reservations still open",
+            "title": "Open Micros",
+            "type": "integer"
+          },
+          "ours_micros": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Of it, on the backend's own API key; null: not found",
+            "title": "Ours Micros"
+          }
+        },
+        "required": [
+          "month",
+          "billed_micros",
+          "ours_micros",
+          "ledger_micros",
+          "open_micros"
+        ],
+        "title": "AiBillMonth",
+        "type": "object"
+      },
+      "AiBillResponse": {
+        "description": "Response for GET /v1/dashboard/ai-spend/bill.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AiBill"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "data"
+        ],
+        "title": "AiBillResponse",
+        "type": "object"
+      },
       "AiCapData": {
         "properties": {
           "cap_micros": {
@@ -6652,6 +6898,33 @@
           }
         ],
         "summary": "Get Ai Spend",
+        "tags": [
+          "ai spend"
+        ]
+      }
+    },
+    "/v1/dashboard/ai-spend/bill": {
+      "get": {
+        "description": "The bill check: what Anthropic bills the organization, last month and this one by\nUTC day and by API key, beside the ledger. The backend reads Anthropic with its\nAdmin API key; `state` says why when it couldn't (no key, a refused key).",
+        "operationId": "get_ai_bill_v1_dashboard_ai_spend_bill_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiBillResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Ai Bill",
         "tags": [
           "ai spend"
         ]

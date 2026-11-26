@@ -16,6 +16,11 @@ Days are UTC, the calendar the monthly caps reset on.
              spend whose chat was deleted, or whose turn was never written)
     app      the whole app's cap, over every line together (backend migration
              0056): a cap only, never a ledger row's line
+
+`GET /v1/dashboard/ai-spend/bill` passes the backend's bill check through
+(backend/services/ai/bill.py, `GET /v1/internal/jobs/ai/bill`): what Anthropic bills
+the organization (its Usage and Cost Analytics API, read by the backend with its
+Admin API key) beside the ledger, by UTC day and by API key.
 """
 
 from __future__ import annotations
@@ -151,3 +156,50 @@ class AiCapResponse(ApiModel):
     status: str
     message: str
     data: AiCapData
+
+
+# ---- The bill check ----
+
+
+class AiBillMonth(ApiModel):
+    """One calendar month (UTC): what Anthropic bills against what the ledger priced."""
+
+    month: date = Field(..., description="Its first day")
+    billed_micros: int = Field(..., description="Anthropic's cost for the whole organization, before credits")
+    ours_micros: Optional[int] = Field(None, description="Of it, on the backend's own API key; null: not found")
+    ledger_micros: int = Field(..., description="The ledger's settled spend")
+    open_micros: int = Field(0, description="The ledger's reservations still open")
+
+
+class AiBillDay(ApiModel):
+    day: date
+    billed_micros: int
+    ours_micros: Optional[int] = None
+    ledger_micros: int
+    open_micros: int = 0
+
+
+class AiBillKey(ApiModel):
+    api_key_id: Optional[str] = Field(None, description="Null: usage made without a key (the Console)")
+    name: Optional[str] = None
+    hint: Optional[str] = Field(None, description="Anthropic's partial hint of the key")
+    ours: bool = Field(False, description="The key the backend sends its model calls with")
+    billed_micros: int
+
+
+class AiBill(ApiModel):
+    state: str = Field(..., description="ok | no_key | refused | unavailable | unreachable")
+    message: Optional[str] = Field(None, description="Why the check couldn't run")
+    read_at: datetime = Field(..., description="When the backend read Anthropic")
+    refreshed_at: Optional[datetime] = Field(None, description="Anthropic's numbers are complete up to here")
+    months: list[AiBillMonth] = Field(default_factory=list, description="Last month, then this month")
+    days: list[AiBillDay] = Field(default_factory=list, description="Every UTC day of both months to today")
+    keys: list[AiBillKey] = Field(default_factory=list, description="This month, largest first")
+
+
+class AiBillResponse(ApiModel):
+    """Response for GET /v1/dashboard/ai-spend/bill."""
+
+    status: str
+    message: str
+    data: AiBill

@@ -31,6 +31,25 @@ export function useAiSpend(window: SpendWindow) {
   return useQuery({ ...aiSpendQuery(window), enabled: token !== null })
 }
 
+/** The backend keeps Anthropic's answer five minutes, and Anthropic's own data lags hours. */
+export const AI_BILL_REFETCH_MS = 300_000
+
+export function aiBillQuery() {
+  return queryOptions({
+    // Apart from the report's key: a cap saved there has nothing to change here
+    queryKey: ["dashboard", "ai-bill"] as const,
+    queryFn: async () => (await apiFetch<Schemas["AiBillResponse"]>(`${BASE}/bill`)).data,
+    refetchInterval: AI_BILL_REFETCH_MS,
+    retry: (failures, error) => giveUpOn(error, failures),
+  })
+}
+
+/** What Anthropic bills, last month and this one, beside the ledger. */
+export function useAiBill() {
+  const token = useToken()
+  return useQuery({ ...aiBillQuery(), enabled: token !== null })
+}
+
 export interface CapChange {
   line: CapLineKey
   userId: number | null

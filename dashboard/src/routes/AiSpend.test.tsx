@@ -3,8 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router"
 
-import { aiSpendQuery } from "@/hooks/useAiSpend"
-import type { AiSpendReport, SpendWindow, UserLine } from "@/lib/aiSpend"
+import { aiBillQuery, aiSpendQuery } from "@/hooks/useAiSpend"
+import type { AiBill, AiSpendReport, SpendWindow, UserLine } from "@/lib/aiSpend"
 import { AiSpend } from "@/routes/AiSpend"
 import { pressed } from "@/test-helpers"
 
@@ -67,9 +67,10 @@ function report(overrides: Partial<AiSpendReport> = {}): AiSpendReport {
   }
 }
 
-function render(path: string, window: SpendWindow, data: AiSpendReport): string {
+function render(path: string, window: SpendWindow, data: AiSpendReport, bill?: AiBill): string {
   const client = new QueryClient()
   client.setQueryData(aiSpendQuery(window).queryKey, data)
+  if (bill) client.setQueryData(aiBillQuery().queryKey, bill)
   return renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
@@ -187,5 +188,58 @@ describe("AiSpend", () => {
     expect(html).toContain("Nothing spent in this window.")
     expect(html).toContain("Nothing spent in the last 3 days.")
     expect(html).toContain("No calls recorded in the last 3 days.")
+  })
+})
+
+function bill(overrides: Partial<AiBill> = {}): AiBill {
+  return {
+    state: "ok",
+    message: null,
+    read_at: "2026-11-26T12:30:00Z",
+    refreshed_at: "2026-11-26T08:00:00Z",
+    months: [
+      { month: "2026-10-01", billed_micros: 10_255_000, ours_micros: 10_000_000, ledger_micros: 9_800_000, open_micros: 0 },
+      { month: "2026-11-01", billed_micros: 7_710_000, ours_micros: 7_300_000, ledger_micros: 3_950_000, open_micros: 1_000_000 },
+    ],
+    days: [
+      { day: "2026-11-24", billed_micros: 3_000_000, ours_micros: 3_000_000, ledger_micros: 3_000_000, open_micros: 0 },
+      { day: "2026-11-25", billed_micros: 3_210_000, ours_micros: 2_800_000, ledger_micros: 2_750_000, open_micros: 0 },
+      { day: "2026-11-26", billed_micros: 1_500_000, ours_micros: 1_500_000, ledger_micros: 1_200_000, open_micros: 1_000_000 },
+    ],
+    keys: [
+      { api_key_id: "apikey_app", name: "court-vision-prod", hint: "sk-ant-api03-R2D...igAA", ours: true, billed_micros: 7_300_000 },
+      { api_key_id: "apikey_laptop", name: "laptop evals", hint: null, ours: false, billed_micros: 410_000 },
+    ],
+    ...overrides,
+  }
+}
+
+describe("AiSpend's bill check", () => {
+  test("each month and recent day beside the ledger, held to the app's own key", () => {
+    const text = render("/ai-spend", "30", report(), bill())
+    expect(text).toContain("Against Anthropic&#x27;s bill")
+    expect(text).toContain("October 2026")
+    expect(text).toContain("November 2026")
+    // November: $3.95 priced against $7.30 on the app's key
+    expect(text).toContain("$7.71")
+    expect(text).toContain("−$3.35")
+    // Only today runs past Anthropic's refresh (08:00 UTC); November 25 ended before it
+    expect(text.match(/may still read short/g)?.length).toBe(1)
+    expect(text).toContain("court-vision-prod")
+    expect(text).toContain("this app")
+    expect(text).toContain("laptop evals")
+  })
+
+  test("a key Anthropic refused says so, and what the check needs", () => {
+    const text = render("/ai-spend", "30", report(), bill({ state: "refused", message: "Anthropic answered 401: invalid x-api-key", months: [], days: [], keys: [] }))
+    expect(text).toContain("Anthropic refused the key (Anthropic answered 401: invalid x-api-key)")
+    expect(text).toContain("sk-ant-admin")
+    expect(text).not.toContain("October 2026")
+  })
+
+  test("the rest of the page doesn't wait for the bill", () => {
+    const text = render("/ai-spend", "30", report())
+    expect(text).toContain("Reading Anthropic&#x27;s bill…")
+    expect(text).toContain("By model")
   })
 })
