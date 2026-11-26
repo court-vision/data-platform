@@ -517,6 +517,37 @@ def test_execute_processes_every_espn_team_of_every_opted_in_user(pipeline, in_w
 
 
 @pytest.mark.unit
+def test_a_teams_own_email_runs_while_the_accounts_is_off(pipeline, in_window):
+    # Account off: the team that switched its own on runs, the one that follows the account doesn't
+    off, _ = make_user(email="off@example.com", lineup_alerts_enabled=False)
+    own, follows = make_team(off, team_name="Own"), make_team(off, team_name="Follows")
+    NotificationTeamPreference.create(user=off.user_id, team_id=own.team_id, lineup_alerts_enabled=True,
+                                      auto_lineup_enabled=True)
+    # No account row at all: only a team's own setting runs, with the row's defaults
+    never = User.create(email="never@example.com")
+    theirs = make_team(never, team_name="Theirs")
+    make_team(never, team_name="Untouched")
+    NotificationTeamPreference.create(user=never.user_id, team_id=theirs.team_id, lineup_alerts_enabled=True)
+    # Account on: a team that switched its own off stays off
+    on, _ = make_user(email="on@example.com")
+    quiet = make_team(on, team_name="Quiet")
+    NotificationTeamPreference.create(user=on.user_id, team_id=quiet.team_id, lineup_alerts_enabled=False)
+    pipeline.backend_client = FakeBackendClient(evaluation("planned"))
+
+    pipeline.execute(PipelineContext("lineup_alerts"))
+
+    calls = [(c["team_id"], c["apply"]) for c in pipeline.backend_client.calls]
+    assert calls == [(own.team_id, True), (theirs.team_id, False)]
+    assert follows.team_id not in {c["team_id"] for c in pipeline.backend_client.calls}
+
+
+@pytest.mark.unit
+def test_nobody_opted_in_anywhere_is_an_empty_list(pipeline):
+    make_user(lineup_alerts_enabled=False)
+    assert pipeline._get_eligible_users() == []
+
+
+@pytest.mark.unit
 def test_three_unavailable_teams_raise_the_ops_alert(pipeline, in_window, alerts):
     user, _ = make_user()
     for _ in range(3):
