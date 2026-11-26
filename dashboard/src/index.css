@@ -8,12 +8,16 @@
 @tailwind base;
 
 @layer base {
-  /* The frontend sets these with next/font; desk.module.css reads them by
-     name. Families come from @fontsource-variable (imported in main.tsx). */
+  /* The frontend sets these with next/font (fonts.ts); desk.module.css reads
+     them by name, the --face-* ones as a theme's --desk-sans. Families come
+     from @fontsource (imported in main.tsx). */
   :root {
     --desk-sans: "Geist Variable";
     --desk-mono: "Geist Mono Variable";
     --font-outfit: "Outfit Variable";
+    --face-grotesk: "Space Grotesk Variable";
+    --face-condensed: "Barlow Semi Condensed";
+    --face-serif: "Fraunces Variable";
   }
 
   *,

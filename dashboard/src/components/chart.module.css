@@ -89,7 +89,7 @@
   display: inline-block;
   width: 10px;
   height: 10px;
-  border-radius: 2px;
+  border-radius: calc(2px * var(--round, 1));
   background: var(--run, var(--text-3));
 }
 

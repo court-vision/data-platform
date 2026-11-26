@@ -34,7 +34,37 @@
  * the first desk palettes, at 1.2:1 and 1.4:1, lost every edge.
  *
  * Effects are tokens too: --glow lights the accent marks and --bar-bg paints
- * the bar (Noon and Midnight use both).
+ * the bar (Noon, Midnight and Blacktop use both; Harvest and Hearth a texture).
+ * The base block sets both to their plain values, so a swatch never inherits
+ * the frame's.
+ *
+ * Character is tokens too, so a theme can change more than its colors.
+ * --round scales every corner in every desk (0 is square, 2 is near a pill).
+ * --ctl-w and --ctl-line outline buttons and inputs, --rail-line the rails;
+ * --btn-*, --primary-* and --pill-* finish buttons and the chosen segment.
+ * The bar's bottom edge is --bar-rule (a border-image) at --bar-rule-w, and
+ * --bar-edge an inset shadow on it; --status-bg paints the status line,
+ * --mark-h sets the accent marks under tabs, --label-track and --label-weight
+ * the mono labels. The Week desk reads a few more: --tape-bg and
+ * --figure-weight for the tape, --slot-* for the slot chips, --strip-w and
+ * --strip-blur for the health strips, --today-head-image over the today
+ * column's head and --today-edge-l and --today-edge-r down the focused day's
+ * sides. A theme can also set --desk-sans to one of the faces in fonts.ts.
+ * What tokens cannot carry follows the theme blocks as scoped rules.
+ *
+ * Chart series (the AI desk's blocks) are --series-1 to --series-4, in the
+ * same fixed order in every theme: series 1 is the theme's accent hue at a
+ * step that reads on --raised, where a block sits, and the four were checked
+ * together for color-vision separation and contrast there. Text beside a mark
+ * stays in the text tokens; the hue alone never carries a name.
+ *
+ * One effect brings colors from outside the theme: Dime Autopilot, on (the
+ * spectrum rules below). --spectrum-1 to --spectrum-6 walk the wheel, deep
+ * enough to read as type on a light desk and bright on a dark one, and
+ * --spectrum lists them back to the first so every use of it loops without a
+ * seam. --spectrum-halo is how much of them glows around the block's edge (a
+ * theme with hard edges sets 0) and --spectrum-blend how the switch-on sweep
+ * lays over the block.
  */
 .tokens {
   --bg: #f6f3ec;
@@ -62,7 +92,52 @@
   --today-head: #f0dec2;
   --shadow: 0 14px 40px rgba(60, 45, 25, 0.16), 0 0 0 1px var(--line-2);
   --overlay: rgba(40, 32, 20, 0.32);
+  --series-1: #b4471a;
+  --series-2: #2a78d6;
+  --series-3: #eda100;
+  --series-4: #6250d6;
+  --spectrum-1: #c2255c;
+  --spectrum-2: #d9480f;
+  --spectrum-3: #a16207;
+  --spectrum-4: #1c7c54;
+  --spectrum-5: #0a6dab;
+  --spectrum-6: #6b45d1;
+  --spectrum: var(--spectrum-1), var(--spectrum-2), var(--spectrum-3), var(--spectrum-4), var(--spectrum-5), var(--spectrum-6), var(--spectrum-1);
+  --spectrum-halo: 0.2;
+  --spectrum-blend: multiply;
   --glow: none;
+  --bar-bg: var(--surface);
+  --round: 1;
+  --ctl-w: 1px;
+  --ctl-line: var(--line-2);
+  --rail-line: var(--line);
+  --btn-bg: var(--surface);
+  --btn-shadow: none;
+  --btn-press: none;
+  --primary-bg: var(--accent);
+  --primary-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
+  --primary-ink: var(--accent-ink);
+  --primary-line: var(--accent);
+  --primary-shadow: var(--glow);
+  --pill-ink: var(--text);
+  --pill-shadow: 0 0 0 1px var(--line-2), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --bar-rule: none;
+  --bar-rule-w: 1px;
+  --bar-edge: none;
+  --status-bg: var(--surface);
+  --mark-h: 2px;
+  --label-track: 0.08em;
+  --label-weight: 400;
+  --today-head-image: none;
+  --tape-bg: var(--surface);
+  --figure-weight: 400;
+  --slot-bg: var(--surface-2);
+  --slot-ink: var(--text);
+  --slot-line: var(--line-2);
+  --strip-w: 3px;
+  --strip-blur: 0px;
+  --today-edge-l: none;
+  --today-edge-r: none;
   color-scheme: light;
 }
 
@@ -92,6 +167,10 @@
   --today-head: #cfe1f6;
   --shadow: 0 14px 40px rgba(15, 26, 51, 0.14), 0 0 0 1px var(--line-2);
   --overlay: rgba(15, 26, 51, 0.3);
+  --series-1: #0a6dab;
+  --series-2: #eb6834;
+  --series-3: #6250d6;
+  --series-4: #eda100;
   --glow: 0 0 10px rgba(10, 109, 171, 0.3);
   --bar-bg: linear-gradient(180deg, #e9f0f9, #e1e9f4);
 }
@@ -122,6 +201,10 @@
   --today-head: #31281a;
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line-2);
   --overlay: rgba(12, 10, 8, 0.62);
+  --series-1: #c98500;
+  --series-2: #3987e5;
+  --series-3: #d55181;
+  --series-4: #9085e9;
   color-scheme: dark;
 }
 
@@ -151,9 +234,313 @@
   --today-head: #1a2d50;
   --shadow: 0 16px 48px rgba(2, 6, 16, 0.6), 0 0 0 1px var(--line-2);
   --overlay: rgba(4, 8, 18, 0.62);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #9085e9;
+  --series-4: #c98500;
   --glow: 0 0 14px rgba(92, 200, 255, 0.45);
   --bar-bg: linear-gradient(180deg, #1c294a, #162039);
   color-scheme: dark;
+}
+
+.tokens[data-theme="chalk"] {
+  --bg: #f7f7f5;
+  --surface: #ededea;
+  --surface-2: #e3e3df;
+  --raised: #ffffff;
+  --pill: #d4f53c;
+  --hover: #ebebe7;
+  --hover-col: #f1f1ee;
+  --line: #cdcdc7;
+  --line-2: #a6a69f;
+  --text: #121211;
+  --text-2: #3e3e3a;
+  --text-3: #61615b;
+  --accent: #4b7300;
+  --accent-soft: rgba(75, 115, 0, 0.1);
+  --accent-ink: #ffffff;
+  --up: #0a7752;
+  --down: #c62f2a;
+  --live: #0a7752;
+  --warn: #965400;
+  --preview: #6a45c2;
+  --preview-soft: rgba(106, 69, 194, 0.08);
+  --today: #f2f6e1;
+  --today-head: #e6eec7;
+  --shadow: 0 0 0 1.5px #121211, 5px 5px 0 #121211;
+  --overlay: rgba(18, 18, 17, 0.3);
+  --series-1: #4b7300;
+  --series-2: #2a78d6;
+  --series-3: #c98500;
+  --series-4: #c2417a;
+  --round: 0;
+  --ctl-w: 1.5px;
+  --ctl-line: #121211;
+  --rail-line: #121211;
+  --btn-bg: #ffffff;
+  --btn-shadow: 2px 2px 0 #121211;
+  --btn-press: translate(1px, 1px);
+  --primary-bg: #d4f53c;
+  --primary-hover: #def86a;
+  --primary-ink: #121211;
+  --primary-line: #121211;
+  --primary-shadow: 2px 2px 0 #121211;
+  --pill-shadow: 0 0 0 1.5px #121211;
+  --bar-bg: #ffffff;
+  --bar-rule: linear-gradient(#121211, #121211) 1;
+  --bar-rule-w: 2px;
+  --mark-h: 4px;
+  --label-weight: 600;
+  --today-head-image: repeating-linear-gradient(-45deg, rgba(18, 18, 17, 0.07) 0 4px, transparent 4px 9px);
+  --desk-sans: var(--face-grotesk);
+  --tape-bg: #ffffff;
+  --figure-weight: 500;
+  --slot-bg: #121211;
+  --slot-ink: #f7f7f5;
+  --slot-line: #121211;
+  --strip-w: 4px;
+  --today-edge-l: linear-gradient(90deg, #121211 0 2px, transparent 2px);
+  --today-edge-r: linear-gradient(270deg, #121211 0 2px, transparent 2px);
+}
+
+.tokens[data-theme="blacktop"] {
+  --bg: #0d0e0e;
+  --surface: #161717;
+  --surface-2: #1f2121;
+  --raised: #1c1e1e;
+  --pill: #22260f;
+  --hover: #1a1c1c;
+  --hover-col: #121313;
+  --line: #2f3232;
+  --line-2: #474b4b;
+  --text: #f3f4f0;
+  --text-2: #b8bbb4;
+  --text-3: #8d918a;
+  --accent: #d4f53c;
+  --accent-soft: rgba(212, 245, 60, 0.14);
+  --accent-ink: #141c00;
+  --up: #3ddc9b;
+  --down: #ff6262;
+  --live: #3ddc9b;
+  --warn: #ffb04a;
+  --preview: #c4a8ff;
+  --preview-soft: rgba(196, 168, 255, 0.11);
+  --today: #14170e;
+  --today-head: #1d2312;
+  --shadow: inset 0 2px 0 #d4f53c, 0 0 0 1px var(--line-2), 0 24px 60px rgba(0, 0, 0, 0.7);
+  --overlay: rgba(0, 0, 0, 0.66);
+  --series-1: #a8c41a;
+  --series-2: #d95926;
+  --series-3: #8a6cf0;
+  --series-4: #2fb3a3;
+  --glow: 0 0 12px rgba(212, 245, 60, 0.35);
+  --round: 0;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.08 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
+  --bar-bg: var(--grain), #161717;
+  --bar-edge: inset 0 2px 0 #d4f53c;
+  --status-bg: var(--grain), #161717;
+  --mark-h: 3px;
+  --label-track: 0.14em;
+  --label-weight: 600;
+  --btn-bg: #1a1c1c;
+  --btn-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.45);
+  --primary-shadow: 0 0 14px rgba(212, 245, 60, 0.45);
+  --pill-ink: #d4f53c;
+  --pill-shadow: 0 0 0 1px #d4f53c, 0 0 10px rgba(212, 245, 60, 0.3);
+  --today-head-image: repeating-linear-gradient(-45deg, rgba(212, 245, 60, 0.1) 0 4px, transparent 4px 10px);
+  --desk-sans: var(--face-condensed);
+  --tape-bg: var(--grain), #161717;
+  --figure-weight: 600;
+  --slot-bg: #f3f4f0;
+  --slot-ink: #0d0e0e;
+  --slot-line: #f3f4f0;
+  --strip-w: 4px;
+  --strip-blur: 6px;
+  --today-edge-l: linear-gradient(90deg, rgba(212, 245, 60, 0.7) 0 1px, rgba(212, 245, 60, 0.1) 1px, rgba(212, 245, 60, 0) 16px);
+  --today-edge-r: linear-gradient(270deg, rgba(212, 245, 60, 0.7) 0 1px, rgba(212, 245, 60, 0.1) 1px, rgba(212, 245, 60, 0) 16px);
+  color-scheme: dark;
+}
+
+/*
+ * Harvest and Hearth, the Thanksgiving pair: the table by day, cranberry and
+ * firelight after dinner. A soft serif (Fraunces), recipe-card corners and a
+ * stacked-card shadow, linen and wood grain, a crimped pie-crust edge under the
+ * bar (--bar-rule as an image), gingham or flannel over today's column, and the
+ * turkey's tail feathers as the tab mark (a scoped rule after the theme blocks).
+ * --linen and --wood are their textures, as --grain is Blacktop's. Both have
+ * fall leaves (FallLeaves.tsx, turned on by `leaves` in themes.ts), drawn in
+ * --leaf-1 to --leaf-5.
+ */
+.tokens[data-theme="harvest"] {
+  --bg: #fbf4e6;
+  --surface: #f3e5cc;
+  --surface-2: #ebd9ba;
+  --raised: #fffaf0;
+  --pill: #f3bd4f;
+  --hover: #f1e2c6;
+  --hover-col: #f7edda;
+  --line: #dcc39c;
+  --line-2: #b0905f;
+  --text: #2b180e;
+  --text-2: #4e3220;
+  --text-3: #6c4e37;
+  --accent: #a01c48;
+  --accent-soft: rgba(160, 28, 72, 0.1);
+  --accent-ink: #ffffff;
+  --up: #276d2f;
+  --down: #b3331a;
+  --live: #276d2f;
+  --warn: #855400;
+  --preview: #6a45c2;
+  --preview-soft: rgba(106, 69, 194, 0.08);
+  --today: #fcecd1;
+  --today-head: #f9e3c0;
+  --shadow: 0 0 0 1px #b0905f, 4px 5px 0 #ead2a6, 4px 5px 0 1px #c9a874, 0 16px 40px rgba(90, 50, 15, 0.16);
+  --overlay: rgba(43, 24, 14, 0.32);
+  --series-1: #a01c48;
+  --series-2: #2a78d6;
+  --series-3: #c98500;
+  --series-4: #6250d6;
+  --linen: repeating-linear-gradient(0deg, rgba(120, 80, 40, 0.028) 0 1px, transparent 1px 3px), repeating-linear-gradient(90deg, rgba(120, 80, 40, 0.028) 0 1px, transparent 1px 3px);
+  --bar-bg: var(--linen), #fffaf0;
+  --bar-rule: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 0h12v1.5a6 4.5 0 0 1-12 0z' fill='%23c98a45'/%3E%3Cpath d='M0 0h12v1a6 3 0 0 1-12 0z' fill='%23e0aa64'/%3E%3C/svg%3E") 0 0 6 0 / 0 0 1 0 / 0 round;
+  --bar-rule-w: 6px;
+  --round: 1.5;
+  --ctl-w: 1.5px;
+  --ctl-line: #8c6a45;
+  --rail-line: #b0905f;
+  --btn-bg: #fffaf0;
+  --btn-shadow: 0 2px 0 #dcc39c;
+  --btn-press: translateY(1px);
+  --primary-bg: #e3762a;
+  --primary-hover: #ea8a45;
+  --primary-ink: #2b180e;
+  --primary-line: #9c4a12;
+  --primary-shadow: 0 2px 0 #9c4a12;
+  --pill-ink: #2b180e;
+  --pill-shadow: 0 0 0 1px #b07f1c, 0 1px 0 1px #b07f1c;
+  --status-bg: var(--linen), var(--surface);
+  --mark-h: 4px;
+  --label-weight: 500;
+  --today-head-image: repeating-linear-gradient(90deg, rgba(160, 28, 72, 0.065) 0 6px, transparent 6px 12px), repeating-linear-gradient(0deg, rgba(160, 28, 72, 0.065) 0 6px, transparent 6px 12px);
+  --desk-sans: var(--face-serif);
+  --tape-bg: var(--linen), #fffaf0;
+  --figure-weight: 500;
+  --slot-bg: #5a3420;
+  --slot-ink: #fbf4e6;
+  --slot-line: #5a3420;
+  --strip-w: 4px;
+  --today-edge-l: linear-gradient(90deg, #e3762a 0 2px, transparent 2px);
+  --today-edge-r: linear-gradient(270deg, #e3762a 0 2px, transparent 2px);
+  --leaf-1: #a01c48;
+  --leaf-2: #e3762a;
+  --leaf-3: #e0a52e;
+  --leaf-4: #9c5a2a;
+  --leaf-5: #7a8f45;
+}
+
+.tokens[data-theme="hearth"] {
+  --bg: #1d1012;
+  --surface: #271518;
+  --surface-2: #321c20;
+  --raised: #2e191d;
+  --pill: #4a2224;
+  --hover: #2c171b;
+  --hover-col: #231215;
+  --line: #47282d;
+  --line-2: #6d434b;
+  --text: #fbeee4;
+  --text-2: #dcc0b6;
+  --text-3: #c0a298;
+  --accent: #ff9a52;
+  --accent-soft: rgba(255, 154, 82, 0.15);
+  --accent-ink: #24120a;
+  --up: #7fd18a;
+  --down: #ff7563;
+  --live: #7fd18a;
+  --warn: #f4c75e;
+  --preview: #d2acff;
+  --preview-soft: rgba(210, 172, 255, 0.1);
+  --today: #2a1613;
+  --today-head: #381c18;
+  --shadow: 0 0 0 1px var(--line-2), 4px 5px 0 #100709, 0 24px 60px rgba(0, 0, 0, 0.6);
+  --overlay: rgba(12, 4, 6, 0.64);
+  --series-1: #e07a3a;
+  --series-2: #3987e5;
+  --series-3: #d55181;
+  --series-4: #9085e9;
+  --wood: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='60'%3E%3Cfilter id='w'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.004 0.28' numOctaves='3' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.05 0 0 0 0 0.02 0 0 0 0 0 0 0 0 0.5 -0.12'/%3E%3C/filter%3E%3Crect width='600' height='60' filter='url(%23w)'/%3E%3C/svg%3E");
+  --bar-bg: var(--wood), #28161a;
+  --bar-rule: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='6'%3E%3Cpath d='M0 0h12v1.5a6 4.5 0 0 1-12 0z' fill='%23a8652f'/%3E%3Cpath d='M0 0h12v1a6 3 0 0 1-12 0z' fill='%23c98a45'/%3E%3C/svg%3E") 0 0 6 0 / 0 0 1 0 / 0 round;
+  --bar-rule-w: 6px;
+  --round: 1.5;
+  --ctl-line: #84535b;
+  --btn-bg: #2e191d;
+  --btn-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+  --btn-press: translateY(1px);
+  --primary-ink: #24120a;
+  --primary-shadow: inset 0 -2px 0 rgba(120, 50, 10, 0.45);
+  --pill-ink: #ffd2a6;
+  --pill-shadow: 0 0 0 1px #b0552c;
+  --status-bg: var(--wood), #28161a;
+  --mark-h: 4px;
+  --label-weight: 500;
+  --today-head-image: repeating-linear-gradient(90deg, rgba(255, 154, 82, 0.08) 0 8px, transparent 8px 16px), repeating-linear-gradient(0deg, rgba(255, 154, 82, 0.08) 0 8px, transparent 8px 16px);
+  --desk-sans: var(--face-serif);
+  --tape-bg: var(--wood), #28161a;
+  --figure-weight: 500;
+  --slot-bg: #f3d9b4;
+  --slot-ink: #24120a;
+  --slot-line: #f3d9b4;
+  --strip-w: 4px;
+  --today-edge-l: linear-gradient(90deg, #ff9a52 0 2px, transparent 2px);
+  --today-edge-r: linear-gradient(270deg, #ff9a52 0 2px, transparent 2px);
+  --leaf-1: #c4304f;
+  --leaf-2: #f08a3c;
+  --leaf-3: #efb848;
+  --leaf-4: #b06a34;
+  --leaf-5: #8fa452;
+  color-scheme: dark;
+}
+
+/* The spectrum on a dark desk: the same six hues, bright. Chalk's edges are hard, so nothing glows there. */
+.tokens[data-theme="ember"],
+.tokens[data-theme="midnight"],
+.tokens[data-theme="blacktop"],
+.tokens[data-theme="hearth"] {
+  --spectrum-1: #ff7ab8;
+  --spectrum-2: #ff9f4a;
+  --spectrum-3: #ffd95c;
+  --spectrum-4: #5ee6a0;
+  --spectrum-5: #5cc8ff;
+  --spectrum-6: #b79bff;
+  --spectrum-halo: 0.36;
+  --spectrum-blend: screen;
+}
+
+.tokens[data-theme="chalk"] {
+  --spectrum-halo: 0;
+}
+
+/* Chalk prints its status line in reverse, light ink on black. */
+.tokens[data-theme="chalk"] .status {
+  --text: #f7f7f5;
+  --text-2: #d6d6d0;
+  --text-3: #ababa4;
+  --line-2: #5e5e58;
+  border-top-color: #121211;
+  background: #121211;
+}
+
+/* Harvest and Hearth: Fraunces at its softest, and the turkey's tail as the tab mark. */
+.tokens[data-theme="harvest"],
+.tokens[data-theme="hearth"] {
+  font-variation-settings: "SOFT" 100;
+}
+
+.tokens[data-theme="harvest"] .tab[aria-current="page"]::after,
+.tokens[data-theme="hearth"] .tab[aria-current="page"]::after {
+  background: linear-gradient(90deg, #a01c48 0 25%, #e3762a 25% 50%, #e8b13a 50% 75%, #5f7f3a 75%);
 }
 
 /* A desk's own column: everything between the bar and the status line. */
@@ -172,7 +559,8 @@
 .label {
   font-family: var(--desk-mono), ui-monospace, monospace;
   font-size: 10.5px;
-  letter-spacing: 0.08em;
+  font-weight: var(--label-weight);
+  letter-spacing: var(--label-track);
   text-transform: uppercase;
   color: var(--text-3);
 }
@@ -220,13 +608,16 @@
 /* ---------------------------------------------------------------- bar */
 
 .bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
   height: 46px;
   padding: 0 16px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--bar-rule-w) solid var(--line);
+  border-image: var(--bar-rule);
   background: var(--bar-bg, var(--surface));
+  box-shadow: var(--bar-edge);
   flex-shrink: 0;
 }
 
@@ -312,7 +703,8 @@
   color: var(--text-3);
   font-family: var(--desk-mono), ui-monospace, monospace;
   font-size: 11px;
-  letter-spacing: 0.08em;
+  font-weight: var(--label-weight);
+  letter-spacing: var(--label-track);
   text-transform: uppercase;
   text-decoration: none;
 }
@@ -330,9 +722,9 @@
   position: absolute;
   left: 10px;
   right: 10px;
-  bottom: -1px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
+  bottom: calc(-1 * var(--bar-rule-w));
+  height: var(--mark-h);
+  border-radius: calc(2px * var(--round, 1)) calc(2px * var(--round, 1)) 0 0;
   background: var(--accent);
   box-shadow: var(--glow);
 }
@@ -343,7 +735,7 @@
   gap: 8px;
   height: 30px;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round, 1));
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
@@ -369,7 +761,7 @@
   justify-content: center;
   width: 30px;
   height: 30px;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round, 1));
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-2);
@@ -455,7 +847,7 @@
   gap: 6px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--round, 1));
   border: 1px solid var(--line-2);
   color: var(--text-2);
   font-family: var(--desk-mono), ui-monospace, monospace;
@@ -485,6 +877,80 @@
   background: color-mix(in srgb, var(--warn) 16%, transparent);
 }
 
+/* ---------------------------------------------------------------- fall leaves (FallLeaves.tsx) */
+
+/* A few piles resting on the bar's bottom edge, half over the edge, taking no clicks. */
+.crustLeaves {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 28px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.leafPile {
+  position: absolute;
+  top: 0;
+}
+
+.leafSpot {
+  position: absolute;
+  display: block;
+  line-height: 0;
+}
+
+.leaf {
+  display: block;
+  overflow: visible;
+}
+
+.leafVein {
+  fill: none;
+  stroke: color-mix(in srgb, currentColor 58%, #000000);
+  stroke-width: 0.8;
+  stroke-linecap: round;
+}
+
+/* The fall: each leaf drops through the frame while it sways and turns, once. */
+.leafFall {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.leafDrop {
+  position: absolute;
+  top: 0;
+  display: block;
+  line-height: 0;
+  animation: leafDrop var(--leaf-fall) cubic-bezier(0.35, 0.1, 0.65, 0.9) var(--leaf-wait) both;
+}
+
+.leafSway {
+  display: block;
+  animation: leafSway var(--leaf-sway) ease-in-out var(--leaf-wait) infinite;
+}
+
+@keyframes leafDrop {
+  from { transform: translateY(-40px); }
+  to { transform: translateY(calc(100dvh + 40px)); }
+}
+
+@keyframes leafSway {
+  0%, 100% { transform: translateX(-18px) rotate(-25deg); }
+  50% { transform: translateX(18px) rotate(25deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leafFall {
+    display: none;
+  }
+}
+
 /* ---------------------------------------------------------------- chips */
 
 .chip {
@@ -492,7 +958,7 @@
   align-items: center;
   height: 18px;
   padding: 0 6px;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--round, 1));
   font-family: var(--desk-mono), ui-monospace, monospace;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
@@ -525,6 +991,183 @@
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
+/* ---------------------------------------------------------------- spectrum (Dime Autopilot is on) */
+
+/*
+ * What Dime Autopilot looks like while it runs a team, wherever that shows:
+ * the word runs through the spectrum (.spectrumText), the block it governs has
+ * the same colors turning around its edge (.spectrumEdge) with a halo outside
+ * it, its switch's track runs too (.spectrumTrack), and once, as it comes on,
+ * a band of the colors crosses the block (.spectrumSweep, an element mounted
+ * for that moment). The bar's mark (.autopilotMark) is the badge every desk
+ * with that team in view carries. With reduced motion each keeps its colors
+ * and holds still, and nothing sweeps.
+ */
+@property --spectrum-turn {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes spectrum-turn {
+  to { --spectrum-turn: 360deg; }
+}
+
+/* One full image width, so the loop has no seam (the list ends on its first color). */
+@keyframes spectrum-run {
+  to { background-position: -200% 0; }
+}
+
+@keyframes spectrum-sweep {
+  from { transform: translateX(-130%) skewX(-14deg); }
+  to { transform: translateX(360%) skewX(-14deg); }
+}
+
+.spectrumText {
+  background: linear-gradient(90deg, var(--spectrum)) 0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-weight: 600;
+  animation: spectrum-run 3.2s linear infinite;
+}
+
+/*
+ * The edge is drawn over the block's own border, so the block keeps its box:
+ * --edge-w is that border's width and --edge-r its radius. The halo is a
+ * blurred copy 3px larger, cut out where the block is, so it needs nothing of
+ * the block's parent and never tints what is inside.
+ */
+.spectrumEdge {
+  --edge-w: var(--ctl-w, 1px);
+  --edge-r: calc(8px * var(--round, 1));
+  position: relative;
+}
+
+.spectrumEdge::before,
+.spectrumEdge::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  background: conic-gradient(from var(--spectrum-turn), var(--spectrum));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: spectrum-turn 7s linear infinite;
+}
+
+.spectrumEdge::before {
+  inset: calc(-1 * var(--edge-w));
+  padding: max(1.5px, var(--edge-w));
+  border-radius: var(--edge-r);
+}
+
+.spectrumEdge::after {
+  inset: calc(-20px - var(--edge-w));
+  border: 17px solid transparent;
+  padding: 3px;
+  border-radius: calc(var(--edge-r) + 20px);
+  background-clip: padding-box;
+  filter: blur(9px);
+  opacity: var(--spectrum-halo);
+}
+
+/* A switch that is on; the role keeps this above the switch's own accent track whichever sheet loads last. */
+.spectrumTrack[role="switch"][aria-checked="true"] {
+  background: linear-gradient(90deg, var(--spectrum)) 0 0 / 200% 100%;
+  animation: spectrum-run 3.2s linear infinite;
+}
+
+.spectrumSweep {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.spectrumSweep::before {
+  content: "";
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 42%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--spectrum-1),
+    var(--spectrum-2),
+    var(--spectrum-3),
+    var(--spectrum-4),
+    var(--spectrum-5),
+    var(--spectrum-6),
+    transparent
+  );
+  opacity: 0.62;
+  filter: blur(12px);
+  mix-blend-mode: var(--spectrum-blend);
+  animation: spectrum-sweep 1050ms cubic-bezier(0.4, 0, 0.5, 1) both;
+}
+
+/* The bar's mark: a badge whose outline and word run together; it is the way to the team's automations. */
+.autopilotMark {
+  position: relative;
+  border-color: transparent;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.autopilotMark::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--spectrum)) 0 0 / 200% 100%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: spectrum-run 3.2s linear infinite;
+}
+
+.autopilotMark:hover {
+  background: var(--hover);
+}
+
+.autopilotMark:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Forced colors drop background images, and the word is painted with one: give it back its ink. */
+@media (forced-colors: active) {
+  .spectrumText {
+    background: none;
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectrumText,
+  .spectrumEdge::before,
+  .spectrumEdge::after,
+  .spectrumTrack[role="switch"][aria-checked="true"],
+  .autopilotMark::before {
+    animation: none;
+  }
+
+  .spectrumSweep {
+    display: none;
+  }
+}
+
 /* ---------------------------------------------------------------- segmented rail */
 
 .rail {
@@ -532,9 +1175,9 @@
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border-radius: 7px;
+  border-radius: calc(7px * var(--round, 1));
   background: var(--surface-2);
-  border: 1px solid var(--line);
+  border: var(--ctl-w) solid var(--rail-line);
 }
 
 .seg {
@@ -545,7 +1188,7 @@
   height: 28px;
   padding: 0 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: calc(5px * var(--round, 1));
   background: transparent;
   color: var(--text-2);
   font-family: var(--desk-mono), ui-monospace, monospace;
@@ -553,6 +1196,8 @@
   letter-spacing: 0.04em;
   white-space: nowrap;
   cursor: pointer;
+  /* --seg-delay holds a segment's ink back with its pill (see .segIndicator); nothing sets it by default */
+  transition: color 0s linear var(--seg-delay, 0ms);
 }
 
 .seg:hover:not(:disabled) {
@@ -566,16 +1211,39 @@
 }
 
 .segOn {
-  color: var(--text);
+  color: var(--pill-ink);
 }
 
-.segPill {
+.segPill,
+.segIndicator,
+.segRail:not([data-pill]) > .segOn::before {
   position: absolute;
   inset: 0;
-  border-radius: 5px;
+  border-radius: calc(5px * var(--round, 1));
   background: var(--pill);
-  box-shadow: 0 0 0 1px var(--line-2), 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--pill-shadow);
   z-index: 0;
+}
+
+/* SegRail: one pill per rail, placed over the checked segment and slid there
+   by a transition (motion's spring settled in about this long). Until it has
+   measured, the checked segment draws the pill itself. */
+.segRail {
+  position: relative;
+}
+
+.segIndicator {
+  inset: 0 auto auto 0;
+  pointer-events: none;
+  transition:
+    transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--seg-delay, 0ms);
+}
+
+.segRail:not([data-pill]) > .segOn::before {
+  content: "";
 }
 
 .segLabel {
@@ -594,9 +1262,10 @@
   gap: 7px;
   height: 30px;
   padding: 0 12px;
-  border-radius: 6px;
-  border: 1px solid var(--line-2);
-  background: var(--surface);
+  border-radius: calc(6px * var(--round, 1));
+  border: var(--ctl-w) solid var(--ctl-line);
+  background: var(--btn-bg);
+  box-shadow: var(--btn-shadow);
   color: var(--text);
   font: inherit;
   font-size: 12.5px;
@@ -610,20 +1279,24 @@
   background: var(--hover);
 }
 
+.btn:active:not(:disabled) {
+  transform: var(--btn-press);
+}
+
 .btn:disabled {
   color: var(--text-3);
   cursor: default;
 }
 
 .btnPrimary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-ink);
-  box-shadow: var(--glow);
+  border-color: var(--primary-line);
+  background: var(--primary-bg);
+  color: var(--primary-ink);
+  box-shadow: var(--primary-shadow);
 }
 
 .btnPrimary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 88%, #ffffff);
+  background: var(--primary-hover);
 }
 
 .btnPrimary:disabled {
@@ -655,7 +1328,7 @@
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--round, 1));
   border: 1px solid var(--line-2);
   color: var(--text-3);
   font-family: var(--desk-mono), ui-monospace, monospace;
@@ -683,8 +1356,8 @@
 .input {
   height: 32px;
   padding: 0 10px;
-  border-radius: 6px;
-  border: 1px solid var(--line-2);
+  border-radius: calc(6px * var(--round, 1));
+  border: var(--ctl-w) solid var(--ctl-line);
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
@@ -710,7 +1383,7 @@
   height: 28px;
   padding: 0 16px;
   border-top: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--status-bg);
   font-family: var(--desk-mono), ui-monospace, monospace;
   font-size: 10.5px;
   color: var(--text-3);
@@ -722,13 +1395,31 @@
 .keys {
   display: flex;
   align-items: center;
+  align-self: stretch;
   gap: 12px;
+  min-width: 0;
 }
 
 .keys span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+
+/* A desk's own keys: the ones that don't fit wrap onto a second line, out of sight, so
+   they go whole (from the end) and the desk's report on the right is never cut. */
+.keyList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.keyList > span {
+  height: 100%;
 }
 
 /* ---------------------------------------------------------------- menus */
@@ -739,7 +1430,7 @@
   max-height: min(460px, var(--radix-popover-content-available-height));
   display: flex;
   flex-direction: column;
-  border-radius: 9px;
+  border-radius: calc(9px * var(--round, 1));
   background: var(--raised);
   box-shadow: var(--shadow);
   color: var(--text);
@@ -802,7 +1493,7 @@
   min-height: 36px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(6px * var(--round, 1));
   background: transparent;
   color: inherit;
   font: inherit;
@@ -869,7 +1560,7 @@ button.menuItem:hover:not(:disabled) {
   flex-direction: column;
   gap: 2px;
   padding: 6px 6px 8px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--round, 1));
   border: 1px solid var(--line);
   background: transparent;
   color: var(--text);
@@ -917,7 +1608,7 @@ button.menuItem:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   height: 68px;
-  border-radius: 5px;
+  border-radius: calc(5px * var(--round, 1));
   overflow: hidden;
   background: var(--bg);
   box-shadow: 0 0 0 1px var(--line-2);
@@ -931,6 +1622,7 @@ button.menuItem:hover:not(:disabled) {
   padding: 0 6px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--line);
+  border-image: var(--bar-rule);
   background: var(--bar-bg, var(--surface));
 }
 
@@ -953,7 +1645,7 @@ button.menuItem:hover:not(:disabled) {
 .swatchTab {
   width: 16px;
   height: 2px;
-  border-radius: 1px;
+  border-radius: calc(1px * var(--round, 1));
   background: var(--text-2);
 }
 
@@ -982,21 +1674,21 @@ button.menuItem:hover:not(:disabled) {
 }
 
 .swatchHead .swatchToday {
-  background: var(--today-head);
+  background: var(--today-head-image, none), var(--today-head);
   box-shadow: inset 0 1.5px 0 var(--accent);
 }
 
 .swatchText {
   height: 3px;
   margin-left: 6px;
-  border-radius: 1px;
+  border-radius: calc(1px * var(--round, 1));
   background: var(--text-3);
 }
 
 .swatchValue {
   width: 11px;
   height: 3px;
-  border-radius: 1px;
+  border-radius: calc(1px * var(--round, 1));
   background: var(--up);
 }
 
@@ -1016,18 +1708,18 @@ button.menuItem:hover:not(:disabled) {
 .swatchChip {
   width: 22px;
   height: 7px;
-  border-radius: 2px;
+  border-radius: calc(2px * var(--round, 1));
   background: var(--surface-2);
-  box-shadow: 0 0 0 1px var(--line-2);
+  box-shadow: 0 0 0 1px var(--ctl-line);
 }
 
 .swatchButton {
   margin-left: auto;
   width: 18px;
   height: 7px;
-  border-radius: 2px;
-  background: var(--accent);
-  box-shadow: var(--glow);
+  border-radius: calc(2px * var(--round, 1));
+  background: var(--primary-bg);
+  box-shadow: 0 0 0 1px var(--primary-line), var(--primary-shadow);
 }
 
 /* ---------------------------------------------------------------- dialogs */
@@ -1055,7 +1747,7 @@ button.menuItem:hover:not(:disabled) {
   transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: calc(12px * var(--round, 1));
   background: var(--raised);
   box-shadow: var(--shadow);
   color: var(--text);
@@ -1102,6 +1794,179 @@ button.menuItem:hover:not(:disabled) {
   border-top: 1px solid var(--line);
 }
 
+/* ---------------------------------------------------------------- command palette */
+
+/*
+ * ⌘K: the bar opens. The field stands where the desk tabs were, with a tab's
+ * underline, and the results unroll under the bar edge to edge, in the bar's
+ * surface, with the bar's line as the seam. No window, no overlay; nothing of
+ * it is on screen otherwise.
+ */
+.palette {
+  flex: 0 1 560px;
+  min-width: 160px;
+  align-self: stretch;
+  display: flex;
+  color: var(--text);
+}
+
+/* cmdk's root: the field in the bar; the drawer hangs from the bar, not from it. */
+.paletteCmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
+.paletteHead {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* The field's underline, where the current tab's is. */
+.paletteHead::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(-1 * var(--bar-rule-w));
+  height: var(--mark-h);
+  border-radius: calc(2px * var(--round, 1)) calc(2px * var(--round, 1)) 0 0;
+  background: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.paletteSearchIcon {
+  position: absolute;
+  left: 8px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.paletteInput {
+  width: 100%;
+  height: 100%;
+  padding: 0 44px 0 30px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.paletteInput::placeholder {
+  color: var(--text-3);
+}
+
+.paletteEsc {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+}
+
+/* The drawer: under the bar's line, edge to edge, in the bar's surface, one line at the bottom. */
+.paletteDrawer {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 91;
+  display: flex;
+  flex-direction: column;
+  max-height: min(70vh, calc(100dvh - 46px - 28px - 8px));
+  margin-top: 1px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 24px 40px -28px rgba(0, 0, 0, 0.55);
+  animation: paletteIn 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes paletteIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The rows: a column from the bar's left edge, no wider than a wide menu. */
+.paletteList {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: 720px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 6px 10px;
+}
+
+/* Nothing typed yet: everything there is, as a site's menu, two columns across when there is room. */
+@media (min-width: 900px) {
+  .paletteBrowse {
+    max-width: 1100px;
+  }
+
+  .paletteBrowse > [cmdk-list-sizer] {
+    column-count: 2;
+    column-gap: 20px;
+  }
+
+  .paletteBrowse [cmdk-group] {
+    break-inside: avoid;
+  }
+}
+
+.paletteIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  color: var(--text-3);
+}
+
+.paletteText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.paletteLabel,
+.paletteNote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paletteFoot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  font-family: var(--desk-mono), ui-monospace, monospace;
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.paletteFoot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Phones: the keys mean nothing on a touch screen. */
+@media (max-width: 639.98px) {
+  .paletteEsc,
+  .paletteFoot {
+    display: none;
+  }
+}
+
 /* ---------------------------------------------------------------- states */
 
 .empty {
@@ -1124,7 +1989,7 @@ button.menuItem:hover:not(:disabled) {
 
 .skel {
   height: 10px;
-  border-radius: 3px;
+  border-radius: calc(3px * var(--round, 1));
   background: linear-gradient(90deg, var(--surface-2), var(--hover), var(--surface-2));
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
@@ -1193,7 +2058,7 @@ button.menuItem:hover:not(:disabled) {
   gap: 10px;
   width: 356px;
   padding: 11px 14px;
-  border-radius: 9px;
+  border-radius: calc(9px * var(--round, 1));
   background: var(--raised);
   box-shadow: var(--shadow);
   color: var(--text);
@@ -1235,7 +2100,7 @@ button.menuItem:hover:not(:disabled) {
   flex-shrink: 0;
   height: 24px;
   padding: 0 9px;
-  border-radius: 5px;
+  border-radius: calc(5px * var(--round, 1));
   border: 1px solid var(--line-2);
   background: var(--surface-2);
   color: var(--text);
@@ -1257,7 +2122,13 @@ button.menuItem:hover:not(:disabled) {
   .skel,
   .menu,
   .dialog,
+  .paletteDrawer,
   .overlay {
     animation: none;
+  }
+
+  .seg,
+  .segIndicator {
+    transition: none;
   }
 }

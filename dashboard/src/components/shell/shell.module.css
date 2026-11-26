@@ -121,7 +121,7 @@
   width: min(400px, 100%);
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: calc(12px * var(--round, 1));
   background: var(--raised);
   box-shadow: var(--shadow);
 }

@@ -4,7 +4,9 @@
  * names a token block in desk.module.css (Paper is the base `.tokens` block)
  * and is what storage remembers, so never rename one. `scheme` picks the
  * team-logo variant and the toast theme. The menu lays them out light beside
- * dark, a pair to a row, so keep each light theme just before its pair.
+ * dark, a pair to a row, so keep each light theme just before its pair. A
+ * theme can change more than its colors (corners, outlines, glass, its face):
+ * see the character tokens in desk.module.css.
  */
 export type DeskScheme = "light" | "dark";
 
@@ -16,6 +18,8 @@ export interface DeskThemeInfo {
   pair: string;
   /** One line under the name in the appearance menu. */
   note: string;
+  /** Fall leaves: a few resting on the bar's edge, and a short fall when the theme opens (FallLeaves.tsx). */
+  leaves?: boolean;
 }
 
 export const DESK_THEMES = [
@@ -23,6 +27,10 @@ export const DESK_THEMES = [
   { id: "midnight", label: "Midnight", scheme: "dark", pair: "noon", note: "Deep navy, sky accent, a soft glow" },
   { id: "paper", label: "Paper", scheme: "light", pair: "ember", note: "Warm newsprint, ink and court orange" },
   { id: "ember", label: "Ember", scheme: "dark", pair: "paper", note: "Warm charcoal and amber" },
+  { id: "chalk", label: "Chalk", scheme: "light", pair: "blacktop", note: "Black ink, hard shadows, a volt highlighter" },
+  { id: "blacktop", label: "Blacktop", scheme: "dark", pair: "chalk", note: "Asphalt grain, square corners and volt" },
+  { id: "harvest", label: "Harvest", scheme: "light", pair: "hearth", note: "Linen, pumpkin and cranberry, a gingham today", leaves: true },
+  { id: "hearth", label: "Hearth", scheme: "dark", pair: "harvest", note: "Cranberry and firelight, a flannel today", leaves: true },
 ] as const satisfies readonly DeskThemeInfo[];
 
 export type DeskThemeId = (typeof DESK_THEMES)[number]["id"];
@@ -39,6 +47,10 @@ export function isDeskTheme(id: unknown): id is DeskThemeId {
 
 export function themeScheme(id: DeskThemeId): DeskScheme {
   return BY_ID.get(id)?.scheme ?? "light";
+}
+
+export function themeLeaves(id: DeskThemeId): boolean {
+  return BY_ID.get(id)?.leaves === true;
 }
 
 export function themePair(id: DeskThemeId): DeskThemeId {
