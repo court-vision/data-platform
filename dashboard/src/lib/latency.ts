@@ -22,19 +22,19 @@ export function parseWindow(raw: string | null): LatencyWindow {
 }
 
 /** A column the route table can be ordered by: its head is the control. */
-export type Sort = "route" | "requests" | "time" | "p50" | "p95" | "p99" | "errors" | "outside"
+export type Sort = "tag" | "route" | "requests" | "time" | "p50" | "p95" | "p99" | "errors" | "outside"
 export type Direction = "asc" | "desc"
 
-const SORT_KEYS: readonly Sort[] = ["route", "requests", "time", "p50", "p95", "p99", "errors", "outside"]
+const SORT_KEYS: readonly Sort[] = ["tag", "route", "requests", "time", "p50", "p95", "p99", "errors", "outside"]
 
 /** The order "time" (the default) and "p95"/"requests" (from before the heads) addresses keep working. */
 export function parseSort(raw: string | null): Sort {
   return SORT_KEYS.includes(raw as Sort) ? (raw as Sort) : "time"
 }
 
-/** A column's first order when its head is clicked: routes A to Z, numbers biggest first. */
+/** A column's first order when its head is clicked: tags in their order, routes A to Z, numbers biggest first. */
 export function defaultDirection(sort: Sort): Direction {
-  return sort === "route" ? "asc" : "desc"
+  return sort === "route" || sort === "tag" ? "asc" : "desc"
 }
 
 export function parseDirection(raw: string | null, sort: Sort): Direction {
@@ -48,6 +48,8 @@ export function totalTime(route: RouteLatency): number | null {
 
 function sortValue(route: RouteLatency, sort: Exclude<Sort, "route">): number | null {
   switch (sort) {
+    case "tag":
+      return ROUTE_TAGS.indexOf(routeTag(route.parts))
     case "requests":
       return route.requests
     case "time":
@@ -67,16 +69,85 @@ function sortValue(route: RouteLatency, sort: Exclude<Sort, "route">): number | 
 
 const byName = (a: RouteLatency, b: RouteLatency) => a.route.localeCompare(b.route) || a.method.localeCompare(b.method)
 
-/** Routes in a column's order. A route with no value there goes last either way; ties go A to Z. */
+/** Within one tag, the costliest route first. */
+const byCost = (a: RouteLatency, b: RouteLatency) => (totalTime(b) ?? 0) - (totalTime(a) ?? 0) || byName(a, b)
+
+/**
+ * Routes in a column's order. A route with no value there goes last either
+ * way; ties go A to Z, except under one tag, where the costliest goes first.
+ */
 export function sortRoutes(routes: RouteLatency[], sort: Sort, direction: Direction = defaultDirection(sort)): RouteLatency[] {
   const sign = direction === "asc" ? 1 : -1
   if (sort === "route") return [...routes].sort((a, b) => sign * byName(a, b))
+  const tie = sort === "tag" ? byCost : byName
   return [...routes].sort((a, b) => {
     const x = sortValue(a, sort)
     const y = sortValue(b, sort)
-    if (x == null || y == null) return x == null && y == null ? byName(a, b) : x == null ? 1 : -1
-    return sign * (x - y) || byName(a, b)
+    if (x == null || y == null) return x == null && y == null ? tie(a, b) : x == null ? 1 : -1
+    return sign * (x - y) || tie(a, b)
   })
+}
+
+/**
+ * What a route is, at a glance, from what its requests call: AI when any of
+ * them reach Claude, else ESPN, else the NBA, else Other for any other outside
+ * call (Yahoo, or plain HTTP), else SVC when one calls our own services
+ * (features, sqlmate, fantasy-writer), else DB, a route that only touches
+ * Postgres and Redis. Clerk counts as ours and says nothing: any signed-in
+ * route can fetch Clerk's keys when their cache runs out. `group` is the
+ * anatomy colour the tag is drawn in. Keep the order: it is the column's.
+ */
+export interface RouteTag {
+  key: "ai" | "espn" | "nba" | "svc" | "db" | "other"
+  label: string
+  group: string
+  note: string
+}
+
+export const ROUTE_TAGS: readonly RouteTag[] = [
+  { key: "ai", label: "AI", group: "claude", note: "calls Claude" },
+  { key: "espn", label: "ESPN", group: "espn", note: "calls ESPN" },
+  { key: "nba", label: "NBA", group: "nba", note: "calls the NBA" },
+  { key: "svc", label: "SVC", group: "services", note: "calls our own services: features, sqlmate or fantasy-writer" },
+  { key: "db", label: "DB", group: "postgres", note: "only Postgres and Redis" },
+  { key: "other", label: "Other", group: "other", note: "calls Yahoo or another outside service" },
+]
+
+const TAG_OF = new Map(ROUTE_TAGS.map((tag) => [tag.key, tag]))
+
+/** Buckets that are ours, for tagging: our code, its queues, its stores, its services, and sign-in. */
+const OURS = new Set(["app", "wait", "postgres", "redis", "features", "sqlmate", "fantasy_writer", "clerk"])
+const SERVICES = new Set(["features", "sqlmate", "fantasy_writer"])
+
+/**
+ * A bucket's key is the evidence of a call, not its value: the backend keeps a
+ * key whenever the window's total for it is above zero, then rounds the mean
+ * per request to 0.1 ms, so one ESPN call among 10,000 requests reads 0.0.
+ */
+export function routeTag(parts: Record<string, number>): RouteTag {
+  const touched = Object.keys(parts)
+  const key: RouteTag["key"] = touched.includes("claude")
+    ? "ai"
+    : touched.includes("espn")
+      ? "espn"
+      : touched.includes("nba")
+        ? "nba"
+        : touched.some((bucket) => !OURS.has(bucket))
+          ? "other"
+          : touched.some((bucket) => SERVICES.has(bucket))
+            ? "svc"
+            : "db"
+  return TAG_OF.get(key) as RouteTag
+}
+
+/** A tag's hover text: what it means, and everything the route waits on, biggest first. */
+export function routeTagTitle(parts: Record<string, number>): string {
+  const tag = routeTag(parts)
+  const waits = Object.entries(parts)
+    .filter(([bucket]) => bucket !== "app" && bucket !== "wait")
+    .sort((a, b) => b[1] - a[1])
+    .map(([bucket]) => bucketLabel(bucket))
+  return `${tag.label}: ${tag.note}. ${waits.length ? `Waits on ${waits.join(", ")}.` : "Only our own code."}`
 }
 
 /**

@@ -71,6 +71,20 @@ describe("Latency", () => {
     expect(matchup).toContain(">10.4 s</td>")
     expect(sortedBy(html)).toEqual(["Total time", "descending"])
     expect(html).not.toContain("Order by")
+    // Each route's tag, in its anatomy colour, with what it waits on on hover.
+    expect(matchup).toMatch(/data-group="espn" title="ESPN: calls ESPN. Waits on ESPN, Postgres.">ESPN</)
+    const rankings = html.split("<tr").find((row) => row.includes("/v1/rankings"))!
+    expect(rankings).toContain('data-group="postgres"')
+    expect(rankings).toContain(">DB</span>")
+  })
+
+  test("ordered by tag, the routes group by what they call", () => {
+    const chat: RouteLatency = { ...RANKINGS, route: "/v1/internal/ai/chat", method: "POST", requests: 3, mean_ms: 5000, parts: { claude: 4800, app: 200 } }
+    const html = render(<Latency />, "/latency?sort=tag", (client) =>
+      client.setQueryData(latencyQuery("24h").queryKey, overview({ routes: [RANKINGS, MATCHUP, chat] })),
+    )
+    expect(routeNames(html)).toEqual(["/v1/internal/ai/chat", "/v1/matchups/live/{team_id}", "/v1/rankings"])
+    expect(sortedBy(html)).toEqual(["Tag", "ascending"])
   })
 
   test("the order and the window come from the URL", () => {
@@ -93,7 +107,7 @@ describe("Latency", () => {
     expect(sortedBy(byName)).toEqual(["Route", "ascending"])
 
     // Every column but the bar's is a head that orders.
-    expect(byName.match(/class="sortHead"/g)).toHaveLength(8)
+    expect(byName.match(/class="sortHead"/g)).toHaveLength(9)
     expect(byName).toContain('<th scope="col">Where the time goes</th>')
   })
 
@@ -148,6 +162,7 @@ describe("LatencyRoute", () => {
     )
 
     expect(html).toContain("/v1/matchups/live/{team_id}</h1>")
+    expect(html).toMatch(/data-group="espn" title="ESPN: [^"]*">ESPN</)
     expect(html).toContain(">900 ms</dd>")
     // The bucket table: biggest first, with calls per request.
     const table = html.split('aria-label="Average request"')[1].split("</table>")[0]

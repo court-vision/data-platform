@@ -20,7 +20,7 @@ import {
   type SlowRequest,
 } from "@/lib/latency"
 import { formatCentral, formatCentralLong, relativeTime } from "@/lib/time"
-import { StatsTiles } from "@/routes/Latency"
+import { RouteTagChip, StatsTiles } from "@/routes/Latency"
 import s from "@/components/sheet.module.css"
 import l from "@/components/latency.module.css"
 
@@ -64,7 +64,12 @@ export function LatencyRoute() {
       <Head
         back={back}
         title={route}
-        chips={<Tag>{method}</Tag>}
+        chips={
+          <>
+            <Tag>{method}</Tag>
+            {data?.route && <RouteTagChip parts={data.route.parts} />}
+          </>
+        }
         meta={
           data && (
             <>
